@@ -1,0 +1,113 @@
+{
+  "project_name": "Grupo RYSA ERP & POS",
+  "theme": "Hybrid Strategy. Landing Page: Light Theme (clean, trustworthy, B2B wholesale). ERP/Dashboard: Light Theme with structural grayscale. POS Module: High-Contrast Dark Mode option or highly focused Light Mode with stark borders to reduce eye strain and increase focus for fast operations.",
+  "typography": {
+    "primary_font": "Outfit",
+    "secondary_font": "Inter",
+    "rules": {
+      "headings": "Use Outfit. font-black or font-bold, tight tracking (tracking-tighter). Avoid default weights. Do not use Inter for headings.",
+      "body": "Use Inter for dense ERP data and tables to ensure maximum legibility.",
+      "scale": {
+        "h1": "text-4xl sm:text-5xl lg:text-6xl tracking-tighter",
+        "h2": "text-2xl sm:text-3xl lg:text-4xl tracking-tight",
+        "h3": "text-xl sm:text-2xl",
+        "h4": "text-lg sm:text-xl",
+        "body": "text-sm sm:text-base",
+        "labels": "text-xs tracking-[0.2em] uppercase"
+      }
+    }
+  },
+  "colors": {
+    "archetype": "Swiss & High-Contrast (Authority, Clarity, Truth) mixed with Industrial Accents",
+    "palette": {
+      "primary": "#0055A4",
+      "primary_hover": "#004385",
+      "accent": "#FF5A00",
+      "accent_hover": "#E04F00",
+      "background_landing": "#F8F9FA",
+      "background_erp": "#F1F5F9",
+      "surface": "#FFFFFF",
+      "sidebar_dark": "#0F172A",
+      "text_primary": "#0F172A",
+      "text_secondary": "#475569",
+      "border": "#E2E8F0",
+      "success": "#22C55E",
+      "danger": "#EF4444",
+      "warning": "#F59E0B"
+    },
+    "rules": "Avoid generic SaaS blue. Use Industrial Blue (#0055A4) for trust and Safety Orange (#FF5A00) exclusively for primary CTAs (e.g., 'Cobrar' in POS). Do not use Teal (#1B93A4)."
+  },
+  "visual_enhancers": {
+    "landing_page": "Crystal Glassmorphism for sticky header (backdrop-blur-xl bg-white/80 border-b border-white/40). Large typography, generous padding.",
+    "erp_pos": "Technical Grid Borders. Expose the skeleton for tables and dashboards. 1px solid borders (border-border), flat backgrounds. Max 6px border-radius (rounded-md) for a sharp, professional look.",
+    "shadows": "Minimal. Use shadow-sm for cards. Avoid large diffuse shadows in ERP to maintain data clarity."
+  },
+  "components_usage": {
+    "buttons": "Landing: Pill-shaped (rounded-full). ERP/POS: Sharp/slightly rounded (rounded-md). Always define explicit hover text colors (hover:bg-primary-hover hover:text-white).",
+    "inputs": "Shadcn UI Input/Select. Use h-9 or h-10 for standard, h-12 for POS search bar (large tap target).",
+    "tables": "Shadcn Table. Sticky headers. Compact padding (p-2 or p-3) for dense inventory data. Alternating row colors or clear hover states (hover:bg-slate-50).",
+    "cards": "Cardless or flat 1px border. Do not overuse thick cards. Keep it clean.",
+    "sidebar": "Collapsible to icon-only mode to save space for the POS and Dashboard.",
+    "modals": "Use Shadcn Dialog. Backdrop blur for focus."
+  },
+  "grids_and_layouts": {
+    "landing": "Tetris Bento Grid (Mode A) for featured categories. grid-cols-1 md:grid-cols-12, gap-8. Asymmetrical spans.",
+    "dashboard": "High Density Grid (Mode B). grid-cols-1 md:grid-cols-4, gap-4 or gap-6. Top row for 4 key KPI cards. Below: 2/3 chart, 1/3 recent activity.",
+    "pos_module": "Split Layout. Left (65%): Search bar, category filters, and dense product grid. Right (35%): Fixed Cart/Ticket summary, total, and Checkout (Cobrar) button. Optimized for tablet/PC."
+  },
+  "motion": {
+    "rules": "Micro-interactions only in ERP to prioritize speed. Hover states must have transition: background-color 0.15s ease, color 0.15s ease. Avoid heavy page transitions in POS.",
+    "landing": "Staggered fade-up for hero elements. Smooth scroll (Lenis style)."
+  },
+  "accessibility": {
+    "contrast": "Strict APCA/WCAG AA compliance. Dark text on light backgrounds.",
+    "focus": "focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2",
+    "testing": "MANDATORY: All interactive elements, buttons, inputs, and key data points MUST have data-testid attributes (e.g., data-testid='pos-search-input', data-testid='checkout-button')."
+  },
+  "media": {
+    "rules": "Use provided Unsplash URLs. Never use generic placeholder text/images. Optimize for B2B industrial look.",
+    "image_urls": [
+      {
+        "url": "https://images.unsplash.com/photo-1710141530542-f792450e736e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjd8MHwxfHNlYXJjaHwzfHxwbGFzdGljJTIwcGFja2FnaW5nJTIwcm9sbHMlMjB3YXJlaG91c2V8ZW58MHx8fHwxNzg1ODQ1Njg0fDA&ixlib=rb-4.1.0&q=85",
+        "category": "Landing Page Hero",
+        "description": "Warehouse with stacked white bags. Use with a dark or gradient overlay for text readability."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1616429368325-d5d7542b0ec3?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1MDZ8MHwxfHNlYXJjaHwxfHxwYXBlciUyMGJhZ3MlMjBkaXNwb3NhYmxlc3xlbnwwfHx8fDE3ODU4NDU2ODR8MA&ixlib=rb-4.1.0&q=85",
+        "category": "Category: Bolsas de Papel",
+        "description": "Brown paper bag for product category card."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1541698321721-c083f55816da?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njd8MHwxfHNlYXJjaHwzfHxwbGFzdGljJTIwZGlzcG9zYWJsZSUyMGN1cHN8ZW58MHx8fHwxNzg1ODQ1Njk5fDA&ixlib=rb-4.1.0&q=85",
+        "category": "Category: Vasos y Desechables",
+        "description": "Clear plastic disposable cup."
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1769355104335-acef3aa4c9b6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2MzR8MHwxfHNlYXJjaHw0fHxjYXJkYm9hcmQlMjBib3hlcyUyMHBhY2thZ2luZyUyMHdhcmVob3VzZXxlbnwwfHx8fDE3ODU4NDU2OTh8MA&ixlib=rb-4.1.0&q=85",
+        "category": "Category: Empaque y Cajas",
+        "description": "Cardboard boxes in warehouse."
+      }
+    ]
+  },
+  "libraries": {
+    "icons": "lucide-react (Standard, pre-installed). Ensure stroke-width is 1.5 or 2 for clarity.",
+    "charts": "recharts (for sales and inventory dashboards)",
+    "toast": "sonner (Use for success/error alerts in POS and Inventory)",
+    "date": "Shadcn Calendar / date-fns"
+  },
+  "instructions_to_main_agent": [
+    "Language: Entire UI MUST be in ESPAÑOL (Dashboard, Productos, POS, Caja, Clientes).",
+    "POS Priority: The Punto de Venta screen must prioritize speed. Include quick quantity adjustments, easy product search, and a large 'Cobrar' button. Optimize layout for Desktop and Tablet.",
+    "Data Tables: Inventory and Product tables must have clear visual states for stock (e.g., green dot for In Stock, red dot for Out of Stock, yellow for Low Stock).",
+    "Forms: Use tabbed forms (Shadcn Tabs) for complex product creation (General, Precios, Stock, Imágenes).",
+    "Do NOT use transparent backgrounds for dropdowns or modals."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "You tend to converge toward generic outputs. Break the mold: use asymmetrical grids for the landing page and highly technical, sharp borders for the ERP.",
+    "Create depth through layered design elements with z-index hierarchy, but keep ERP surfaces flat and clean.",
+    "Do not apply `transition: all`. Target specific properties like `transition: transform 0.2s, opacity 0.2s`.",
+    "Do not center-align the app container. Use left-aligned layouts for data grids and tables.",
+    "Never use AI assistant Emoji characters (🤖🧠💭💡) for icons. Use lucide-react.",
+    "MUST include `data-testid` on all interactive and key informational elements."
+  ]
+}
