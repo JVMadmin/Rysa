@@ -92,15 +92,28 @@ class ClientInput(BaseModel):
     telefono: Optional[str] = ""
     whatsapp: Optional[str] = ""
     correo: Optional[str] = ""
-    direccion: Optional[str] = ""
+    calle: Optional[str] = ""
+    numero_exterior: Optional[str] = ""
+    numero_interior: Optional[str] = ""
+    colonia: Optional[str] = ""
+    localidad: Optional[str] = ""
+    municipio: Optional[str] = ""
     ciudad: Optional[str] = ""
     estado_geo: Optional[str] = ""
+    pais: Optional[str] = "México"
     cp: Optional[str] = ""
+    referencias: Optional[str] = ""
+    direccion: Optional[str] = ""
     tipo: str = "publico"  # publico | menudeo | mayoreo | especial
     lista_precios: int = 1
     condicion_pago: str = "contado"
+    credito_autorizado: bool = False
     limite_credito: float = 0.0
     estado: str = "activo"
+
+class CreditInput(BaseModel):
+    credito_autorizado: bool
+    limite_credito: float = 0.0
 
 class CajaOpen(BaseModel):
     fondo_inicial: float = 0.0
@@ -366,6 +379,24 @@ async def list_clients(q: Optional[str] = None, estado: Optional[str] = None,
         query["$or"] = [{"codigo": rx}, {"nombre": rx}, {"razon_social": rx},
                         {"rfc": rx}, {"telefono": rx}]
     clients = await db.clients.find(query, {"_id": 0}).sort("nombre", 1).to_list(2000)
+    now = now_utc()
+    mes = now.strftime("%Y-%m")
+    anio = str(now.year)
+    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0, "cliente_id": 1, "total": 1, "fecha": 1}).to_list(20000)
+    mes_map, anio_map = {}, {}
+    for s in sales:
+        cid = s.get("cliente_id")
+        if not cid:
+            continue
+        f = s.get("fecha", "")
+        if f[:7] == mes:
+            mes_map[cid] = mes_map.get(cid, 0) + s["total"]
+        if f[:4] == anio:
+            anio_map[cid] = anio_map.get(cid, 0) + s["total"]
+    for c in clients:
+        c["compras_mes"] = round(mes_map.get(c["id"], 0), 2)
+        c["compras_anio"] = round(anio_map.get(c["id"], 0), 2)
+        c["credito_disponible"] = round(float(c.get("limite_credito", 0)) - float(c.get("saldo", 0)), 2)
     return clients
 
 @api.post("/clients")
@@ -394,6 +425,16 @@ async def update_client(client_id: str, data: ClientInput, user: dict = Depends(
 @api.patch("/clients/{client_id}/estado")
 async def client_estado(client_id: str, estado: str, user: dict = Depends(require_permission("cliente.editar"))):
     await db.clients.update_one({"id": client_id}, {"$set": {"estado": estado}})
+    return await db.clients.find_one({"id": client_id}, {"_id": 0})
+
+@api.patch("/clients/{client_id}/credito")
+async def set_credito(client_id: str, data: CreditInput, user: dict = Depends(require_permission("credito.autorizar"))):
+    c = await db.clients.find_one({"id": client_id})
+    if not c:
+        raise HTTPException(404, "Cliente no encontrado")
+    await db.clients.update_one({"id": client_id}, {"$set": {
+        "credito_autorizado": data.credito_autorizado, "limite_credito": data.limite_credito}})
+    await log_audit(user, "editar", "cliente", client_id, f"crédito autorizado={data.credito_autorizado} límite={data.limite_credito}")
     return await db.clients.find_one({"id": client_id}, {"_id": 0})
 
 # =========================================================================
@@ -556,6 +597,13 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
                 raise HTTPException(400, "El pago es menor al total")
             cambio = round(pagado - total, 2)
         else:
+            if not cliente:
+                raise HTTPException(400, "Selecciona un cliente para venta a crédito")
+            if not cliente.get("credito_autorizado", False):
+                raise HTTPException(400, "El cliente no tiene crédito autorizado")
+            disponible = float(cliente.get("limite_credito", 0)) - float(cliente.get("saldo", 0))
+            if total > disponible + 0.01:
+                raise HTTPException(400, f"Excede el crédito disponible ({round(disponible, 2)})")
             saldo = total
         folio = await next_counter("venta", "V", 6)
         estado = "confirmada"
