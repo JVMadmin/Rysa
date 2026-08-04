@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, EmailStr
 import pandas as pd
 
 from deps import (
-    db, now_utc, iso_now, hash_password, verify_password, create_access_token,
+    db, client, now_utc, iso_now, hash_password, verify_password, create_access_token,
     get_current_user, require_permission, has_permission, next_counter, log_audit,
     ROLE_PERMISSIONS,
 )
@@ -451,6 +451,7 @@ def calcular_venta(items: List[dict], descuento_global: float):
         subtotal += neto
         iva_total += neto * (it.get("iva_tasa", 16.0) / 100)
         desc_lineas += desc
+    descuento_global = min(max(descuento_global, 0.0), subtotal)
     subtotal_final = subtotal - descuento_global
     iva_final = subtotal_final / subtotal * iva_total if subtotal else 0
     total = round(subtotal_final + iva_final, 2)
