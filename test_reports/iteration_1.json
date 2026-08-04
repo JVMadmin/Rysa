@@ -1,0 +1,43 @@
+{
+  "summary": "Primera ronda de pruebas de Grupo RYSA ERP. Se creó pytest suite completo (24 tests) cubriendo auth, RBAC, productos+kardex, clientes, caja (abrir/cerrar/resumen), ventas contado con efectivo, ventas a crédito, validaciones (existencia insuficiente, pago menor), cancelación con reversa de inventario+caja+crédito, suspender venta, dashboard, export/import Excel y auditoría. Todos los 24 tests PASAN. Smoke test frontend confirma login OK, navegación a Dashboard/Productos/POS/Caja, y presencia de data-testids clave.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "app.on_event('shutdown')", "issue": "server.py:819 llama client.close() pero 'client' no está importado desde deps.py — sólo 'db'. Fallará NameError al hacer shutdown (no impacta runtime porque supervisor mata el proceso, pero es bug latente)."},
+      {"endpoint": "/api/products/import/confirm", "issue": "Cuando existe el producto (código ya presente) el 'update' pisa existencia? NO — se hace $set solo de 'base' que no incluye existencia. Sin embargo se pierden precios/controles previos si el archivo importa por segunda vez (base no los incluye). Aceptable en Fase 1 pero documentar."},
+      {"endpoint": "/api/sales (calcular_venta)", "issue": "iva_final se recalcula proporcional al descuento_global; para descuentos > subtotal daría división/negativos. Validar descuento_global <= subtotal."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_rysa_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Menor) Arreglar server.py shutdown: importar 'client' desde deps o eliminar la llamada.",
+    "(Menor) Validar descuento_global <= subtotal en calcular_venta().",
+    "Nota: pytest.ini fuerza -n 2 loadscope; los tests de RYSA requieren ejecución secuencial (comparten caja/estado). Se ejecutó con '-n 0' explícito. Considerar mover pytest.ini config al test-suite específico o marcar tests para forzar mismo worker."
+  ],
+  "critical_code_review_comments": [
+    "Bug latente: server.py línea 819 usa 'client' no importado (solo 'db' viene de deps).",
+    "Falta validación en /api/products/import/confirm: si el Excel trae 'existencia' para producto EXISTENTE, se ignora (correcto para no doble-contar) pero no se documenta al usuario.",
+    "seed_admin actualiza password si cambia (verify_password devuelve False) — correcto para playbook.",
+    "get_current_user acepta cookie httpOnly y Bearer — correcto. Cookie con secure=True, samesite='none' funciona en preview HTTPS.",
+    "MongoDB _id se excluye correctamente en find_one/find (proyección {_id:0}).",
+    "next_counter es atómico (find_one_and_update con $inc + upsert)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_rysa_api.py (nuevo)"
+  ],
+  "success_rate": {"backend": "100% (24/24)", "frontend": "100% smoke (login + navegación + data-testids presentes)"},
+  "test_credentials": "admin: REDACTED / REDACTED (funciona)",
+  "seed_data_creation": "Tests crearon: producto TESTIMP01 (import), 3 productos TEST_Vaso Plastico 12oz (P00001..P00003 con existencia 55/47/53), 1 cliente TEST_Cliente Credito (con saldo por venta a crédito), 3 ventas (V000001 confirmada, V000002 cancelada por test, V000003 crédito). Prefijo TEST_ para identificar. Se recomienda limpieza manual si se corren tests múltiples veces.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend suite completa vive en /app/backend/tests/test_rysa_api.py. IMPORTANTE: correr con '-n 0' para desactivar xdist paralelo (los tests comparten estado: caja abierta, cliente crédito, venta contado que luego se cancela). Comando: `REACT_APP_BACKEND_URL=https://rysa-comercio.preview.emergentagent.com python -m pytest backend/tests/test_rysa_api.py -v -n 0 --junitxml=/app/test_reports/pytest/pytest_results.xml`. Datos TEST_ persistidos en DB. Frontend POS tiene data-testids: pos-search-input, pos-prod-{codigo} (no pos-result-*), pos-cobrar, confirmar-venta, pago-metodo-0, pago-monto-0, pos-total, pos-cambio, pos-cliente, pos-lista, ver-suspendidas.",
+  "rca_of_the_issue": "N/A - no bugs bloqueantes detectados. Solo issues menores: (1) shutdown() usa variable no importada 'client' — fix trivial; (2) validaciones edge-case de descuento global."
+}
