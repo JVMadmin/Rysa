@@ -47,7 +47,7 @@ ROLE_PERMISSIONS = {
         "producto.precio", "inventario.ajuste", "venta.crear", "venta.cancelar",
         "venta.descuento", "caja.abrir", "caja.cerrar", "caja.retiro",
         "caja.entrada", "cliente.crear", "cliente.editar", "reportes.ver",
-        "importar", "exportar", "usuarios.ver",
+        "importar", "exportar", "usuarios.ver", "config",
     },
     "vendedor": {
         "venta.crear", "venta.descuento", "cliente.crear", "cliente.editar",

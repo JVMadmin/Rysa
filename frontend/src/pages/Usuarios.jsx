@@ -12,7 +12,7 @@ import { Plus, Loader2, UserCog } from "lucide-react";
 
 const ROLES = [["admin", "Administrador"], ["encargado", "Encargado"], ["vendedor", "Vendedor"], ["cajero", "Cajero"]];
 
-export default function Usuarios() {
+export default function Usuarios({ embedded = false }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -35,7 +35,7 @@ export default function Usuarios() {
   return (
     <div className="space-y-5" data-testid="usuarios-page">
       <div className="flex items-center justify-between">
-        <div><h1 className="font-display text-2xl font-black tracking-tight">Usuarios y Roles</h1><p className="text-slate-500 text-sm">{rows.length} usuarios</p></div>
+        <div>{!embedded && <><h1 className="font-display text-2xl font-black tracking-tight">Usuarios y Roles</h1><p className="text-slate-500 text-sm">{rows.length} usuarios</p></>}{embedded && <p className="text-slate-500 text-sm">{rows.length} usuarios</p>}</div>
         <Button onClick={() => setOpen(true)} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="nuevo-usuario-btn"><Plus className="w-4 h-4 mr-1" /> Nuevo usuario</Button>
       </div>
 

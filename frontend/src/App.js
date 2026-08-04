@@ -14,6 +14,7 @@ import POS from "@/pages/POS";
 import Ventas from "@/pages/Ventas";
 import Usuarios from "@/pages/Usuarios";
 import Auditoria from "@/pages/Auditoria";
+import Configuracion from "@/pages/Configuracion";
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
             <Route path="/app/pos" element={<POS />} />
             <Route path="/app/ventas" element={<Ventas />} />
             <Route path="/app/usuarios" element={<Usuarios />} />
+            <Route path="/app/configuracion" element={<Configuracion />} />
             <Route path="/app/auditoria" element={<Auditoria />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

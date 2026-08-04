@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, money } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import {
   TrendingUp, ShoppingCart, Wallet, Users, AlertTriangle, PackageX, Package, Loader2,
+  Receipt, Settings, ArrowRight,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -20,16 +23,39 @@ const Kpi = ({ icon: Icon, label, value, color, testid }) => (
 
 export default function Dashboard() {
   const [d, setD] = useState(null);
+  const { can } = useAuth();
 
   useEffect(() => { api.get("/dashboard").then((r) => setD(r.data)); }, []);
 
   if (!d) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#0055A4]" /></div>;
+
+  const MODULES = [
+    { to: "/app/pos", label: "Punto de Venta", desc: "Cobrar rápido", icon: ShoppingCart, color: "#FF5A00", perm: "venta.crear" },
+    { to: "/app/productos", label: "Productos", desc: "Inventario", icon: Package, color: "#0055A4" },
+    { to: "/app/clientes", label: "Clientes", desc: "Directorio", icon: Users, color: "#22C55E" },
+    { to: "/app/caja", label: "Caja", desc: "Cortes y movimientos", icon: Wallet, color: "#0F172A", perm: "caja.abrir" },
+    { to: "/app/ventas", label: "Ventas", desc: "Historial", icon: Receipt, color: "#8B5CF6" },
+    { to: "/app/configuracion", label: "Configuración", desc: "Empresa y precios", icon: Settings, color: "#64748B", perm: "config" },
+  ].filter((m) => !m.perm || can(m.perm));
 
   return (
     <div className="space-y-6" data-testid="dashboard-page">
       <div>
         <h1 className="font-display text-2xl font-black tracking-tight text-slate-900">Dashboard</h1>
         <p className="text-slate-500 text-sm">Resumen general de la operación.</p>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {MODULES.map((m) => (
+          <Link key={m.to} to={m.to} data-testid={`quick-${m.to.split("/").pop()}`}
+            className="group bg-white border border-slate-200 rounded-md p-4 hover:border-[#0055A4] hover:shadow-sm transition-all">
+            <div className="w-10 h-10 rounded-md flex items-center justify-center mb-3" style={{ background: m.color + "1a" }}>
+              <m.icon className="w-5 h-5" style={{ color: m.color }} strokeWidth={2} />
+            </div>
+            <div className="font-display font-bold text-sm text-slate-800 flex items-center gap-1">{m.label}<ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" /></div>
+            <div className="text-xs text-slate-400">{m.desc}</div>
+          </Link>
+        ))}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

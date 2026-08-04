@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
-  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes,
+  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings,
 } from "lucide-react";
 
 const NAV = [
@@ -15,6 +15,7 @@ const NAV = [
   { to: "/app/caja", label: "Caja", icon: Wallet, perm: "caja.abrir" },
   { to: "/app/usuarios", label: "Usuarios", icon: UserCog, perm: "usuarios.ver" },
   { to: "/app/auditoria", label: "Auditoría", icon: ScrollText, perm: "reportes.ver" },
+  { to: "/app/configuracion", label: "Configuración", icon: Settings, perm: "config" },
 ];
 
 export default function ErpLayout() {

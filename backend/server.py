@@ -136,9 +136,34 @@ class SaleInput(BaseModel):
     condicion: str = "contado"  # contado | credito
     pagos: List[Pago] = Field(default_factory=list)
     lista_precios: int = 1
+    tipo_venta: str = "directa"  # directa | cotizacion
+    vendedor_id: Optional[str] = None
 
 class CancelInput(BaseModel):
     motivo: str
+
+class SucursalItem(BaseModel):
+    nombre: str = ""
+    direccion: Optional[str] = ""
+    ciudad: Optional[str] = ""
+    estado: Optional[str] = ""
+    cp: Optional[str] = ""
+    telefono: Optional[str] = ""
+    activa: bool = True
+
+class SettingsInput(BaseModel):
+    empresa_nombre: str = "Grupo RYSA"
+    rfc: Optional[str] = ""
+    telefono: Optional[str] = ""
+    correo: Optional[str] = ""
+    direccion: Optional[str] = ""
+    ciudad: Optional[str] = ""
+    estado: Optional[str] = ""
+    cp: Optional[str] = ""
+    iva_tasa: float = 16.0
+    moneda: str = "MXN"
+    listas_precios_nombres: List[str] = Field(default_factory=lambda: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"])
+    sucursales: List[SucursalItem] = Field(default_factory=list)
 
 # =========================================================================
 # INVENTARIO (KARDEX) - helper
@@ -490,67 +515,80 @@ async def get_sale(sale_id: str, user: dict = Depends(get_current_user)):
 async def create_sale(data: SaleInput, user: dict = Depends(require_permission("venta.crear"))):
     if not data.items:
         raise HTTPException(400, "La venta no tiene productos")
-    # Cliente
     cliente = None
     if data.cliente_id:
         cliente = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0})
     cliente_nombre = cliente["nombre"] if cliente else "Público General"
-    # Validar existencia y permisos de venta
+    # Vendedor: automático = usuario logueado, se puede cambiar
+    vendedor_id = data.vendedor_id or user["id"]
+    vendedor_nombre = user["name"]
+    if data.vendedor_id and data.vendedor_id != user["id"]:
+        v = await db.users.find_one({"id": data.vendedor_id}, {"_id": 0})
+        if v:
+            vendedor_nombre = v["name"]
     items = [it.model_dump() for it in data.items]
+    es_cotizacion = data.tipo_venta == "cotizacion"
     for it in items:
         p = await db.products.find_one({"id": it["product_id"]})
         if not p:
             raise HTTPException(400, f"Producto {it['codigo']} no existe")
         if p.get("estado") != "activo":
             raise HTTPException(400, f"Producto {p['codigo']} no está activo")
-        controles = p.get("controles", {}) or {}
-        controlar = controles.get("controlar_inventario", True)
-        permitir_neg = controles.get("permitir_inventario_negativo", False)
-        if controlar and not permitir_neg and float(p.get("existencia", 0)) < it["cantidad"]:
-            raise HTTPException(400, f"Existencia insuficiente de {p['codigo']} (disp: {p.get('existencia',0)})")
+        if not es_cotizacion:
+            controles = p.get("controles", {}) or {}
+            controlar = controles.get("controlar_inventario", True)
+            permitir_neg = controles.get("permitir_inventario_negativo", False)
+            if controlar and not permitir_neg and float(p.get("existencia", 0)) < it["cantidad"]:
+                raise HTTPException(400, f"Existencia insuficiente de {p['codigo']} (disp: {p.get('existencia',0)})")
     totales = calcular_venta(items, data.descuento_global)
-    # Validar pagos si contado
     total = totales["total"]
     pagos = [p.model_dump() for p in data.pagos]
     pagado = sum(p["monto"] for p in pagos)
     cambio = 0.0
     saldo = 0.0
-    if data.condicion == "contado":
-        if round(pagado, 2) < round(total, 2):
-            raise HTTPException(400, "El pago es menor al total")
-        cambio = round(pagado - total, 2)
-    else:  # credito
-        saldo = total
-    folio = await next_counter("venta", "V", 6)
-    caja = await caja_abierta_de(user["id"])
     now = now_utc()
+    if es_cotizacion:
+        folio = await next_counter("cotizacion", "COT", 6)
+        estado = "cotizacion"
+    else:
+        if data.condicion == "contado":
+            if round(pagado, 2) < round(total, 2):
+                raise HTTPException(400, "El pago es menor al total")
+            cambio = round(pagado - total, 2)
+        else:
+            saldo = total
+        folio = await next_counter("venta", "V", 6)
+        estado = "confirmada"
+    caja = await caja_abierta_de(user["id"])
     sale = {
         "id": uid(), "folio": folio, "fecha": iso_now(),
         "hora": now.strftime("%H:%M"), "usuario_id": user["id"], "usuario_nombre": user["name"],
+        "vendedor_id": vendedor_id, "vendedor_nombre": vendedor_nombre,
         "cliente_id": data.cliente_id, "cliente_nombre": cliente_nombre,
-        "items": items, **totales, "condicion": data.condicion,
-        "pagos": pagos, "cambio": cambio, "saldo": saldo, "estado": "confirmada",
-        "factura": False, "caja_id": caja["id"] if caja else None,
+        "items": items, **totales, "tipo_venta": data.tipo_venta, "condicion": data.condicion,
+        "pagos": pagos, "cambio": cambio, "saldo": saldo, "estado": estado,
+        "factura": False, "caja_id": caja["id"] if (caja and not es_cotizacion) else None,
         "lista_precios": data.lista_precios,
     }
     await db.sales.insert_one(sale)
-    # Descontar inventario + kardex
-    for it in items:
-        p = await db.products.find_one({"id": it["product_id"]})
-        await registrar_movimiento(p, "venta", 0, it["cantidad"], user, folio, f"Venta {folio}")
-    # Caja: efectivo entra
-    if caja:
-        efectivo = sum(p["monto"] for p in pagos if p["metodo"] == "efectivo")
-        if data.condicion == "contado" and efectivo > 0:
-            monto_caja = min(efectivo, total)  # sin contar el cambio
-            await db.caja_movimientos.insert_one({
-                "id": uid(), "caja_id": caja["id"], "tipo": "venta", "concepto": f"Venta {folio}",
-                "monto": round(monto_caja, 2), "referencia": folio,
-                "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()})
-    # Crédito: aumentar saldo cliente
-    if data.condicion == "credito" and cliente:
-        await db.clients.update_one({"id": cliente["id"]}, {"$inc": {"saldo": total}})
-    await log_audit(user, "crear", "venta", sale["id"], f"{folio} total {total}")
+    if not es_cotizacion:
+        # Descontar inventario + kardex
+        for it in items:
+            p = await db.products.find_one({"id": it["product_id"]})
+            await registrar_movimiento(p, "venta", 0, it["cantidad"], user, folio, f"Venta {folio}")
+        # Caja: efectivo entra
+        if caja:
+            efectivo = sum(p["monto"] for p in pagos if p["metodo"] == "efectivo")
+            if data.condicion == "contado" and efectivo > 0:
+                monto_caja = min(efectivo, total)
+                await db.caja_movimientos.insert_one({
+                    "id": uid(), "caja_id": caja["id"], "tipo": "venta", "concepto": f"Venta {folio}",
+                    "monto": round(monto_caja, 2), "referencia": folio,
+                    "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()})
+        # Crédito: aumentar saldo cliente
+        if data.condicion == "credito" and cliente:
+            await db.clients.update_one({"id": cliente["id"]}, {"$inc": {"saldo": total}})
+    await log_audit(user, "crear", "cotizacion" if es_cotizacion else "venta", sale["id"], f"{folio} total {total}")
     return await db.sales.find_one({"id": sale["id"]}, {"_id": 0})
 
 @api.post("/sales/{sale_id}/cancelar")
@@ -560,23 +598,25 @@ async def cancel_sale(sale_id: str, data: CancelInput, user: dict = Depends(requ
         raise HTTPException(404, "Venta no encontrada")
     if sale["estado"] == "cancelada":
         raise HTTPException(400, "La venta ya está cancelada")
-    # Revertir inventario
-    for it in sale["items"]:
-        p = await db.products.find_one({"id": it["product_id"]})
-        if p:
-            await registrar_movimiento(p, "devolucion", it["cantidad"], 0, user, sale["folio"], f"Cancelación {sale['folio']}")
-    # Revertir caja
-    if sale.get("caja_id") and sale["condicion"] == "contado":
-        efectivo = sum(pg["monto"] for pg in sale["pagos"] if pg["metodo"] == "efectivo")
-        if efectivo > 0:
-            await db.caja_movimientos.insert_one({
-                "id": uid(), "caja_id": sale["caja_id"], "tipo": "devolucion",
-                "concepto": f"Cancelación {sale['folio']}", "monto": round(min(efectivo, sale["total"]), 2),
-                "referencia": sale["folio"], "usuario_id": user["id"],
-                "usuario_nombre": user["name"], "fecha": iso_now()})
-    # Revertir crédito
-    if sale["condicion"] == "credito" and sale.get("cliente_id"):
-        await db.clients.update_one({"id": sale["cliente_id"]}, {"$inc": {"saldo": -sale["total"]}})
+    es_confirmada = sale["estado"] == "confirmada"
+    if es_confirmada:
+        # Revertir inventario
+        for it in sale["items"]:
+            p = await db.products.find_one({"id": it["product_id"]})
+            if p:
+                await registrar_movimiento(p, "devolucion", it["cantidad"], 0, user, sale["folio"], f"Cancelación {sale['folio']}")
+        # Revertir caja
+        if sale.get("caja_id") and sale["condicion"] == "contado":
+            efectivo = sum(pg["monto"] for pg in sale["pagos"] if pg["metodo"] == "efectivo")
+            if efectivo > 0:
+                await db.caja_movimientos.insert_one({
+                    "id": uid(), "caja_id": sale["caja_id"], "tipo": "devolucion",
+                    "concepto": f"Cancelación {sale['folio']}", "monto": round(min(efectivo, sale["total"]), 2),
+                    "referencia": sale["folio"], "usuario_id": user["id"],
+                    "usuario_nombre": user["name"], "fecha": iso_now()})
+        # Revertir crédito
+        if sale["condicion"] == "credito" and sale.get("cliente_id"):
+            await db.clients.update_one({"id": sale["cliente_id"]}, {"$inc": {"saldo": -sale["total"]}})
     await db.sales.update_one({"id": sale_id}, {"$set": {
         "estado": "cancelada",
         "cancelacion": {"usuario": user["name"], "fecha": iso_now(), "motivo": data.motivo}}})
@@ -786,6 +826,33 @@ async def audit(user: dict = Depends(require_permission("reportes.ver"))):
     return await db.audit_logs.find({}, {"_id": 0}).sort("fecha", -1).to_list(300)
 
 # =========================================================================
+# CONFIGURACIÓN / SETTINGS
+# =========================================================================
+@api.get("/settings")
+async def get_settings(user: dict = Depends(get_current_user)):
+    s = await db.settings.find_one({"_id": "app"}, {"_id": 0})
+    return s or {}
+
+@api.put("/settings")
+async def update_settings(data: SettingsInput, user: dict = Depends(require_permission("config"))):
+    doc = data.model_dump()
+    await db.settings.update_one({"_id": "app"}, {"$set": doc}, upsert=True)
+    await log_audit(user, "editar", "configuracion", "app", "Actualización de configuración")
+    return doc
+
+@api.get("/vendedores")
+async def vendedores(user: dict = Depends(get_current_user)):
+    return await db.users.find({"active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(200)
+
+@api.get("/sales-next-folio")
+async def sales_next_folio(user: dict = Depends(get_current_user)):
+    v = await db.counters.find_one({"_id": "venta"})
+    c = await db.counters.find_one({"_id": "cotizacion"})
+    vn = (v["seq"] if v else 0) + 1
+    cn = (c["seq"] if c else 0) + 1
+    return {"venta": f"V{str(vn).zfill(6)}", "cotizacion": f"COT{str(cn).zfill(6)}"}
+
+# =========================================================================
 # STARTUP
 # =========================================================================
 @app.on_event("startup")
@@ -814,6 +881,15 @@ async def startup():
             "correo": "", "direccion": "", "ciudad": "", "estado_geo": "", "cp": "",
             "tipo": "publico", "lista_precios": 1, "condicion_pago": "contado",
             "limite_credito": 0, "saldo": 0, "estado": "activo", "created_at": iso_now()})
+    # Configuración por defecto
+    if not await db.settings.find_one({"_id": "app"}):
+        await db.settings.insert_one({
+            "_id": "app", "empresa_nombre": "Grupo RYSA", "rfc": "", "telefono": "",
+            "correo": "contacto@gruporysa.com", "direccion": "", "ciudad": "", "estado": "",
+            "cp": "", "iva_tasa": 16.0, "moneda": "MXN",
+            "listas_precios_nombres": ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"],
+            "sucursales": [{"nombre": "Matriz", "direccion": "", "ciudad": "", "estado": "",
+                            "cp": "", "telefono": "", "activa": True}]})
 
 @app.on_event("shutdown")
 async def shutdown():
