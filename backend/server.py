@@ -11,8 +11,9 @@ from typing import List, Optional
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 import pandas as pd
+from datetime import datetime
 
 from deps import (
     db, client, now_utc, iso_now, hash_password, verify_password, create_access_token,
@@ -28,6 +29,147 @@ api = APIRouter(prefix="/api")
 
 def uid() -> str:
     return uuid.uuid4().hex
+
+# ==========================================================================
+# ESTRUCTURA COMPLETA DE 85 COLUMNAS (nomenclatura DBF/XBase)
+# ==========================================================================
+COLS_85 = [
+    ("POSICION", "C"), ("CODIGO", "C"), ("DESCRIP", "C"), ("DESCRIPLRG", "M"), ("CLASIFICA", "C"),
+    ("CATEGORIA", "C"), ("CATEGOCVE", "C"), ("DEPTOCVE", "C"), ("LINEA", "C"), ("UNIMEDIDA", "C"),
+    ("UNIMEDCVE", "C"), ("CVEPROSER", "C"), ("SATOBJIMP", "C"), ("UBICACION", "C"), ("EMPAQUE", "N"),
+    ("UNIMEDEMPQ", "C"), ("EXISTENCIA", "N"), ("INSUMO", "L"), ("PROVEEDOR", "C"), ("FECHAALTA", "D"),
+    ("ULTFCOSTO", "D"), ("ULTCOSTO", "N"), ("COSTO", "N"), ("COSTODLLS", "N"), ("UTILMINIMO", "N"),
+    ("UTILPRECI1", "N"), ("UTILPRECI2", "N"), ("UTILPRECI3", "N"), ("UTILPRECI4", "N"), ("UTILPRECI5", "N"),
+    ("EXENTO", "L"), ("IMPUESTO", "N"), ("T_IEPS", "N"), ("IEPS", "N"), ("ISH", "N"),
+    ("RET_ISR", "N"), ("RET_IVA", "N"), ("PRECIOVTA", "N"), ("PRECVTACTR", "N"), ("PRECVTAUSO", "N"),
+    ("PRECIO1", "N"), ("PRECIO2", "N"), ("PRECIO3", "N"), ("PRECIO4", "N"), ("PRECIO5", "N"),
+    ("PRECIOMIN", "N"), ("ULTFDEVCOM", "D"), ("ULTCDEVCOM", "N"), ("ULTFCOMPRA", "D"), ("ULTCCOMPRA", "N"),
+    ("ULTFDEVVEN", "D"), ("ULTCDEVVEN", "N"), ("ULTFVENTA", "D"), ("ULTCVENTA", "N"), ("VTA_MES", "N"),
+    ("VTA_ANUAL", "N"), ("XENTREGAR", "N"), ("XRECIBIR", "N"), ("STOCKMIN", "N"), ("STOCKMAX", "N"),
+    ("PORPEDIR", "L"), ("IMAGEN", "M"), ("FOTO", "M"), ("FICHATEC", "M"), ("NUMSERIES", "L"),
+    ("FACTCOMENT", "L"), ("INTEGRADO", "L"), ("VALEXIST", "L"), ("MODIPRECIO", "L"), ("APLIDESCTO", "L"),
+    ("TOPECOSTO", "L"), ("INVENTARIO", "L"), ("MOVKARDEX", "L"), ("VENTAWEB", "L"), ("LOTES", "L"),
+    ("CONTROLADO", "L"), ("BASCULA", "L"), ("ASOCIADO", "L"), ("FLETE", "L"), ("COMENTARIO", "M"),
+    ("ROTACION", "C"), ("ULTPRECIO", "D"), ("COMISION", "N"), ("COMITIPO", "C"), ("STATUS", "C"),
+]
+COL_ORDER = [n for n, _ in COLS_85]
+IMPORT_ALIASES = {"DESCRIPCION": "DESCRIP", "UNIDAD_MEDIDA": "UNIMEDIDA", "STOCK_MINIMO": "STOCKMIN",
+                  "ESTADO": "STATUS", "CLASIFICACION": "CLASIFICA"}
+STATUS_TO_ESTADO = {"A": "activo", "1": "activo", "ACTIVO": "activo", "B": "baja", "BAJA": "baja",
+                    "S": "suspendido", "SUSPENDIDO": "suspendido"}
+
+def _p_num(v):
+    if v is None:
+        return None
+    s = str(v).strip().replace(",", "")
+    if s == "" or s.lower() in ("nan", "none"):
+        return None
+    try:
+        return float(s)
+    except Exception:
+        return "__ERR__"
+
+def _p_bool(v):
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if s in ("true", "1", "1.0", "si", "sí", "s", "yes", "y", "verdadero", ".t.", "t"):
+        return True
+    if s in ("false", "0", "0.0", "no", "n", "", ".f.", "f", "nan"):
+        return False
+    return "__ERR__"
+
+def _p_date(v):
+    if v is None:
+        return None
+    s = str(v).strip()
+    if s == "" or s.lower() in ("nat", "nan", "none"):
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d-%m-%Y", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt).date().isoformat()
+        except Exception:
+            pass
+    try:
+        return pd.to_datetime(s).date().isoformat()
+    except Exception:
+        return "__ERR__"
+
+def parse_row(canon: dict):
+    """canon: {COLNAME_UPPER: raw}. Devuelve (data lowercase, errores)."""
+    data, errores = {}, []
+    for name, t in COLS_85:
+        raw = canon.get(name, "")
+        key = name.lower()
+        if t in ("C", "M"):
+            data[key] = "" if raw is None else str(raw).strip()
+        elif t == "N":
+            val = _p_num(raw)
+            if val == "__ERR__":
+                errores.append({"campo": name, "valor": str(raw), "motivo": "Número inválido"}); data[key] = None
+            else:
+                data[key] = val
+        elif t == "D":
+            val = _p_date(raw)
+            if val == "__ERR__":
+                errores.append({"campo": name, "valor": str(raw), "motivo": "Fecha inválida"}); data[key] = None
+            else:
+                data[key] = val
+        elif t == "L":
+            val = _p_bool(raw)
+            if val == "__ERR__":
+                errores.append({"campo": name, "valor": str(raw), "motivo": "Booleano inválido"}); data[key] = False
+            else:
+                data[key] = val
+    if not data.get("codigo"):
+        errores.append({"campo": "CODIGO", "valor": "", "motivo": "Código obligatorio"})
+    if not data.get("descrip"):
+        errores.append({"campo": "DESCRIP", "valor": "", "motivo": "Descripción obligatoria"})
+    return data, errores
+
+def build_product_doc(d: dict) -> dict:
+    """Documento de producto: conserva los 85 campos y sincroniza los campos usados por POS/Inventario."""
+    iva = d.get("impuesto")
+    iva = float(iva) if iva not in (None, 0, "") else 16.0
+    costo = float(d.get("costo") or 0)
+    precios = []
+    for i in range(1, 6):
+        con = d.get(f"precio{i}"); util = d.get(f"utilpreci{i}")
+        if con:
+            con = float(con); sin = round(con / (1 + iva / 100), 2)
+            u = round((sin / costo - 1) * 100, 2) if costo else float(util or 0)
+        else:
+            u = float(util or 0); sin = round(costo * (1 + u / 100), 2); con = round(sin * (1 + iva / 100), 2)
+        precios.append({"nombre": f"Precio {i}", "utilidad_pct": u, "precio_sin_iva": sin, "precio_con_iva": round(con, 2)})
+    status = str(d.get("status", "")).upper()
+    doc = dict(d)  # conserva los 85 campos tal cual
+    doc.update({
+        "descripcion": d.get("descrip", ""),
+        "descripcion_larga": d.get("descriplrg", ""),
+        "linea": d.get("linea", ""),
+        "clasificacion": d.get("clasifica", ""),
+        "unidad_medida": d.get("unimedida") or "PZA",
+        "empaque": d.get("empaque") or "",
+        "ubicacion": d.get("ubicacion", ""),
+        "costo": costo,
+        "stock_minimo": float(d.get("stockmin") or 0),
+        "iva_tasa": iva,
+        "estado": STATUS_TO_ESTADO.get(status, "activo"),
+        "precios": precios,
+        "precio_minimo": float(d.get("preciomin") or 0),
+        "imagen_url": d.get("imagen") or d.get("foto") or "",
+        "sku": d.get("codigo", ""),
+        "sinonimos": [],
+        "sat": {"clave_sat": d.get("cveproser", ""), "unidad_sat": d.get("unimedcve", ""),
+                "impuestos": "Exento" if d.get("exento") else "IVA"},
+        "controles": {"permitir_venta": True, "controlar_inventario": bool(d.get("inventario", True)),
+                      "permitir_inventario_negativo": False,
+                      "mostrar_pos": not bool(d.get("insumo", False)),
+                      "mostrar_catalogo": bool(d.get("ventaweb", False))},
+        "ficha_tecnica": {},
+        "proveedores": [d.get("proveedor")] if d.get("proveedor") else [],
+    })
+    return doc
 
 # =========================================================================
 # MODELOS
@@ -55,6 +197,7 @@ class PrecioItem(BaseModel):
     precio_con_iva: float = 0.0
 
 class ProductInput(BaseModel):
+    model_config = ConfigDict(extra="allow")
     codigo: Optional[str] = None
     sku: Optional[str] = ""
     descripcion: str
@@ -265,14 +408,19 @@ async def list_roles(user: dict = Depends(get_current_user)):
 def calc_precios(costo: float, precios: List[dict], iva_tasa: float) -> List[dict]:
     out = []
     for p in precios:
-        util = float(p.get("utilidad_pct", 0))
+        util = float(p.get("utilidad_pct", 0) or 0)
         if p.get("precio_sin_iva"):
             sin_iva = float(p["precio_sin_iva"])
+            con_iva = round(sin_iva * (1 + iva_tasa / 100), 2)
+        elif p.get("precio_con_iva"):
+            con_iva = float(p["precio_con_iva"])
+            sin_iva = round(con_iva / (1 + iva_tasa / 100), 2)
+            util = round((sin_iva / costo - 1) * 100, 2) if costo else util
         else:
             sin_iva = round(costo * (1 + util / 100), 2)
-        con_iva = round(sin_iva * (1 + iva_tasa / 100), 2)
+            con_iva = round(sin_iva * (1 + iva_tasa / 100), 2)
         out.append({"nombre": p.get("nombre", "Precio"), "utilidad_pct": util,
-                    "precio_sin_iva": sin_iva, "precio_con_iva": con_iva})
+                    "precio_sin_iva": sin_iva, "precio_con_iva": round(con_iva, 2)})
     return out
 
 @api.get("/products")
@@ -768,69 +916,92 @@ async def export_products(estado: Optional[str] = None, q: Optional[str] = None,
 
 @api.get("/products/plantilla/excel")
 async def plantilla_products(user: dict = Depends(get_current_user)):
-    df = pd.DataFrame([{c: "" for c in PROD_COLS} | {"precio_1": ""}])
+    df = pd.DataFrame(columns=COL_ORDER)
     data = df_to_excel_bytes(df)
     return StreamingResponse(io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=plantilla_productos.xlsx"})
+        headers={"Content-Disposition": "attachment; filename=plantilla_productos_85.xlsx"})
 
 @api.post("/products/import/preview")
 async def import_preview(file: UploadFile = File(...), user: dict = Depends(require_permission("importar"))):
     content = await file.read()
-    df = pd.read_excel(io.BytesIO(content)).fillna("")
+    name = (file.filename or "").lower()
+    if name.endswith(".csv"):
+        df = pd.read_csv(io.BytesIO(content), dtype=str, keep_default_na=False)
+    else:
+        df = pd.read_excel(io.BytesIO(content), dtype=str, keep_default_na=False)
+    df.columns = [IMPORT_ALIASES.get(str(c).strip().upper(), str(c).strip().upper()) for c in df.columns]
     rows = df.to_dict("records")
-    preview = []
+    all_codes = [str(r.get("CODIGO", "")).strip() for r in rows if str(r.get("CODIGO", "")).strip()]
+    existentes_db = set()
+    if all_codes:
+        async for p in db.products.find({"codigo": {"$in": all_codes}}, {"_id": 0, "codigo": 1}):
+            existentes_db.add(p["codigo"])
+    preview, codigos = [], set()
+    nuevos = existentes = con_errores = 0
     for i, r in enumerate(rows):
-        codigo = str(r.get("codigo", "")).strip()
-        errores = []
-        if not str(r.get("descripcion", "")).strip():
-            errores.append("Descripción requerida")
-        existe = await db.products.find_one({"codigo": codigo}) if codigo else None
-        accion = "actualizar" if existe else "crear"
-        preview.append({"fila": i + 2, "codigo": codigo,
-                        "descripcion": str(r.get("descripcion", "")),
-                        "accion": accion, "errores": errores, "data": r})
-    return {"total": len(preview), "preview": preview,
-            "con_errores": sum(1 for p in preview if p["errores"])}
+        canon = {k: r.get(k, "") for k in COL_ORDER}
+        data, errores = parse_row(canon)
+        codigo = data.get("codigo", "")
+        if codigo and codigo in codigos:
+            errores.append({"campo": "CODIGO", "valor": codigo, "motivo": "Código duplicado en el archivo"})
+        codigos.add(codigo)
+        existe = codigo in existentes_db
+        if errores:
+            con_errores += 1
+        elif existe:
+            existentes += 1
+        else:
+            nuevos += 1
+        preview.append({"fila": i + 2, "codigo": codigo, "descripcion": data.get("descrip", ""),
+                        "accion": "actualizar" if existe else "crear", "existe": existe,
+                        "errores": errores, "data": data})
+    return {"total": len(preview), "nuevos": nuevos, "existentes": existentes,
+            "con_errores": con_errores, "columnas": COL_ORDER, "preview": preview}
 
 @api.post("/products/import/confirm")
 async def import_confirm(payload: dict, user: dict = Depends(require_permission("importar"))):
     rows = payload.get("rows", [])
-    creados = actualizados = 0
-    for r in rows:
-        if r.get("errores"):
-            continue
-        d = r["data"]
-        codigo = str(d.get("codigo", "")).strip() or await next_counter("producto", "P", 5)
-        iva = 16.0
-        costo = float(d.get("costo") or 0)
-        base = {
-            "descripcion": str(d.get("descripcion", "")),
-            "linea": str(d.get("linea", "")), "clasificacion": str(d.get("clasificacion", "")),
-            "costo": costo, "unidad_medida": str(d.get("unidad_medida", "") or "PZA"),
-            "stock_minimo": float(d.get("stock_minimo") or 0),
-            "estado": str(d.get("estado", "") or "activo"), "iva_tasa": iva,
-            "updated_at": iso_now(),
-        }
+    mode = payload.get("mode", "ambos")  # nuevos | actualizar | ambos
+    actualizar_existencia = bool(payload.get("actualizar_existencia", False))
+    creados = actualizados = omitidos = 0
+    for row in rows:
+        if row.get("errores"):
+            omitidos += 1; continue
+        d = row.get("data", {})
+        codigo = str(d.get("codigo", "")).strip()
+        if not codigo:
+            omitidos += 1; continue
         existing = await db.products.find_one({"codigo": codigo})
+        if existing and mode == "nuevos":
+            omitidos += 1; continue
+        if not existing and mode == "actualizar":
+            omitidos += 1; continue
+        doc = build_product_doc(d)
+        doc["codigo"] = codigo
+        doc["updated_at"] = iso_now()
+        ex_val = doc.pop("existencia", None)
         if existing:
-            await db.products.update_one({"codigo": codigo}, {"$set": base})
+            await db.products.update_one({"codigo": codigo}, {"$set": doc})
+            if actualizar_existencia and ex_val is not None:
+                prod = await db.products.find_one({"codigo": codigo})
+                diff = float(ex_val) - float(prod.get("existencia", 0))
+                if abs(diff) > 0.0001:
+                    if diff > 0:
+                        await registrar_movimiento(prod, "ajuste", diff, 0, user, "Importación", "Ajuste por importación")
+                    else:
+                        await registrar_movimiento(prod, "ajuste", 0, -diff, user, "Importación", "Ajuste por importación")
             actualizados += 1
         else:
-            doc = {"id": uid(), "codigo": codigo, "sku": "", "descripcion_larga": "",
-                   "existencia": 0, "ubicacion": "", "precio_minimo": 0,
-                   "precios": calc_precios(costo, [{"nombre": "Precio 1", "utilidad_pct": 30}], iva),
-                   "sat": {}, "controles": {"permitir_venta": True, "controlar_inventario": True,
-                                            "mostrar_pos": True}, "ficha_tecnica": {},
-                   "proveedores": [], "sinonimos": [], "imagen_url": "",
-                   "created_at": iso_now(), **base}
+            doc["id"] = uid(); doc["existencia"] = 0; doc["created_at"] = iso_now()
             await db.products.insert_one(doc)
-            ex_ini = float(d.get("existencia") or 0)
-            if ex_ini > 0:
-                await registrar_movimiento(doc, "entrada", ex_ini, 0, user, "Importación")
+            if ex_val and float(ex_val) > 0:
+                prod = await db.products.find_one({"id": doc["id"]})
+                await registrar_movimiento(prod, "entrada", float(ex_val), 0, user, "Importación", "Inventario inicial")
             creados += 1
-    await log_audit(user, "importar", "producto", "", f"{creados} creados, {actualizados} actualizados")
-    return {"creados": creados, "actualizados": actualizados}
+    if creados or actualizados:
+        await log_audit(user, "importar", "producto", "", f"{creados} creados, {actualizados} actualizados, {omitidos} omitidos")
+    return {"creados": creados, "actualizados": actualizados, "omitidos": omitidos}
 
 @api.get("/clients/export/excel")
 async def export_clients(q: Optional[str] = None, estado: Optional[str] = None, tipo: Optional[str] = None,

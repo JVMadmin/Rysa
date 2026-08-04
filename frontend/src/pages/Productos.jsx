@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import ProductForm from "@/components/ProductForm";
 import { toast } from "sonner";
 import { Plus, Search, Download, Upload, Pencil, History, Loader2, Boxes, FileDown } from "lucide-react";
@@ -32,6 +33,9 @@ export default function Productos() {
   const [movs, setMovs] = useState([]);
   const [importOpen, setImportOpen] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [importMode, setImportMode] = useState("ambos");
+  const [actExist, setActExist] = useState(false);
+  const [progress, setProgress] = useState(null);
   const fileRef = useRef();
 
   const load = async () => {
@@ -89,11 +93,31 @@ export default function Productos() {
   };
 
   const confirmImport = async () => {
+    const valid = preview.preview.filter((r) => !r.errores?.length);
+    if (valid.length === 0) return toast.error("No hay filas válidas para importar");
+    const chunk = 500;
+    let creados = 0, actualizados = 0, omitidos = 0;
+    setProgress({ done: 0, total: valid.length });
     try {
-      const { data } = await api.post("/products/import/confirm", { rows: preview.preview });
-      toast.success(`${data.creados} creados, ${data.actualizados} actualizados`);
+      for (let i = 0; i < valid.length; i += chunk) {
+        const part = valid.slice(i, i + chunk);
+        const { data } = await api.post("/products/import/confirm", { rows: part, mode: importMode, actualizar_existencia: actExist });
+        creados += data.creados; actualizados += data.actualizados; omitidos += data.omitidos;
+        setProgress({ done: Math.min(i + chunk, valid.length), total: valid.length });
+      }
+      toast.success(`${creados} creados, ${actualizados} actualizados, ${omitidos} omitidos`);
       setImportOpen(false); setPreview(null); load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setProgress(null); }
+  };
+
+  const downloadErrors = () => {
+    const lines = [["fila", "codigo", "campo", "valor", "motivo"]];
+    preview.preview.forEach((r) => (r.errores || []).forEach((e) => lines.push([r.fila, r.codigo, e.campo, e.valor, e.motivo])));
+    const csv = lines.map((l) => l.map((x) => `"${String(x ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = "errores_importacion.csv"; a.click();
   };
 
   return (
@@ -108,7 +132,7 @@ export default function Productos() {
           {can("importar") && <Button variant="outline" onClick={() => fileRef.current.click()} data-testid="import-btn"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
           <Button variant="outline" onClick={exportExcel} data-testid="export-btn"><Download className="w-4 h-4 mr-1" /> Exportar</Button>
           {can("producto.crear") && <Button onClick={() => { setEditing(null); setFormOpen(true); }} data-testid="nuevo-producto-btn" className="bg-[#0055A4] hover:bg-[#004385]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" hidden onChange={onFile} />
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
         </div>
       </div>
 
@@ -218,34 +242,65 @@ export default function Productos() {
       </Dialog>
 
       {/* Import preview */}
-      <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-w-2xl" data-testid="import-preview">
-          <DialogHeader><DialogTitle className="font-display">Vista previa de importación</DialogTitle></DialogHeader>
+      <Dialog open={importOpen} onOpenChange={(o) => !progress && setImportOpen(o)}>
+        <DialogContent className="max-w-3xl" data-testid="import-preview">
+          <DialogHeader><DialogTitle className="font-display">Vista previa de importación (85 columnas)</DialogTitle></DialogHeader>
           {preview && (
             <>
-              <p className="text-sm text-slate-500">{preview.total} filas · {preview.con_errores} con errores</p>
-              <div className="max-h-80 overflow-y-auto border border-slate-200 rounded">
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="bg-slate-50 rounded p-2"><div className="text-xs text-slate-400">Total</div><div className="font-display font-bold" data-testid="prev-total">{preview.total}</div></div>
+                <div className="bg-green-50 rounded p-2"><div className="text-xs text-slate-400">Nuevos</div><div className="font-display font-bold text-green-700" data-testid="prev-nuevos">{preview.nuevos}</div></div>
+                <div className="bg-blue-50 rounded p-2"><div className="text-xs text-slate-400">Existentes</div><div className="font-display font-bold text-blue-700" data-testid="prev-existentes">{preview.existentes}</div></div>
+                <div className="bg-red-50 rounded p-2"><div className="text-xs text-slate-400">Con errores</div><div className="font-display font-bold text-red-600" data-testid="prev-errores">{preview.con_errores}</div></div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">Modo</Label>
+                  <Select value={importMode} onValueChange={setImportMode}>
+                    <SelectTrigger className="w-56 h-9" data-testid="import-mode"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nuevos">Solo crear nuevos</SelectItem>
+                      <SelectItem value="actualizar">Solo actualizar existentes</SelectItem>
+                      <SelectItem value="ambos">Crear nuevos y actualizar existentes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2 border border-amber-200 bg-amber-50 rounded-md px-3 py-1.5">
+                  <Switch checked={actExist} onCheckedChange={setActExist} data-testid="import-act-exist" />
+                  <span className="text-xs text-amber-800">Actualizar existencia (genera ajuste en Kardex)</span>
+                </div>
+                {preview.con_errores > 0 && <Button variant="outline" size="sm" onClick={downloadErrors} data-testid="download-errors">Descargar errores</Button>}
+              </div>
+
+              <div className="max-h-72 overflow-auto border border-slate-200 rounded">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50"><tr className="text-left text-xs uppercase text-slate-500">
+                  <thead className="bg-slate-50 sticky top-0"><tr className="text-left text-xs uppercase text-slate-500">
                     <th className="p-2">Fila</th><th className="p-2">Código</th><th className="p-2">Descripción</th><th className="p-2">Acción</th><th className="p-2">Errores</th>
                   </tr></thead>
                   <tbody>
-                    {preview.preview.map((r) => (
+                    {preview.preview.slice(0, 300).map((r) => (
                       <tr key={r.fila} className="border-t border-slate-100">
                         <td className="p-2">{r.fila}</td><td className="p-2">{r.codigo}</td>
-                        <td className="p-2 truncate max-w-[160px]">{r.descripcion}</td>
-                        <td className="p-2"><Badge className={r.accion === "crear" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}>{r.accion}</Badge></td>
-                        <td className="p-2 text-red-600 text-xs">{r.errores.join(", ")}</td>
+                        <td className="p-2 truncate max-w-[180px]">{r.descripcion}</td>
+                        <td className="p-2">{r.errores?.length
+                          ? <Badge className="bg-red-100 text-red-700">error</Badge>
+                          : <Badge className={r.accion === "crear" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}>{r.accion}</Badge>}</td>
+                        <td className="p-2 text-red-600 text-xs">{(r.errores || []).map((e) => `${e.campo}: ${e.motivo}`).join("; ")}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              {preview.preview.length > 300 && <p className="text-xs text-slate-400">Mostrando 300 de {preview.total} filas.</p>}
+              {progress && <p className="text-sm text-[#0055A4] font-medium" data-testid="import-progress">Importando... {progress.done} / {progress.total}</p>}
             </>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setImportOpen(false)}>Cancelar</Button>
-            <Button onClick={confirmImport} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="confirm-import">Confirmar importación</Button>
+            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={!!progress}>Cancelar</Button>
+            <Button onClick={confirmImport} disabled={!!progress} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="confirm-import">
+              {progress ? "Importando..." : "Confirmar importación"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
