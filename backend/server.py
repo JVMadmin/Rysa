@@ -961,6 +961,10 @@ async def import_preview(file: UploadFile = File(...), user: dict = Depends(requ
         raise HTTPException(400, f"Error al procesar el archivo: {str(e)[:150]}")
     df.columns = [IMPORT_ALIASES.get(str(c).strip().upper(), str(c).strip().upper()) for c in df.columns]
     rows = df.to_dict("records")
+    if not rows:
+        raise HTTPException(400, "El archivo no contiene registros o no es un formato válido (XLSX, XLS, CSV).")
+    if not any(str(c).strip().upper() == "CODIGO" for c in df.columns):
+        raise HTTPException(400, "El archivo no tiene la columna CODIGO. Descarga la plantilla de 85 columnas.")
     all_codes = [str(r.get("CODIGO", "")).strip() for r in rows if str(r.get("CODIGO", "")).strip()]
     existentes_db = set()
     if all_codes:
