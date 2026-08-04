@@ -922,14 +922,43 @@ async def plantilla_products(user: dict = Depends(get_current_user)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=plantilla_productos_85.xlsx"})
 
+def read_import_table(content: bytes, filename: str):
+    """Lee XLSX/XLS/CSV de forma robusta. Devuelve un DataFrame (todo texto)."""
+    name = (filename or "").lower()
+    if name.endswith(".csv"):
+        try:
+            return pd.read_csv(io.BytesIO(content), dtype=str, keep_default_na=False)
+        except Exception:
+            return pd.read_csv(io.BytesIO(content), dtype=str, keep_default_na=False, sep=";", encoding="latin-1")
+    errores = []
+    engines = ["openpyxl", "xlrd"] if name.endswith(".xlsx") else ["xlrd", "openpyxl"]
+    for eng in engines:
+        try:
+            return pd.read_excel(io.BytesIO(content), dtype=str, keep_default_na=False, engine=eng)
+        except Exception as e:
+            errores.append(f"{eng}: {str(e)[:80]}")
+    # Algunos ERP exportan .xls que en realidad es HTML/XML
+    try:
+        dfs = pd.read_html(io.BytesIO(content))
+        if dfs:
+            return dfs[0].astype(str).fillna("")
+    except Exception as e:
+        errores.append(f"html: {str(e)[:80]}")
+    try:
+        return pd.read_csv(io.BytesIO(content), dtype=str, keep_default_na=False, sep=None, engine="python")
+    except Exception as e:
+        errores.append(f"csv: {str(e)[:80]}")
+    raise HTTPException(400, "No se pudo leer el archivo. Formatos soportados: XLSX, XLS, CSV. " + " | ".join(errores[:2]))
+
 @api.post("/products/import/preview")
 async def import_preview(file: UploadFile = File(...), user: dict = Depends(require_permission("importar"))):
     content = await file.read()
-    name = (file.filename or "").lower()
-    if name.endswith(".csv"):
-        df = pd.read_csv(io.BytesIO(content), dtype=str, keep_default_na=False)
-    else:
-        df = pd.read_excel(io.BytesIO(content), dtype=str, keep_default_na=False)
+    try:
+        df = read_import_table(content, file.filename or "")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Error al procesar el archivo: {str(e)[:150]}")
     df.columns = [IMPORT_ALIASES.get(str(c).strip().upper(), str(c).strip().upper()) for c in df.columns]
     rows = df.to_dict("records")
     all_codes = [str(r.get("CODIGO", "")).strip() for r in rows if str(r.get("CODIGO", "")).strip()]
@@ -1016,7 +1045,7 @@ async def export_clients(q: Optional[str] = None, estado: Optional[str] = None, 
 @api.post("/clients/import/confirm")
 async def import_clients(file: UploadFile = File(...), user: dict = Depends(require_permission("importar"))):
     content = await file.read()
-    df = pd.read_excel(io.BytesIO(content)).fillna("")
+    df = read_import_table(content, file.filename or "").fillna("")
     creados = 0
     for r in df.to_dict("records"):
         nombre = str(r.get("nombre", "")).strip()

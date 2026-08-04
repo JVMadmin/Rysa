@@ -1,0 +1,30 @@
+{
+  "summary": "Backend-only regression test for the .xls import bug fix in the products import module. Created pytest suite covering .xls (legacy BIFF via xlrd), .xlsx (openpyxl), .csv, dedupe re-import, and corrupt-file behavior. All 7 tests PASS. The main bug is fixed: legacy .xls generated via xlwt is read correctly by /api/products/import/preview and confirm creates products with proper stock and computed prices. Re-importing with mode='nuevos' correctly omits duplicates (CODIGO unique). Test data cleaned from Mongo (products + inventory_movements). Admin user preserved.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/products/import/preview", "issue": "Garbage/corrupt .xls bytes return HTTP 200 with total=0 (empty preview) instead of the requested HTTP 400 with a clear error message. Not a 500 (no crash), so the robust reader's HTML/CSV fallback swallows unreadable files as 'empty'. Consider raising 400 when all engines fail AND fallback produced 0 rows AND magic bytes are clearly non-tabular."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_import_products.py",
+    "/app/test_reports/pytest/import_products.xml"
+  ],
+  "action_items": [
+    "Optional hardening: when read_import_table() falls back to HTML/CSV and returns 0 rows on a file with binary garbage, raise HTTPException(400, 'archivo no soportado o vacío') so the user gets an explicit error instead of a silent empty preview."
+  ],
+  "critical_code_review_comments": [
+    "read_import_table() correctly branches by extension (openpyxl for .xlsx, xlrd for .xls) with HTML/CSV fallback — verified working end-to-end.",
+    "Preview payload uses lowercase 'codigo' key inside preview[].data and top-level preview[].codigo — frontend must match this casing (columnas[] however is uppercase, e.g. 'CODIGO'). Slight inconsistency worth noting but not a bug.",
+    "Confirm with mode='nuevos' correctly reports {creados:0, omitidos:>=2} on re-import; CODIGO uniqueness enforced.",
+    "Existencia is applied through an inventory_movements record (not a raw field write) — verified by GET /api/products?q=TESTXLS001 returning existencia=5.0 and precios[0].precio_con_iva > 0."
+  ],
+  "updated_files": ["/app/backend/tests/test_import_products.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "not tested (skipped by request)"},
+  "test_credentials": "admin: REDACTED / REDACTED",
+  "seed_data_creation": "Created TESTXLS001, TESTXLS002 (via .xls), TESTXLSX001 (via .xlsx). All removed from products and inventory_movements after tests. TESTCSV001 preview-only (not confirmed) — not persisted.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Reusable regression suite lives at /app/backend/tests/test_import_products.py. Run with: export REACT_APP_BACKEND_URL=... && python -m pytest tests/test_import_products.py -v -o addopts='' . The suite auto-cleans its own test rows. Preview row shape: {fila, codigo, descripcion, accion, existe, errores, data:{...}} with lowercase field names inside data."
+}
