@@ -36,19 +36,25 @@ export default function Productos() {
   const [importMode, setImportMode] = useState("ambos");
   const [actExist, setActExist] = useState(false);
   const [progress, setProgress] = useState(null);
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [nonce, setNonce] = useState(0);
+  const pageSize = 50;
   const fileRef = useRef();
 
   const load = async () => {
     setLoading(true);
-    const params = {};
+    const params = { skip: page * pageSize, limit: pageSize };
     if (q) params.q = q;
     if (estado !== "all") params.estado = estado;
     if (filtro !== "all") params.filtro = filtro;
-    const { data } = await api.get("/products", { params });
-    setRows(data);
+    const res = await api.get("/products", { params });
+    setRows(res.data);
+    setTotal(Number(res.headers["x-total-count"] ?? res.data.length));
     setLoading(false);
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [estado, filtro]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [estado, filtro, page, nonce]);
+  const doSearch = () => { setPage(0); setNonce((n) => n + 1); };
 
   const openMovs = async (p) => {
     setMovProd(p);
@@ -106,7 +112,7 @@ export default function Productos() {
         setProgress({ done: Math.min(i + chunk, valid.length), total: valid.length });
       }
       toast.success(`${creados} creados, ${actualizados} actualizados, ${omitidos} omitidos`);
-      setImportOpen(false); setPreview(null); load();
+      setImportOpen(false); setPreview(null); setPage(0); setNonce((n) => n + 1);
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setProgress(null); }
   };
@@ -125,7 +131,7 @@ export default function Productos() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-black tracking-tight">Productos e Inventario</h1>
-          <p className="text-slate-500 text-sm">{rows.length} productos</p>
+          <p className="text-slate-500 text-sm">{total} productos</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => download("/products/plantilla/excel", "plantilla_productos.xlsx")} data-testid="plantilla-btn"><FileDown className="w-4 h-4 mr-1" /> Plantilla</Button>
@@ -143,7 +149,7 @@ export default function Productos() {
             onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()}
             className="pl-9" data-testid="buscar-producto" />
         </div>
-        <Select value={estado} onValueChange={setEstado}>
+        <Select value={estado} onValueChange={(v) => { setEstado(v); setPage(0); }}>
           <SelectTrigger className="w-40" data-testid="filtro-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos</SelectItem>
@@ -152,7 +158,7 @@ export default function Productos() {
             <SelectItem value="suspendido">Suspendidos</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={filtro} onValueChange={setFiltro}>
+        <Select value={filtro} onValueChange={(v) => { setFiltro(v); setPage(0); }}>
           <SelectTrigger className="w-40" data-testid="filtro-stock"><SelectValue placeholder="Stock" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todo stock</SelectItem>
@@ -160,7 +166,7 @@ export default function Productos() {
             <SelectItem value="sin_existencia">Sin existencia</SelectItem>
           </SelectContent>
         </Select>
-        <Button variant="outline" onClick={load}><Search className="w-4 h-4" /></Button>
+        <Button variant="outline" onClick={doSearch}><Search className="w-4 h-4" /></Button>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
@@ -209,6 +215,15 @@ export default function Productos() {
             })}
           </tbody>
         </table>
+      </div>
+
+      {/* Paginación */}
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-slate-500" data-testid="prod-total">{total} productos · página {page + 1} de {Math.max(1, Math.ceil(total / pageSize))}</span>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} data-testid="prev-page">Anterior</Button>
+          <Button variant="outline" size="sm" disabled={(page + 1) * pageSize >= total} onClick={() => setPage((p) => p + 1)} data-testid="next-page">Siguiente</Button>
+        </div>
       </div>
 
       <ProductForm open={formOpen} onClose={() => setFormOpen(false)} product={editing} onSaved={load} />

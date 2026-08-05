@@ -424,8 +424,11 @@ def calc_precios(costo: float, precios: List[dict], iva_tasa: float) -> List[dic
     return out
 
 @api.get("/products")
-async def list_products(estado: Optional[str] = None, q: Optional[str] = None,
-                        filtro: Optional[str] = None, user: dict = Depends(get_current_user)):
+async def list_products(response: Response, estado: Optional[str] = None, q: Optional[str] = None,
+                        filtro: Optional[str] = None, skip: int = 0, limit: int = 100,
+                        user: dict = Depends(get_current_user)):
+    limit = max(1, min(int(limit), 500))
+    skip = max(0, int(skip))
     query = {}
     if estado:
         query["estado"] = estado
@@ -433,12 +436,19 @@ async def list_products(estado: Optional[str] = None, q: Optional[str] = None,
         rx = {"$regex": q, "$options": "i"}
         query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
                         {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx}]
-    products = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).to_list(2000)
-    if filtro == "bajo_stock":
-        products = [p for p in products if 0 < float(p.get("existencia", 0)) <= float(p.get("stock_minimo", 0))]
-    elif filtro == "sin_existencia":
-        products = [p for p in products if float(p.get("existencia", 0)) <= 0]
-    return products
+    if filtro in ("bajo_stock", "sin_existencia"):
+        docs = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).to_list(20000)
+        if filtro == "bajo_stock":
+            docs = [p for p in docs if 0 < float(p.get("existencia", 0)) <= float(p.get("stock_minimo", 0))]
+        else:
+            docs = [p for p in docs if float(p.get("existencia", 0)) <= 0]
+        total = len(docs)
+        docs = docs[skip:skip + limit]
+    else:
+        total = await db.products.count_documents(query)
+        docs = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).skip(skip).limit(limit).to_list(limit)
+    response.headers["X-Total-Count"] = str(total)
+    return docs
 
 @api.get("/products/{product_id}")
 async def get_product(product_id: str, user: dict = Depends(get_current_user)):
@@ -898,7 +908,14 @@ def df_to_excel_bytes(df: pd.DataFrame) -> bytes:
 @api.get("/products/export/excel")
 async def export_products(estado: Optional[str] = None, q: Optional[str] = None,
                           user: dict = Depends(require_permission("exportar"))):
-    products = await list_products(estado=estado, q=q, filtro=None, user=user)
+    query = {}
+    if estado:
+        query["estado"] = estado
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
+                        {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx}]
+    products = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).to_list(100000)
     rows = []
     for p in products:
         rows.append({
@@ -1154,4 +1171,5 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
