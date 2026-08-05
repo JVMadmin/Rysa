@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
-  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags,
+  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins,
 } from "lucide-react";
 
 const NAV = [
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/app/productos", label: "Productos", icon: Package },
   { to: "/app/categorias", label: "Categorías", icon: Tags },
   { to: "/app/clientes", label: "Clientes", icon: Users },
+  { to: "/app/cxc", label: "Cuentas por Cobrar", icon: HandCoins, perm: "caja.entrada" },
   { to: "/app/caja", label: "Caja", icon: Wallet, perm: "caja.abrir" },
   { to: "/app/usuarios", label: "Usuarios", icon: UserCog, perm: "usuarios.ver" },
   { to: "/app/auditoria", label: "Auditoría", icon: ScrollText, perm: "reportes.ver" },

@@ -10,6 +10,7 @@ import Dashboard from "@/pages/Dashboard";
 import Productos from "@/pages/Productos";
 import Categorias from "@/pages/Categorias";
 import Clientes from "@/pages/Clientes";
+import CuentasPorCobrar from "@/pages/CuentasPorCobrar";
 import Caja from "@/pages/Caja";
 import POS from "@/pages/POS";
 import Ventas from "@/pages/Ventas";
@@ -31,6 +32,7 @@ function App() {
             <Route path="/app/productos" element={<Productos />} />
             <Route path="/app/categorias" element={<Categorias />} />
             <Route path="/app/clientes" element={<Clientes />} />
+            <Route path="/app/cxc" element={<CuentasPorCobrar />} />
             <Route path="/app/caja" element={<Caja />} />
             <Route path="/app/pos" element={<POS />} />
             <Route path="/app/ventas" element={<Ventas />} />

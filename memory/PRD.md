@@ -48,6 +48,14 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - Clientes: tabla configurable (`COLS`) con encabezados ordenables asc/desc (menor↔mayor / A↔Z, locale es numeric), barra de navegación/paginación (tamaños 25/50/100/200, primera/anterior/siguiente/última, "Página X de N") y botón "Columnas vacías" que oculta columnas sin datos (mantiene Clave/Nombre y las especiales Crédito/Estado). Filtros rápidos y búsqueda ampliada ya existentes.
 - Verificado con capturas: base real importada 688 clientes, orden por Nombre, ocultar vacías (RFC/Ciudad/Tel/Celular/Vend), paginación 14 páginas; POS semáforo "Crédito activo (disponible)".
 
+## Implementado (2026-08-05) — Cuentas por Cobrar (CxC)
+- Nuevo módulo `/app/cxc` (`CuentasPorCobrar.jsx`) + enlace en menú (perm `caja.entrada`, ícono HandCoins).
+- Backend: `GET /cxc` (cartera con antigüedad: corriente/1-30/31-60/61-90/+90, totales cartera/por vencer/vencido/clientes, búsqueda y filtro solo_vencidos), `GET /cxc/{id}` (estado de cuenta: ventas a crédito con saldo/vencimiento/días + historial de abonos), `POST /cxc/{id}/abono` (aplica FIFO a ventas más antiguas, reduce `sale.saldo` y `client.saldo`, valida no exceder saldo; si método=efectivo y hay caja abierta, entra a Caja). Modelo `abonos` con folio AB, aplicaciones, usuario, caja_id.
+- Antigüedad calculada por venta: vencimiento = fecha + `dias_credito` del cliente.
+- Cancelación de venta a crédito ahora revierte solo el saldo pendiente (respeta abonos previos) y pone `sale.saldo=0`.
+- UI: tarjetas resumen, barra de antigüedad, tabla de deudores con aging por cubeta y días de mora, diálogo de abono (monto/saldo total/método/referencia/nota) y estado de cuenta (ventas Pagada/Vigente/Vencida + abonos).
+- Verificado con curl (venta crédito→CxC saldo/aging, abono parcial FIFO 500 saldo 1160→660, caja efectivo, validación exceso 400) y capturas (deudor demo con venta vencida 45d en bucket 31-60).
+
 
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones

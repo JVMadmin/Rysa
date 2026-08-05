@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 from deps import (
     db, client, now_utc, iso_now, hash_password, verify_password, create_access_token,
@@ -307,6 +307,12 @@ class CreditInput(BaseModel):
 
 class QuickToggle(BaseModel):
     valor: bool
+
+class AbonoInput(BaseModel):
+    monto: float
+    metodo: str = "efectivo"  # efectivo | tarjeta | transferencia | deposito | otros
+    referencia: Optional[str] = ""
+    nota: Optional[str] = ""
 
 class CajaOpen(BaseModel):
     fondo_inicial: float = 0.0
@@ -1050,9 +1056,12 @@ async def cancel_sale(sale_id: str, data: CancelInput, user: dict = Depends(requ
                     "concepto": f"Cancelación {sale['folio']}", "monto": round(min(efectivo, sale["total"]), 2),
                     "referencia": sale["folio"], "usuario_id": user["id"],
                     "usuario_nombre": user["name"], "fecha": iso_now()})
-        # Revertir crédito
+        # Revertir crédito (solo el saldo pendiente, respetando abonos previos)
         if sale["condicion"] == "credito" and sale.get("cliente_id"):
-            await db.clients.update_one({"id": sale["cliente_id"]}, {"$inc": {"saldo": -sale["total"]}})
+            pendiente = round(float(sale.get("saldo", sale["total"])), 2)
+            if pendiente > 0:
+                await db.clients.update_one({"id": sale["cliente_id"]}, {"$inc": {"saldo": -pendiente}})
+            await db.sales.update_one({"id": sale_id}, {"$set": {"saldo": 0.0}})
     await db.sales.update_one({"id": sale_id}, {"$set": {
         "estado": "cancelada",
         "cancelacion": {"usuario": user["name"], "fecha": iso_now(), "motivo": data.motivo}}})
@@ -1075,6 +1084,160 @@ async def list_suspended(user: dict = Depends(get_current_user)):
 async def delete_suspended(sid: str, user: dict = Depends(get_current_user)):
     await db.suspended_sales.delete_one({"id": sid})
     return {"ok": True}
+
+# =========================================================================
+# CUENTAS POR COBRAR (CxC)
+# =========================================================================
+AGING_KEYS = ["corriente", "b1_30", "b31_60", "b61_90", "b90"]
+
+def _parse_date(s):
+    try:
+        return date.fromisoformat(str(s)[:10])
+    except Exception:
+        return None
+
+def _dias_vencido(fecha_iso, dias_credito, hoy):
+    d = _parse_date(fecha_iso)
+    if not d:
+        return 0, None
+    vence = d + timedelta(days=int(dias_credito or 0))
+    return (hoy - vence).days, vence.isoformat()
+
+def _bucket(dv):
+    if dv <= 0:
+        return "corriente"
+    if dv <= 30:
+        return "b1_30"
+    if dv <= 60:
+        return "b31_60"
+    if dv <= 90:
+        return "b61_90"
+    return "b90"
+
+@api.get("/cxc")
+async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = False,
+                   user: dict = Depends(get_current_user)):
+    hoy = now_utc().date()
+    clientes = await db.clients.find({"saldo": {"$gt": 0}}, {"_id": 0}).to_list(20000)
+    cmap = {c["id"]: c for c in clientes}
+    sales = await db.sales.find({"condicion": "credito", "estado": "confirmada", "saldo": {"$gt": 0}},
+                                {"_id": 0, "cliente_id": 1, "fecha": 1, "saldo": 1}).to_list(100000)
+    agg = {}
+    for s in sales:
+        cid = s.get("cliente_id")
+        if not cid or cid not in cmap:
+            continue
+        cli = cmap[cid]
+        dv, _ = _dias_vencido(s["fecha"], cli.get("dias_credito", 0), hoy)
+        a = agg.get(cid)
+        if not a:
+            a = {k: 0.0 for k in AGING_KEYS}
+            a.update({"vencido": 0.0, "max_dias": 0, "n": 0})
+            agg[cid] = a
+        a[_bucket(dv)] += s["saldo"]
+        a["n"] += 1
+        if dv > 0:
+            a["vencido"] += s["saldo"]
+            a["max_dias"] = max(a["max_dias"], dv)
+    rows = []
+    ql = (q or "").lower().strip()
+    for cid, cli in cmap.items():
+        a = agg.get(cid)
+        item = {
+            "cliente_id": cid, "codigo": cli.get("codigo"), "nombre": cli.get("nombre"),
+            "telefono": cli.get("telefono"), "celular": cli.get("celular"),
+            "limite_credito": round(float(cli.get("limite_credito", 0)), 2),
+            "dias_credito": cli.get("dias_credito", 0),
+            "saldo": round(float(cli.get("saldo", 0)), 2),
+            "vencido": round(a["vencido"], 2) if a else 0.0,
+            "max_dias": a["max_dias"] if a else 0,
+            "ventas_pendientes": a["n"] if a else 0,
+            "aging": {k: round(a[k], 2) for k in AGING_KEYS} if a else {k: 0.0 for k in AGING_KEYS},
+        }
+        if solo_vencidos and item["vencido"] <= 0:
+            continue
+        if ql and ql not in str(cli.get("nombre", "")).lower() and ql not in str(cli.get("codigo", "")).lower():
+            continue
+        rows.append(item)
+    rows.sort(key=lambda r: r["vencido"] * 1e9 + r["saldo"], reverse=True)
+    tot = {"cartera": round(sum(r["saldo"] for r in rows), 2),
+           "vencido": round(sum(r["vencido"] for r in rows), 2),
+           "clientes": len(rows)}
+    tot["por_vencer"] = round(tot["cartera"] - tot["vencido"], 2)
+    for k in AGING_KEYS:
+        tot[k] = round(sum(r["aging"][k] for r in rows), 2)
+    return {"totales": tot, "clientes": rows}
+
+@api.get("/cxc/{client_id}")
+async def cxc_detail(client_id: str, user: dict = Depends(get_current_user)):
+    cli = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    hoy = now_utc().date()
+    sales = await db.sales.find({"cliente_id": client_id, "condicion": "credito", "estado": "confirmada"},
+                                {"_id": 0}).sort("fecha", 1).to_list(20000)
+    ventas = []
+    for s in sales:
+        dv, vence = _dias_vencido(s["fecha"], cli.get("dias_credito", 0), hoy)
+        saldo = round(float(s.get("saldo", 0)), 2)
+        ventas.append({"id": s["id"], "folio": s["folio"], "fecha": s["fecha"], "total": s["total"],
+                       "saldo": saldo, "vence": vence, "dias_vencido": max(dv, 0),
+                       "pagada": saldo <= 0.001})
+    abonos = await db.abonos.find({"cliente_id": client_id}, {"_id": 0}).sort("fecha", -1).to_list(5000)
+    return {
+        "cliente": {"id": cli["id"], "codigo": cli.get("codigo"), "nombre": cli.get("nombre"),
+                    "telefono": cli.get("telefono"), "celular": cli.get("celular"),
+                    "limite_credito": round(float(cli.get("limite_credito", 0)), 2),
+                    "dias_credito": cli.get("dias_credito", 0),
+                    "saldo": round(float(cli.get("saldo", 0)), 2)},
+        "ventas": ventas, "abonos": abonos,
+    }
+
+@api.post("/cxc/{client_id}/abono")
+async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(require_permission("caja.entrada"))):
+    cli = await db.clients.find_one({"id": client_id})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    monto = round(float(data.monto), 2)
+    if monto <= 0:
+        raise HTTPException(400, "El monto debe ser mayor a cero")
+    saldo_cli = round(float(cli.get("saldo", 0)), 2)
+    if saldo_cli <= 0:
+        raise HTTPException(400, "El cliente no tiene saldo pendiente")
+    if monto > saldo_cli + 0.01:
+        raise HTTPException(400, f"El abono ({monto}) excede el saldo del cliente ({saldo_cli})")
+    sales = await db.sales.find({"cliente_id": client_id, "condicion": "credito", "estado": "confirmada",
+                                 "saldo": {"$gt": 0}}, {"_id": 0}).sort("fecha", 1).to_list(20000)
+    restante = monto
+    aplicaciones = []
+    for s in sales:
+        if restante <= 0.001:
+            break
+        aplica = min(restante, round(float(s.get("saldo", 0)), 2))
+        if aplica <= 0:
+            continue
+        nuevo = round(float(s["saldo"]) - aplica, 2)
+        await db.sales.update_one({"id": s["id"]}, {"$set": {"saldo": nuevo}})
+        aplicaciones.append({"sale_id": s["id"], "folio": s["folio"], "monto": round(aplica, 2)})
+        restante = round(restante - aplica, 2)
+    await db.clients.update_one({"id": client_id}, {"$inc": {"saldo": -monto}})
+    caja = await caja_abierta_de(user["id"])
+    folio = await next_counter("abono", "AB", 6)
+    doc = {"id": uid(), "folio": folio, "cliente_id": client_id, "cliente_codigo": cli.get("codigo"),
+           "cliente_nombre": cli.get("nombre"), "monto": monto, "metodo": data.metodo,
+           "referencia": data.referencia or "", "nota": data.nota or "", "fecha": iso_now(),
+           "aplicaciones": aplicaciones, "usuario_id": user["id"], "usuario_nombre": user["name"],
+           "caja_id": caja["id"] if caja else None}
+    await db.abonos.insert_one(doc)
+    if caja and data.metodo == "efectivo":
+        await db.caja_movimientos.insert_one({
+            "id": uid(), "caja_id": caja["id"], "tipo": "entrada",
+            "concepto": f"Abono {folio} · {cli.get('nombre')}", "monto": monto, "referencia": folio,
+            "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()})
+    await log_audit(user, "abono", "cliente", client_id, f"{folio} monto {monto} metodo {data.metodo}")
+    return {"ok": True, "folio": folio, "saldo_anterior": saldo_cli,
+            "saldo_actual": round(saldo_cli - monto, 2), "aplicaciones": aplicaciones,
+            "caja_afectada": bool(caja and data.metodo == "efectivo")}
 
 # =========================================================================
 # DASHBOARD
