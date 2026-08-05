@@ -8,6 +8,7 @@ import Landing from "@/pages/Landing";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Productos from "@/pages/Productos";
+import Categorias from "@/pages/Categorias";
 import Clientes from "@/pages/Clientes";
 import Caja from "@/pages/Caja";
 import POS from "@/pages/POS";
@@ -28,6 +29,7 @@ function App() {
             <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
             <Route path="/app/dashboard" element={<Dashboard />} />
             <Route path="/app/productos" element={<Productos />} />
+            <Route path="/app/categorias" element={<Categorias />} />
             <Route path="/app/clientes" element={<Clientes />} />
             <Route path="/app/caja" element={<Caja />} />
             <Route path="/app/pos" element={<POS />} />

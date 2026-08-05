@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { api, formatApiError, money } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -22,11 +23,14 @@ const estadoBadge = { activo: "bg-green-100 text-green-700", baja: "bg-slate-200
 
 export default function Productos() {
   const { can } = useAuth();
+  const location = useLocation();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("all");
   const [filtro, setFiltro] = useState("all");
+  const [categoria, setCategoria] = useState(location.state?.categoria || "all");
+  const [categorias, setCategorias] = useState([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [movProd, setMovProd] = useState(null);
@@ -48,12 +52,16 @@ export default function Productos() {
     if (q) params.q = q;
     if (estado !== "all") params.estado = estado;
     if (filtro !== "all") params.filtro = filtro;
+    if (categoria !== "all") params.categoria = categoria;
     const res = await api.get("/products", { params });
     setRows(res.data);
     setTotal(Number(res.headers["x-total-count"] ?? res.data.length));
     setLoading(false);
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [estado, filtro, page, nonce]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [estado, filtro, categoria, page, nonce]);
+  useEffect(() => {
+    api.get("/categories").then(({ data }) => setCategorias(data)).catch(() => {});
+  }, []);
   const doSearch = () => { setPage(0); setNonce((n) => n + 1); };
 
   const openMovs = async (p) => {
@@ -164,6 +172,15 @@ export default function Productos() {
             <SelectItem value="all">Todo stock</SelectItem>
             <SelectItem value="bajo_stock">Bajo stock</SelectItem>
             <SelectItem value="sin_existencia">Sin existencia</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={categoria} onValueChange={(v) => { setCategoria(v); setPage(0); }}>
+          <SelectTrigger className="w-48" data-testid="filtro-categoria"><SelectValue placeholder="Categoría" /></SelectTrigger>
+          <SelectContent className="max-h-72">
+            <SelectItem value="all">Todas las categorías</SelectItem>
+            {categorias.map((c) => (
+              <SelectItem key={c.nombre} value={c.nombre}>{c.nombre} ({c.count})</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Button variant="outline" onClick={doSearch}><Search className="w-4 h-4" /></Button>
