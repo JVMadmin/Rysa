@@ -425,13 +425,16 @@ def calc_precios(costo: float, precios: List[dict], iva_tasa: float) -> List[dic
 
 @api.get("/products")
 async def list_products(response: Response, estado: Optional[str] = None, q: Optional[str] = None,
-                        filtro: Optional[str] = None, skip: int = 0, limit: int = 100,
+                        filtro: Optional[str] = None, categoria: Optional[str] = None,
+                        skip: int = 0, limit: int = 100,
                         user: dict = Depends(get_current_user)):
     limit = max(1, min(int(limit), 500))
     skip = max(0, int(skip))
     query = {}
     if estado:
         query["estado"] = estado
+    if categoria:
+        query["categoria"] = categoria
     if q:
         rx = {"$regex": q, "$options": "i"}
         query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
@@ -520,6 +523,46 @@ async def adjust_inventory(product_id: str, data: InventoryAdjust, user: dict = 
     nueva = await registrar_movimiento(p, data.tipo, entrada, salida, user, data.documento, data.concepto)
     await log_audit(user, "ajuste_inventario", "producto", product_id, f"{data.tipo} {data.cantidad}")
     return {"existencia": nueva}
+
+# =========================================================================
+# CATEGORÍAS
+# =========================================================================
+class CategoryInput(BaseModel):
+    nombre: str
+    clave: Optional[str] = ""
+    descripcion: Optional[str] = ""
+    ficha_tecnica: Optional[str] = ""
+    imagen_url: Optional[str] = ""
+
+@api.get("/categories")
+async def list_categories(user: dict = Depends(get_current_user)):
+    counts = {}
+    async for r in db.products.aggregate([
+        {"$match": {"categoria": {"$nin": ["", None]}}},
+        {"$group": {"_id": "$categoria", "count": {"$sum": 1}}},
+    ]):
+        counts[r["_id"]] = r["count"]
+    managed = {}
+    async for c in db.categories.find({}, {"_id": 0}):
+        managed[c["nombre"]] = c
+    nombres = set(counts) | set(managed)
+    out = []
+    for n in sorted(nombres):
+        m = managed.get(n, {})
+        out.append({"nombre": n, "clave": m.get("clave", ""), "descripcion": m.get("descripcion", ""),
+                    "ficha_tecnica": m.get("ficha_tecnica", ""), "imagen_url": m.get("imagen_url", ""),
+                    "count": counts.get(n, 0)})
+    return out
+
+@api.post("/categories")
+async def upsert_category(data: CategoryInput, user: dict = Depends(require_permission("producto.editar"))):
+    if not data.nombre.strip():
+        raise HTTPException(400, "El nombre es obligatorio")
+    doc = data.model_dump()
+    doc["updated_at"] = iso_now()
+    await db.categories.update_one({"nombre": data.nombre}, {"$set": doc}, upsert=True)
+    await log_audit(user, "editar", "categoria", data.nombre, "Categoría actualizada")
+    return {"ok": True, "nombre": data.nombre}
 
 # =========================================================================
 # CLIENTES
