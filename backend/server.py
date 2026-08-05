@@ -6,6 +6,7 @@ load_dotenv(Path(__file__).parent / '.env')
 import os
 import io
 import uuid
+import re
 import logging
 from typing import List, Optional
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File
@@ -228,35 +229,84 @@ class InventoryAdjust(BaseModel):
     documento: Optional[str] = ""
 
 class ClientInput(BaseModel):
-    codigo: Optional[str] = None
-    nombre: str
+    # --- General ---
+    codigo: Optional[str] = None            # CLAVE (identificador único)
+    nombre: str                             # NOMBRE
     razon_social: Optional[str] = ""
-    rfc: Optional[str] = ""
-    telefono: Optional[str] = ""
-    whatsapp: Optional[str] = ""
-    correo: Optional[str] = ""
-    calle: Optional[str] = ""
-    numero_exterior: Optional[str] = ""
-    numero_interior: Optional[str] = ""
-    colonia: Optional[str] = ""
-    localidad: Optional[str] = ""
-    municipio: Optional[str] = ""
-    ciudad: Optional[str] = ""
-    estado_geo: Optional[str] = ""
-    pais: Optional[str] = "México"
-    cp: Optional[str] = ""
-    referencias: Optional[str] = ""
-    direccion: Optional[str] = ""
-    tipo: str = "publico"  # publico | menudeo | mayoreo | especial
-    lista_precios: int = 1
+    status: Optional[str] = ""              # STATUS legacy (1 char)
+    estado: str = "activo"                  # activo | suspendido | inactivo
+    tipo: str = "publico"                   # clasificación moderna
+    tipo_clave: Optional[str] = ""          # TIPO legacy (1 char)
+    fecha_alta: Optional[str] = ""          # FECHAALTA
+    contrasena: Optional[str] = ""          # CONTRASENA
+    # --- Contacto ---
+    representa: Optional[str] = ""          # REPRESENTA
+    tel_oficina: Optional[str] = ""         # TELOFICINA
+    tel_residencia: Optional[str] = ""      # TELRESIDEN
+    tel_fax: Optional[str] = ""             # TEL_FAX
+    telefono: Optional[str] = ""            # compat
+    celular: Optional[str] = ""             # CELULAR
+    whatsapp: Optional[str] = ""            # compat
+    correo: Optional[str] = ""              # compat (1 correo)
+    correos: Optional[str] = ""             # CORREOS (varios)
+    # --- Dirección ---
+    direccion: Optional[str] = ""           # DIRECCION
+    calle: Optional[str] = ""               # compat
+    numero_exterior: Optional[str] = ""     # NOEXTERIOR
+    numero_interior: Optional[str] = ""     # NOINTERIOR
+    colonia: Optional[str] = ""             # COLONIA
+    ciudad_edo: Optional[str] = ""          # CIUDADEDO
+    localidad: Optional[str] = ""           # LOCALIDAD
+    municipio: Optional[str] = ""           # compat
+    ciudad: Optional[str] = ""              # CIUDAD
+    estado_geo: Optional[str] = ""          # ESTADO (geográfico)
+    pais: Optional[str] = "México"          # PAIS
+    cp: Optional[str] = ""                  # CODPOSTAL
+    referencias: Optional[str] = ""         # REFERENCIA
+    id_localidad: Optional[str] = ""
+    id_colonia: Optional[str] = ""
+    id_ciudad: Optional[str] = ""
+    id_estado: Optional[str] = ""
+    id_pais: Optional[str] = ""
+    # --- Fiscales ---
+    rfc: Optional[str] = ""                 # RFC
+    reg_fiscal: Optional[str] = ""          # REGFISCAL
+    uso_cfdi: Optional[str] = ""            # USOCFDI
+    resfiscal: Optional[str] = ""           # RESFISCAL
+    nregidtrib: Optional[str] = ""          # NREGIDTRIB
+    # --- Comercial ---
+    vendedor: Optional[str] = ""            # VENDEDOR
+    almacen: Optional[str] = ""             # ALMACEN
+    precio_venta: Optional[int] = 1         # PRECIOVTA (lista de precios)
+    lista_precios: int = 1                  # compat POS
     condicion_pago: str = "contado"
-    credito_autorizado: bool = False
-    limite_credito: float = 0.0
-    estado: str = "activo"
+    # --- Crédito ---
+    credito_autorizado: bool = False        # CREDITO
+    limite_credito: float = 0.0             # LIMCREDITO
+    lim_descuento: Optional[float] = 0.0    # LIMDESCTO
+    dias_credito: Optional[int] = 0         # DIASCREDIT
+    saldo: Optional[float] = 0.0            # SALDO
+    venta_credito: Optional[float] = 0.0    # VTACREDITO
+    # --- Retenciones ---
+    ret_isr: bool = False                   # RET_ISR
+    ret_iva: bool = False                   # RET_IVA
+    ret_isr_tasa: Optional[float] = 0.0     # RET_ISRTAS
+    ret_iva_tasa: Optional[float] = 0.0     # RET_IVATAS
+    # --- Estadísticas ---
+    mensual: Optional[float] = 0.0          # MENSUAL
+    anual: Optional[float] = 0.0            # ANUAL
+    ult_fecha_compra: Optional[str] = ""    # ULTFCOMPRA
+    ult_monto_compra: Optional[float] = 0.0 # ULTCCOMPRA
+    # --- Otros ---
+    comentario: Optional[str] = ""          # COMENTARIO
+    ofertas: bool = False                   # OFERTAS
 
 class CreditInput(BaseModel):
     credito_autorizado: bool
     limite_credito: float = 0.0
+
+class QuickToggle(BaseModel):
+    valor: bool
 
 class CajaOpen(BaseModel):
     fondo_inicial: float = 0.0
@@ -567,19 +617,143 @@ async def upsert_category(data: CategoryInput, user: dict = Depends(require_perm
 # =========================================================================
 # CLIENTES
 # =========================================================================
+# Mapeo de la estructura DBF heredada -> campos internos (nombre, tipo)
+# tipo: text | num | int | bool | date
+CLIENT_IMPORT_MAP = {
+    "CLAVE": ("codigo", "text"), "NOMBRE": ("nombre", "text"),
+    "CONTRASENA": ("contrasena", "text"), "REPRESENTA": ("representa", "text"),
+    "TELOFICINA": ("tel_oficina", "text"), "TELRESIDEN": ("tel_residencia", "text"),
+    "TEL_FAX": ("tel_fax", "text"), "CELULAR": ("celular", "text"),
+    "DIRECCION": ("direccion", "text"), "NOINTERIOR": ("numero_interior", "text"),
+    "NOEXTERIOR": ("numero_exterior", "text"), "COLONIA": ("colonia", "text"),
+    "CIUDADEDO": ("ciudad_edo", "text"), "LOCALIDAD": ("localidad", "text"),
+    "REFERENCIA": ("referencias", "text"), "CIUDAD": ("ciudad", "text"),
+    "ESTADO": ("estado_geo", "text"), "PAIS": ("pais", "text"),
+    "ID_LOCALID": ("id_localidad", "text"), "ID_COLONIA": ("id_colonia", "text"),
+    "ID_CIUDAD": ("id_ciudad", "text"), "ID_ESTADO": ("id_estado", "text"),
+    "ID_PAIS": ("id_pais", "text"), "RESFISCAL": ("resfiscal", "text"),
+    "NREGIDTRIB": ("nregidtrib", "text"), "CODPOSTAL": ("cp", "text"),
+    "RFC": ("rfc", "text"), "ALMACEN": ("almacen", "text"),
+    "FECHAALTA": ("fecha_alta", "date"), "VENDEDOR": ("vendedor", "text"),
+    "PRECIOVTA": ("precio_venta", "int"), "TIPO": ("tipo_clave", "text"),
+    "SALDO": ("saldo", "num"), "MENSUAL": ("mensual", "num"), "ANUAL": ("anual", "num"),
+    "CREDITO": ("credito_autorizado", "bool"), "RET_ISR": ("ret_isr", "bool"),
+    "RET_IVA": ("ret_iva", "bool"), "RET_ISRTAS": ("ret_isr_tasa", "num"),
+    "RET_IVATAS": ("ret_iva_tasa", "num"), "LIMDESCTO": ("lim_descuento", "num"),
+    "LIMCREDITO": ("limite_credito", "num"), "DIASCREDIT": ("dias_credito", "int"),
+    "VTACREDITO": ("venta_credito", "num"), "ULTFCOMPRA": ("ult_fecha_compra", "date"),
+    "ULTCCOMPRA": ("ult_monto_compra", "num"), "COMENTARIO": ("comentario", "text"),
+    "USOCFDI": ("uso_cfdi", "text"), "REGFISCAL": ("reg_fiscal", "text"),
+    "STATUS": ("status", "text"), "OFERTAS": ("ofertas", "bool"), "CORREOS": ("correos", "text"),
+}
+CLIENT_LEGACY_ORDER = list(CLIENT_IMPORT_MAP.keys())
+RFC_RE = re.compile(r"^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+def _to_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().upper()
+    return s in ("1", "TRUE", "T", ".T.", "SI", "SÍ", "S", "X", "Y", "YES", "VERDADERO")
+
+def _to_num(v) -> float:
+    if v is None or v == "":
+        return 0.0
+    try:
+        return float(str(v).replace(",", "").replace("$", "").strip())
+    except Exception:
+        return 0.0
+
+def _to_date(v) -> str:
+    s = str(v).strip()
+    if not s or s.lower() in ("nan", "nat", "none"):
+        return ""
+    return s[:10] if len(s) >= 10 and s[4] in "-/" else s
+
+def legacy_status_to_estado(s: str) -> str:
+    c = (s or "").strip().upper()[:1]
+    if c == "S":
+        return "suspendido"
+    if c in ("B", "I", "C"):
+        return "inactivo"
+    return "activo"
+
+def normalize_client_doc(doc: dict) -> dict:
+    """Sincroniza campos derivados/compat sin romper POS."""
+    doc["lista_precios"] = int(doc.get("precio_venta") or doc.get("lista_precios") or 1)
+    if not doc.get("telefono"):
+        doc["telefono"] = doc.get("tel_oficina") or doc.get("tel_residencia") or ""
+    if not doc.get("correo") and doc.get("correos"):
+        doc["correo"] = str(doc["correos"]).split(",")[0].split(";")[0].strip()
+    return doc
+
+def parse_client_row(row: dict):
+    """Convierte una fila (headers legacy en mayúsculas) a doc interno + errores."""
+    data, errores = {}, []
+    for legacy, (field, kind) in CLIENT_IMPORT_MAP.items():
+        if legacy not in row:
+            continue
+        raw = row.get(legacy, "")
+        if kind == "bool":
+            data[field] = _to_bool(raw)
+        elif kind == "num":
+            data[field] = round(_to_num(raw), 4)
+        elif kind == "int":
+            data[field] = int(_to_num(raw))
+        elif kind == "date":
+            data[field] = _to_date(raw)
+        else:
+            data[field] = str(raw).strip()
+    if data.get("status"):
+        data["estado"] = legacy_status_to_estado(data["status"])
+    clave = data.get("codigo", "").strip()
+    if not clave:
+        errores.append({"campo": "CLAVE", "valor": "", "motivo": "CLAVE es obligatoria"})
+    if not data.get("nombre", "").strip():
+        errores.append({"campo": "NOMBRE", "valor": "", "motivo": "NOMBRE es obligatorio"})
+    rfc = data.get("rfc", "").strip().upper()
+    if rfc and not RFC_RE.match(rfc):
+        errores.append({"campo": "RFC", "valor": rfc, "motivo": "RFC con formato inválido"})
+    correo = data.get("correo") or (str(data.get("correos", "")).split(",")[0].strip())
+    if correo and not EMAIL_RE.match(correo):
+        errores.append({"campo": "CORREOS", "valor": correo, "motivo": "Correo con formato inválido"})
+    for f in ("limite_credito", "saldo", "dias_credito"):
+        if data.get(f, 0) < 0:
+            errores.append({"campo": f, "valor": data.get(f), "motivo": "No puede ser negativo"})
+    return data, errores
+
+
 @api.get("/clients")
 async def list_clients(q: Optional[str] = None, estado: Optional[str] = None,
-                       tipo: Optional[str] = None, user: dict = Depends(get_current_user)):
+                       tipo: Optional[str] = None, filtro: Optional[str] = None,
+                       user: dict = Depends(get_current_user)):
     query = {}
     if estado:
         query["estado"] = estado
     if tipo:
         query["tipo"] = tipo
+    # Filtros rápidos
+    if filtro == "con_credito":
+        query["credito_autorizado"] = True
+    elif filtro == "sin_credito":
+        query["credito_autorizado"] = {"$ne": True}
+    elif filtro == "con_saldo":
+        query["saldo"] = {"$gt": 0}
+    elif filtro == "sin_saldo":
+        query["$or"] = [{"saldo": {"$lte": 0}}, {"saldo": {"$exists": False}}]
+    elif filtro in ("activo", "suspendido", "inactivo"):
+        query["estado"] = filtro
+    elif filtro == "con_ofertas":
+        query["ofertas"] = True
+    elif filtro == "sin_ofertas":
+        query["ofertas"] = {"$ne": True}
     if q:
         rx = {"$regex": q, "$options": "i"}
-        query["$or"] = [{"codigo": rx}, {"nombre": rx}, {"razon_social": rx},
-                        {"rfc": rx}, {"telefono": rx}]
-    clients = await db.clients.find(query, {"_id": 0}).sort("nombre", 1).to_list(2000)
+        query["$and"] = query.get("$and", []) + [{"$or": [
+            {"codigo": rx}, {"nombre": rx}, {"razon_social": rx}, {"rfc": rx},
+            {"representa": rx}, {"telefono": rx}, {"tel_oficina": rx}, {"celular": rx},
+            {"correo": rx}, {"correos": rx}, {"ciudad": rx}, {"estado_geo": rx}]}]
+    clients = await db.clients.find(query, {"_id": 0}).sort("nombre", 1).to_list(5000)
     now = now_utc()
     mes = now.strftime("%Y-%m")
     anio = str(now.year)
@@ -603,10 +777,12 @@ async def list_clients(q: Optional[str] = None, estado: Optional[str] = None,
 @api.post("/clients")
 async def create_client(data: ClientInput, user: dict = Depends(require_permission("cliente.crear"))):
     codigo = (data.codigo or "").strip() or await next_counter("cliente", "C", 5)
-    doc = data.model_dump()
+    if await db.clients.find_one({"codigo": codigo}):
+        raise HTTPException(400, f"La CLAVE '{codigo}' ya existe")
+    doc = normalize_client_doc(data.model_dump())
     doc["codigo"] = codigo
     doc["id"] = uid()
-    doc["saldo"] = 0.0
+    doc["saldo"] = float(data.saldo or 0.0)
     doc["created_at"] = iso_now()
     await db.clients.insert_one(doc)
     await log_audit(user, "crear", "cliente", doc["id"], doc["nombre"])
@@ -617,8 +793,9 @@ async def update_client(client_id: str, data: ClientInput, user: dict = Depends(
     existing = await db.clients.find_one({"id": client_id})
     if not existing:
         raise HTTPException(404, "Cliente no encontrado")
-    doc = data.model_dump()
+    doc = normalize_client_doc(data.model_dump())
     doc["codigo"] = existing["codigo"]
+    doc["saldo"] = existing.get("saldo", 0.0)  # saldo lo gobiernan las ventas, no la edición
     await db.clients.update_one({"id": client_id}, {"$set": doc})
     await log_audit(user, "editar", "cliente", client_id)
     return await db.clients.find_one({"id": client_id}, {"_id": 0})
@@ -626,6 +803,16 @@ async def update_client(client_id: str, data: ClientInput, user: dict = Depends(
 @api.patch("/clients/{client_id}/estado")
 async def client_estado(client_id: str, estado: str, user: dict = Depends(require_permission("cliente.editar"))):
     await db.clients.update_one({"id": client_id}, {"$set": {"estado": estado}})
+    await log_audit(user, "cambio_estado", "cliente", client_id, f"estado={estado}")
+    return await db.clients.find_one({"id": client_id}, {"_id": 0})
+
+@api.patch("/clients/{client_id}/credito-toggle")
+async def toggle_credito(client_id: str, data: QuickToggle, user: dict = Depends(require_permission("credito.autorizar"))):
+    c = await db.clients.find_one({"id": client_id})
+    if not c:
+        raise HTTPException(404, "Cliente no encontrado")
+    await db.clients.update_one({"id": client_id}, {"$set": {"credito_autorizado": data.valor}})
+    await log_audit(user, "editar", "cliente", client_id, f"crédito {'habilitado' if data.valor else 'deshabilitado'}")
     return await db.clients.find_one({"id": client_id}, {"_id": 0})
 
 @api.patch("/clients/{client_id}/credito")
@@ -1098,37 +1285,109 @@ async def import_confirm(payload: dict, user: dict = Depends(require_permission(
 
 @api.get("/clients/export/excel")
 async def export_clients(q: Optional[str] = None, estado: Optional[str] = None, tipo: Optional[str] = None,
-                         user: dict = Depends(require_permission("exportar"))):
-    clients = await list_clients(q=q, estado=estado, tipo=tipo, user=user)
-    rows = [{c: cl.get(c) for c in CLIENT_COLS} | {"saldo": cl.get("saldo", 0)} for cl in clients]
-    data = df_to_excel_bytes(pd.DataFrame(rows or [{c: None for c in CLIENT_COLS}]))
+                         filtro: Optional[str] = None, user: dict = Depends(require_permission("exportar"))):
+    clients = await list_clients(q=q, estado=estado, tipo=tipo, filtro=filtro, user=user)
+    rows = []
+    for cl in clients:
+        row = {}
+        for legacy, (field, kind) in CLIENT_IMPORT_MAP.items():
+            v = cl.get(field, "")
+            if kind == "bool":
+                v = ".T." if v else ".F."
+            row[legacy] = v
+        rows.append(row)
+    df = pd.DataFrame(rows or [{c: None for c in CLIENT_LEGACY_ORDER}], columns=CLIENT_LEGACY_ORDER)
+    data = df_to_excel_bytes(df)
     return StreamingResponse(io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=clientes.xlsx"})
 
-@api.post("/clients/import/confirm")
-async def import_clients(file: UploadFile = File(...), user: dict = Depends(require_permission("importar"))):
+@api.get("/clients/plantilla/excel")
+async def plantilla_clients(user: dict = Depends(get_current_user)):
+    df = pd.DataFrame(columns=CLIENT_LEGACY_ORDER)
+    data = df_to_excel_bytes(df)
+    return StreamingResponse(io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=plantilla_clientes.xlsx"})
+
+@api.post("/clients/import/preview")
+async def import_clients_preview(file: UploadFile = File(...), user: dict = Depends(require_permission("importar"))):
     content = await file.read()
     df = read_import_table(content, file.filename or "").fillna("")
-    creados = 0
-    for r in df.to_dict("records"):
-        nombre = str(r.get("nombre", "")).strip()
-        if not nombre:
+    df.columns = [str(c).strip().upper() for c in df.columns]
+    rows = df.to_dict("records")
+    if not rows:
+        raise HTTPException(400, "El archivo no contiene registros.")
+    if not any(c == "CLAVE" for c in df.columns) and not any(c == "NOMBRE" for c in df.columns):
+        raise HTTPException(400, "El archivo no tiene columnas CLAVE/NOMBRE. Descarga la plantilla de clientes.")
+    all_codes = [str(r.get("CLAVE", "")).strip() for r in rows if str(r.get("CLAVE", "")).strip()]
+    existentes_db = set()
+    if all_codes:
+        async for c in db.clients.find({"codigo": {"$in": all_codes}}, {"_id": 0, "codigo": 1}):
+            existentes_db.add(c["codigo"])
+    preview, vistos = [], set()
+    nuevos = existentes = con_errores = 0
+    for i, r in enumerate(rows):
+        data, errores = parse_client_row(r)
+        clave = data.get("codigo", "")
+        if clave and clave in vistos:
+            errores.append({"campo": "CLAVE", "valor": clave, "motivo": "CLAVE duplicada en el archivo"})
+        vistos.add(clave)
+        existe = clave in existentes_db
+        if errores:
+            con_errores += 1
+        elif existe:
+            existentes += 1
+        else:
+            nuevos += 1
+        preview.append({"fila": i + 2, "clave": clave, "nombre": data.get("nombre", ""),
+                        "accion": "actualizar" if existe else "crear", "existe": existe,
+                        "errores": errores, "data": data})
+    return {"total": len(preview), "nuevos": nuevos, "existentes": existentes,
+            "con_errores": con_errores, "columnas": CLIENT_LEGACY_ORDER, "preview": preview}
+
+@api.post("/clients/import/confirm")
+async def import_clients(payload: dict, user: dict = Depends(require_permission("importar"))):
+    rows = payload.get("rows", [])
+    mode = payload.get("mode", "ambos")  # nuevos | actualizar | ambos
+    creados = actualizados = omitidos = 0
+    for r in rows:
+        if r.get("errores"):
+            omitidos += 1
             continue
-        codigo = str(r.get("codigo", "")).strip() or await next_counter("cliente", "C", 5)
-        if await db.clients.find_one({"codigo": codigo}):
+        data = r.get("data", {})
+        clave = str(data.get("codigo", "")).strip()
+        if not clave:
+            omitidos += 1
             continue
-        doc = {"id": uid(), "codigo": codigo, "nombre": nombre,
-               "razon_social": str(r.get("razon_social", "")), "rfc": str(r.get("rfc", "")),
-               "telefono": str(r.get("telefono", "")), "whatsapp": str(r.get("whatsapp", "")),
-               "correo": str(r.get("correo", "")), "direccion": str(r.get("direccion", "")),
-               "ciudad": str(r.get("ciudad", "")), "estado_geo": str(r.get("estado_geo", "")),
-               "cp": str(r.get("cp", "")), "tipo": str(r.get("tipo", "") or "publico"),
-               "lista_precios": 1, "condicion_pago": "contado", "limite_credito": 0,
-               "saldo": 0, "estado": "activo", "created_at": iso_now()}
-        await db.clients.insert_one(doc)
-        creados += 1
-    return {"creados": creados}
+        existing = await db.clients.find_one({"codigo": clave})
+        if existing:
+            if mode == "nuevos":
+                omitidos += 1
+                continue
+            doc = normalize_client_doc(dict(data))
+            doc.pop("id", None)
+            doc.pop("saldo", None)  # saldo lo gobiernan las ventas
+            doc["codigo"] = clave
+            doc["updated_at"] = iso_now()
+            await db.clients.update_one({"codigo": clave}, {"$set": doc})
+            actualizados += 1
+        else:
+            if mode == "actualizar":
+                omitidos += 1
+                continue
+            doc = normalize_client_doc(dict(data))
+            doc["id"] = uid()
+            doc["codigo"] = clave
+            doc.setdefault("tipo", "publico")
+            doc.setdefault("estado", "activo")
+            doc["saldo"] = float(data.get("saldo") or 0.0)
+            doc["created_at"] = iso_now()
+            await db.clients.insert_one(doc)
+            creados += 1
+    if creados or actualizados:
+        await log_audit(user, "importar", "cliente", "", f"{creados} creados, {actualizados} actualizados, {omitidos} omitidos")
+    return {"creados": creados, "actualizados": actualizados, "omitidos": omitidos}
 
 # =========================================================================
 # AUDITORÍA
@@ -1172,7 +1431,13 @@ async def startup():
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
     await db.products.create_index("codigo")
-    await db.clients.create_index("codigo")
+    try:
+        idx = await db.clients.index_information()
+        if "codigo_1" in idx and not idx["codigo_1"].get("unique"):
+            await db.clients.drop_index("codigo_1")
+        await db.clients.create_index("codigo", unique=True)
+    except Exception as e:
+        logger.warning("Índice único clients.codigo: %s", str(e)[:120])
     # Seed admin
     admin_email = os.environ["ADMIN_EMAIL"].strip().lower()
     admin_pw = os.environ["ADMIN_PASSWORD"]

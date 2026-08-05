@@ -32,6 +32,18 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - Filtro rápido por categoría en Productos (selector desplegable) + navegación desde tarjeta "Ver" que aplica el filtro automáticamente vía `location.state`
 - Backend: `GET/POST /api/categories` agrupa por `clasificacion`; `GET /api/products?categoria=` filtra por `clasificacion`. Verificado con curl y capturas (74 categorías, filtro BOLSA NATURAL = 58 productos)
 
+## Implementado (2026-08-05) — Clientes: estructura completa (DBF heredada, 52 campos)
+- `ClientInput` ampliado a los 52 campos legacy (CLAVE→codigo, NOMBRE, CREDITO→credito_autorizado, LIMCREDITO→limite_credito, SALDO, STATUS→estado, PRECIOVTA→precio_venta/lista_precios sync, RET_ISR/IVA, RET_*TAS, DIASCREDIT, MENSUAL/ANUAL, ULTF/CCOMPRA, USOCFDI, REGFISCAL, OFERTAS, CORREOS, etc.) — como columnas reales, no JSON.
+- `CLIENT_IMPORT_MAP` + `parse_client_row` con conversión de tipos DBF (C/N/D/L/M) y validaciones (CLAVE/NOMBRE obligatorios, RFC y correo válidos, no negativos). `normalize_client_doc` sincroniza campos compat sin romper POS.
+- Índice ÚNICO en `clients.codigo` (CLAVE). Identificación por CLAVE en import.
+- Importación segura: `POST /clients/import/preview` (nuevos/existentes/a actualizar/errores + descarga de reporte de errores) y `POST /clients/import/confirm` (modos nuevos|actualizar|ambos). XLSX/XLS/CSV, detección automática de encabezados. En update NO se sobrescribe `saldo` (lo gobiernan las ventas).
+- Toggles rápidos en el listado: `PATCH /clients/{id}/credito-toggle` y `PATCH /clients/{id}/estado`. Guardado automático con toast, sin recargar.
+- Ficha con 10 pestañas (General, Contacto, Dirección, Fiscales, Comercial, Crédito, Retenciones, Estadísticas, Comentarios, Configuración).
+- Listado con columnas: Clave, Nombre, RFC, Ciudad, Teléfono, Celular, Vendedor, P.Vta, Saldo, Límite, Crédito (switch + indicador financiero 🟢🟡🔴⚫), Estado (selector rápido), Alta. Filtros: Todos/Con-Sin crédito/Con-Sin saldo/Activos/Suspendidos/Inactivos/Con-Sin ofertas. Búsqueda ampliada (clave, nombre, RFC, representante, tel/celular, correo, ciudad, estado).
+- POS respeta crédito: venta a crédito a cliente sin `credito_autorizado` → 400 "El cliente no tiene crédito autorizado" (verificado). Plantilla legacy descargable.
+- Verificado con curl (crear, toggle, estado, preview con 2 errores detectados, confirm crear+actualizar por CLAVE, tipos convertidos, POS bloqueo) y capturas. Clientes existentes intactos.
+
+
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones
 - P2: Facturación electrónica, Multi-almacén/sucursales, Catálogo online/e-commerce, Pedidos WhatsApp, App móvil, reportes avanzados, recuperación de contraseña por email, código de barras/escáner
