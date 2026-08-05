@@ -26,6 +26,12 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - Import/Export Excel de productos (plantilla, preview+validación, confirm) y clientes
 - Auditoría de acciones críticas
 
+## Implementado (2026-08-05) — Módulo Categorías
+- Página `Categorias.jsx` conectada a rutas (`/app/categorias`) y menú lateral (ícono Tags)
+- 74 categorías reales derivadas del campo **CLASIFICACION** de los productos (decisión del usuario), con conteo por categoría, imagen editable (URL), descripción y ficha técnica (colección `categories` para metadata)
+- Filtro rápido por categoría en Productos (selector desplegable) + navegación desde tarjeta "Ver" que aplica el filtro automáticamente vía `location.state`
+- Backend: `GET/POST /api/categories` agrupa por `clasificacion`; `GET /api/products?categoria=` filtra por `clasificacion`. Verificado con curl y capturas (74 categorías, filtro BOLSA NATURAL = 58 productos)
+
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones
 - P2: Facturación electrónica, Multi-almacén/sucursales, Catálogo online/e-commerce, Pedidos WhatsApp, App móvil, reportes avanzados, recuperación de contraseña por email, código de barras/escáner

@@ -434,7 +434,7 @@ async def list_products(response: Response, estado: Optional[str] = None, q: Opt
     if estado:
         query["estado"] = estado
     if categoria:
-        query["categoria"] = categoria
+        query["clasificacion"] = categoria
     if q:
         rx = {"$regex": q, "$options": "i"}
         query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
@@ -538,8 +538,8 @@ class CategoryInput(BaseModel):
 async def list_categories(user: dict = Depends(get_current_user)):
     counts = {}
     async for r in db.products.aggregate([
-        {"$match": {"categoria": {"$nin": ["", None]}}},
-        {"$group": {"_id": "$categoria", "count": {"$sum": 1}}},
+        {"$match": {"clasificacion": {"$nin": ["", None]}}},
+        {"$group": {"_id": "$clasificacion", "count": {"$sum": 1}}},
     ]):
         counts[r["_id"]] = r["count"]
     managed = {}
