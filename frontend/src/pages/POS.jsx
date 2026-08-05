@@ -47,6 +47,17 @@ export default function POS() {
   const pcRef = useRef();
   const qRef = useRef("");
   const condicion = formaPago === "credito" ? "credito" : "contado";
+  const clienteSel = useMemo(() => clients.find((c) => c.id === clienteId) || null, [clients, clienteId]);
+  const credInfo = useMemo(() => {
+    if (!clienteSel || clienteSel.codigo === "PUBLICO") return null;
+    const lim = Number(clienteSel.limite_credito || 0), sal = Number(clienteSel.saldo || 0);
+    const disp = Math.round((lim - sal) * 100) / 100;
+    if (!clienteSel.credito_autorizado) return { dot: "bg-slate-800", label: "Sin crédito", lim, sal, disp, ok: false };
+    if (clienteSel.estado === "suspendido" || (lim > 0 && sal >= lim)) return { dot: "bg-red-500", label: "Crédito suspendido / al límite", lim, sal, disp, ok: true };
+    if (sal > 0) return { dot: "bg-amber-500", label: "Crédito activo con saldo pendiente", lim, sal, disp, ok: true };
+    return { dot: "bg-green-500", label: "Crédito activo (disponible)", lim, sal, disp, ok: true };
+  }, [clienteSel]);
+  const creditoBloqueado = condicion === "credito" && !!clienteSel && !clienteSel.credito_autorizado && clienteSel.codigo !== "PUBLICO";
 
   useEffect(() => {
     api.get("/clients", { params: { estado: "activo" } }).then((r) => {
@@ -256,6 +267,20 @@ export default function POS() {
               <SelectContent>{listaNames.map((n, i) => <SelectItem key={i} value={String(i + 1)}>{n}</SelectItem>)}</SelectContent>
             </Select>
           </div>
+          {credInfo && (
+            <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2" data-testid="pos-credito-indicador">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-2 font-semibold text-slate-700">
+                  <span className={`w-2.5 h-2.5 rounded-full ${credInfo.dot}`} data-testid="pos-credito-dot" /> {credInfo.label}
+                </span>
+                <span className="text-slate-400">Límite {money(credInfo.lim)}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs mt-1">
+                <span className="text-slate-500">Saldo: <b className={credInfo.sal > 0 ? "text-red-600" : "text-slate-700"}>{money(credInfo.sal)}</b></span>
+                <span className="text-slate-500">Disponible: <b className={credInfo.disp <= 0 ? "text-red-600" : "text-green-700"}>{money(credInfo.disp)}</b></span>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
@@ -304,9 +329,14 @@ export default function POS() {
             <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>
             <div className="flex justify-between font-display text-2xl font-black pt-1"><span>Total</span><span data-testid="pos-total">{money(totals.total)}</span></div>
           </div>
+          {creditoBloqueado && (
+            <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2" data-testid="pos-credito-bloqueo">
+              <CreditCard className="w-4 h-4" /> Este cliente no tiene crédito habilitado. Usa contado o habilita su crédito en Clientes.
+            </div>
+          )}
           <div className="flex gap-2">
             <Button variant="outline" className="h-12" onClick={suspender} data-testid="pos-suspend"><PauseCircle className="w-5 h-5" /></Button>
-            <Button className="flex-1 h-12 bg-[#FF5A00] hover:bg-[#E04F00] text-base font-bold" onClick={openPay} data-testid="pos-cobrar">
+            <Button className="flex-1 h-12 bg-[#FF5A00] hover:bg-[#E04F00] text-base font-bold" onClick={openPay} disabled={creditoBloqueado} data-testid="pos-cobrar">
               {tipoVenta === "cotizacion" ? <><FileText className="w-5 h-5 mr-2" /> Guardar cotización</> : <>Cobrar · {money(totals.total)}</>}
             </Button>
           </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { api, formatApiError, money } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Plus, Search, Download, Upload, Pencil, Loader2, Users, FileDown, CheckCircle2, AlertTriangle, RefreshCw, X } from "lucide-react";
+import { Plus, Search, Download, Upload, Pencil, Loader2, Users, FileDown, CheckCircle2, AlertTriangle, RefreshCw, X, ArrowUp, ArrowDown, ArrowUpDown, EyeOff, Eye, ChevronLeft, ChevronRight } from "lucide-react";
 
 const blank = () => ({
   codigo: "", nombre: "", razon_social: "", status: "", estado: "activo", tipo: "publico",
@@ -45,6 +45,25 @@ const FILTROS = [
   ["suspendido", "Suspendidos"], ["inactivo", "Inactivos"], ["con_ofertas", "Con ofertas"], ["sin_ofertas", "Sin ofertas"],
 ];
 
+// Configuración de columnas de la tabla (para orden y ocultar vacías)
+const COLS = [
+  { key: "codigo", label: "Clave", always: true },
+  { key: "nombre", label: "Nombre", always: true },
+  { key: "rfc", label: "RFC" },
+  { key: "ciudad", label: "Ciudad" },
+  { key: "telefono", label: "Teléfono" },
+  { key: "celular", label: "Celular" },
+  { key: "vendedor", label: "Vend." },
+  { key: "precio_venta", label: "P.Vta", num: true, center: true },
+  { key: "saldo", label: "Saldo", num: true, right: true, money: true },
+  { key: "limite_credito", label: "Límite", num: true, right: true, money: true },
+  { key: "credito_autorizado", label: "Crédito", center: true, special: "credito" },
+  { key: "estado", label: "Estado", special: "estado" },
+  { key: "fecha_alta", label: "Alta" },
+];
+const colVal = (c, key) => (key === "precio_venta" ? (c.precio_venta || c.lista_precios || 1) : c[key]);
+const isEmptyVal = (v) => v === undefined || v === null || v === "" || v === 0 || v === false;
+
 export default function Clientes() {
   const { can } = useAuth();
   const [rows, setRows] = useState([]);
@@ -61,6 +80,11 @@ export default function Clientes() {
   const [preview, setPreview] = useState(null);
   const [impMode, setImpMode] = useState("ambos");
   const [importing, setImporting] = useState(false);
+  // Navegación / orden / columnas
+  const [sort, setSort] = useState({ key: "nombre", dir: "asc" });
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+  const [hideEmpty, setHideEmpty] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -158,6 +182,28 @@ export default function Clientes() {
   };
 
   // Helpers de formulario
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+  const visibleCols = useMemo(() => {
+    if (!hideEmpty) return COLS;
+    return COLS.filter((c) => c.always || c.special || rows.some((r) => !isEmptyVal(colVal(r, c.key))));
+  }, [hideEmpty, rows]);
+  const sorted = useMemo(() => {
+    const arr = [...rows];
+    const col = COLS.find((c) => c.key === sort.key) || {};
+    arr.sort((a, b) => {
+      let x = colVal(a, sort.key), y = colVal(b, sort.key);
+      if (col.num) { x = Number(x || 0); y = Number(y || 0); return sort.dir === "asc" ? x - y : y - x; }
+      if (sort.key === "credito_autorizado") { x = a.credito_autorizado ? 1 : 0; y = b.credito_autorizado ? 1 : 0; return sort.dir === "asc" ? x - y : y - x; }
+      const r = String(x || "").localeCompare(String(y || ""), "es", { numeric: true });
+      return sort.dir === "asc" ? r : -r;
+    });
+    return arr;
+  }, [rows, sort]);
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const pageRows = useMemo(() => sorted.slice(page * pageSize, page * pageSize + pageSize), [sorted, page, pageSize]);
+  useEffect(() => { setPage(0); }, [filtro, pageSize, rows.length]);
+
+
   const I = (label, k, type = "text", cls = "") => (
     <div className={cls}><Label className="text-xs uppercase tracking-wider text-slate-500">{label}</Label>
       <Input type={type} value={f[k] ?? ""} onChange={(e) => set(k, e.target.value)} className="mt-1" data-testid={`cli-${k}`} /></div>
@@ -190,57 +236,75 @@ export default function Clientes() {
             onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} className="pl-9" data-testid="buscar-cliente" />
         </div>
         <Select value={filtro} onValueChange={setFiltro}>
-          <SelectTrigger className="w-48" data-testid="filtro-clientes"><SelectValue placeholder="Filtro" /></SelectTrigger>
+          <SelectTrigger className="w-44" data-testid="filtro-clientes"><SelectValue placeholder="Filtro" /></SelectTrigger>
           <SelectContent>{FILTROS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
         </Select>
-        <Button variant="outline" onClick={load}><Search className="w-4 h-4" /></Button>
+        <Button variant="outline" onClick={load} data-testid="cli-buscar"><Search className="w-4 h-4" /></Button>
+        <Button variant={hideEmpty ? "default" : "outline"} onClick={() => setHideEmpty((v) => !v)}
+          className={hideEmpty ? "bg-[#0055A4] hover:bg-[#004385]" : ""} data-testid="cli-hide-empty" title="Ocultar columnas sin datos">
+          {hideEmpty ? <Eye className="w-4 h-4 mr-1" /> : <EyeOff className="w-4 h-4 mr-1" />} Columnas vacías
+        </Button>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
         <table className="w-full text-sm whitespace-nowrap">
-          <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-            <th className="p-3">Clave</th><th className="p-3">Nombre</th><th className="p-3">RFC</th><th className="p-3">Ciudad</th>
-            <th className="p-3">Teléfono</th><th className="p-3">Celular</th><th className="p-3">Vend.</th><th className="p-3 text-center">P.Vta</th>
-            <th className="p-3 text-right">Saldo</th><th className="p-3 text-right">Límite</th><th className="p-3 text-center">Crédito</th>
-            <th className="p-3">Estado</th><th className="p-3">Alta</th><th className="p-3"></th>
+          <thead className="bg-slate-50"><tr className="text-xs uppercase tracking-wider text-slate-500">
+            {visibleCols.map((col) => (
+              <th key={col.key} onClick={() => toggleSort(col.key)} data-testid={`sort-${col.key}`}
+                className={`p-3 cursor-pointer select-none hover:text-[#0055A4] ${col.right ? "text-right" : col.center ? "text-center" : "text-left"}`}>
+                <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
+                  {col.label}
+                  {sort.key === col.key
+                    ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
+                    : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                </span>
+              </th>
+            ))}
+            <th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={14} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={14} className="p-10 text-center text-slate-400"><Users className="w-8 h-8 mx-auto mb-2" />Sin clientes.</td></tr>}
-            {!loading && rows.map((c) => {
+            {loading && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
+            {!loading && pageRows.length === 0 && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center text-slate-400"><Users className="w-8 h-8 mx-auto mb-2" />Sin clientes.</td></tr>}
+            {!loading && pageRows.map((c) => {
               const cs = creditStatus(c);
               return (
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cli-row-${c.codigo}`}>
-                  <td className="p-3 font-medium text-[#0055A4]">{c.codigo}</td>
-                  <td className="p-3 max-w-[220px] truncate" title={c.nombre}>{c.nombre}</td>
-                  <td className="p-3 text-slate-500">{c.rfc}</td>
-                  <td className="p-3 text-slate-500">{c.ciudad}</td>
-                  <td className="p-3 text-slate-500">{c.telefono}</td>
-                  <td className="p-3 text-slate-500">{c.celular}</td>
-                  <td className="p-3 text-slate-500">{c.vendedor}</td>
-                  <td className="p-3 text-center">{c.precio_venta || c.lista_precios || 1}</td>
-                  <td className={`p-3 text-right font-semibold ${c.saldo > 0 ? "text-red-600" : ""}`}>{money(c.saldo)}</td>
-                  <td className="p-3 text-right">{money(c.limite_credito)}</td>
-                  <td className="p-3">
-                    <div className="flex items-center justify-center gap-2">
-                      <span className={`w-2.5 h-2.5 rounded-full ${cs.dot}`} title={cs.label} data-testid={`cli-credito-dot-${c.codigo}`} />
-                      <Switch checked={!!c.credito_autorizado} disabled={!can("credito.autorizar")}
-                        onCheckedChange={(v) => toggleCredito(c, v)} data-testid={`cli-credito-switch-${c.codigo}`} />
-                    </div>
-                  </td>
-                  <td className="p-3">
-                    {can("cliente.editar") ? (
-                      <Select value={c.estado || "activo"} onValueChange={(v) => changeEstado(c, v)}>
-                        <SelectTrigger className="h-8 w-32" data-testid={`cli-estado-${c.codigo}`}><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="activo">Activo</SelectItem>
-                          <SelectItem value="suspendido">Suspendido</SelectItem>
-                          <SelectItem value="inactivo">Inactivo</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    ) : <Badge className={estadoBadge[c.estado]}>{c.estado}</Badge>}
-                  </td>
-                  <td className="p-3 text-slate-500">{c.fecha_alta}</td>
+                  {visibleCols.map((col) => {
+                    if (col.special === "credito") return (
+                      <td key={col.key} className="p-3">
+                        <div className="flex items-center justify-center gap-2">
+                          <span className={`w-2.5 h-2.5 rounded-full ${cs.dot}`} title={cs.label} data-testid={`cli-credito-dot-${c.codigo}`} />
+                          <Switch checked={!!c.credito_autorizado} disabled={!can("credito.autorizar")}
+                            onCheckedChange={(v) => toggleCredito(c, v)} data-testid={`cli-credito-switch-${c.codigo}`} />
+                        </div>
+                      </td>
+                    );
+                    if (col.special === "estado") return (
+                      <td key={col.key} className="p-3">
+                        {can("cliente.editar") ? (
+                          <Select value={c.estado || "activo"} onValueChange={(v) => changeEstado(c, v)}>
+                            <SelectTrigger className="h-8 w-32" data-testid={`cli-estado-${c.codigo}`}><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="activo">Activo</SelectItem>
+                              <SelectItem value="suspendido">Suspendido</SelectItem>
+                              <SelectItem value="inactivo">Inactivo</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : <Badge className={estadoBadge[c.estado]}>{c.estado}</Badge>}
+                      </td>
+                    );
+                    const v = colVal(c, col.key);
+                    const cls = col.key === "codigo" ? "font-medium text-[#0055A4]"
+                      : col.key === "nombre" ? "max-w-[220px] truncate"
+                      : col.key === "saldo" ? `font-semibold ${c.saldo > 0 ? "text-red-600" : ""}`
+                      : (col.money || col.center) ? "" : "text-slate-500";
+                    return (
+                      <td key={col.key} className={`p-3 ${col.right ? "text-right" : col.center ? "text-center" : ""} ${cls}`}
+                        title={col.key === "nombre" ? c.nombre : undefined}>
+                        {col.money ? money(v) : v}
+                      </td>
+                    );
+                  })}
                   <td className="p-3 text-right">
                     {can("cliente.editar") && <Button size="icon" variant="ghost" onClick={() => openEdit(c)} data-testid={`edit-cli-${c.codigo}`}><Pencil className="w-4 h-4" /></Button>}
                   </td>
@@ -250,6 +314,28 @@ export default function Clientes() {
           </tbody>
         </table>
       </div>
+
+      {/* Barra de navegación / paginación */}
+      {!loading && sorted.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 text-slate-500">
+            <span data-testid="cli-count">{sorted.length} clientes</span>
+            <span className="text-slate-300">·</span>
+            <span>Mostrar</span>
+            <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+              <SelectTrigger className="h-8 w-20" data-testid="cli-page-size"><SelectValue /></SelectTrigger>
+              <SelectContent>{[25, 50, 100, 200].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage(0)} data-testid="cli-first-page">«</Button>
+            <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} data-testid="cli-prev-page"><ChevronLeft className="w-4 h-4" /></Button>
+            <span className="text-slate-500 px-2" data-testid="cli-page-info">Página {page + 1} de {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} data-testid="cli-next-page"><ChevronRight className="w-4 h-4" /></Button>
+            <Button variant="outline" size="sm" disabled={page + 1 >= totalPages} onClick={() => setPage(totalPages - 1)} data-testid="cli-last-page">»</Button>
+          </div>
+        </div>
+      )}
 
       {/* Formulario cliente con pestañas */}
       <Dialog open={open} onOpenChange={setOpen}>

@@ -43,6 +43,11 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - POS respeta crédito: venta a crédito a cliente sin `credito_autorizado` → 400 "El cliente no tiene crédito autorizado" (verificado). Plantilla legacy descargable.
 - Verificado con curl (crear, toggle, estado, preview con 2 errores detectados, confirm crear+actualizar por CLAVE, tipos convertidos, POS bloqueo) y capturas. Clientes existentes intactos.
 
+## Implementado (2026-08-05) — POS indicador de crédito + Clientes navegación/orden
+- POS: al elegir cliente se muestra semáforo de crédito (🟢🟡🔴⚫) con Límite, Saldo y Disponible (`pos-credito-indicador`). Si `condicion=credito` y el cliente no tiene crédito → aviso rojo y botón Cobrar deshabilitado (backend ya devuelve 400).
+- Clientes: tabla configurable (`COLS`) con encabezados ordenables asc/desc (menor↔mayor / A↔Z, locale es numeric), barra de navegación/paginación (tamaños 25/50/100/200, primera/anterior/siguiente/última, "Página X de N") y botón "Columnas vacías" que oculta columnas sin datos (mantiene Clave/Nombre y las especiales Crédito/Estado). Filtros rápidos y búsqueda ampliada ya existentes.
+- Verificado con capturas: base real importada 688 clientes, orden por Nombre, ocultar vacías (RFC/Ciudad/Tel/Celular/Vend), paginación 14 páginas; POS semáforo "Crédito activo (disponible)".
+
 
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones
