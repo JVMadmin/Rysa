@@ -22,6 +22,7 @@ const blank = () => ({
   localidad: "", ciudad: "", estado_geo: "", pais: "México", cp: "", referencias: "",
   rfc: "", reg_fiscal: "", uso_cfdi: "", resfiscal: "", nregidtrib: "",
   vendedor: "", almacen: "", precio_venta: 1, lista_precios: 1, condicion_pago: "contado",
+  descuento_permanente: 0,
   credito_autorizado: false, limite_credito: 0, lim_descuento: 0, dias_credito: 0, saldo: 0, venta_credito: 0,
   ret_isr: false, ret_iva: false, ret_isr_tasa: 0, ret_iva_tasa: 0,
   mensual: 0, anual: 0, ult_fecha_compra: "", ult_monto_compra: 0,
@@ -116,6 +117,7 @@ export default function Clientes() {
         ret_iva_tasa: Number(f.ret_iva_tasa) || 0,
         mensual: Number(f.mensual) || 0, anual: Number(f.anual) || 0,
         ult_monto_compra: Number(f.ult_monto_compra) || 0, venta_credito: Number(f.venta_credito) || 0,
+        descuento_permanente: Number(f.descuento_permanente) || 0,
       };
       if (editId) await api.put(`/clients/${editId}`, payload);
       else await api.post("/clients", payload);
@@ -408,11 +410,15 @@ export default function Clientes() {
             <TabsContent value="comercial" className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-2">
               {I("Vendedor", "vendedor")}
               {I("Almacén", "almacen")}
-              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Precio de venta (lista)</Label>
-                <Select value={String(f.precio_venta || 1)} onValueChange={(v) => set("precio_venta", v)}>
+              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Lista de precios predeterminada</Label>
+                <Select value={String(f.precio_venta || 1)} onValueChange={(v) => set("precio_venta", v)} disabled={!can("producto.precio")}>
                   <SelectTrigger className="mt-1" data-testid="cli-precio_venta"><SelectValue /></SelectTrigger>
-                  <SelectContent>{[1, 2, 3, 4, 5].map((n) => <SelectItem key={n} value={String(n)}>Precio {n}</SelectItem>)}</SelectContent>
-                </Select></div>
+                  <SelectContent>{[1, 2, 3, 4, 5].map((n) => <SelectItem key={n} value={String(n)}>Precio {n}</SelectItem>)}<SelectItem value="6">Precio mínimo</SelectItem></SelectContent>
+                </Select>
+                {!can("producto.precio") && <p className="text-[10px] text-slate-400 mt-1">Solo Admin/Gerente puede cambiarla.</p>}</div>
+              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Descuento permanente (%)</Label>
+                <Input type="number" value={f.descuento_permanente ?? 0} onChange={(e) => set("descuento_permanente", e.target.value)} className="mt-1" disabled={!can("producto.precio")} data-testid="cli-descuento_permanente" />
+                {!can("producto.precio") && <p className="text-[10px] text-slate-400 mt-1">Solo Admin/Gerente puede cambiarlo.</p>}</div>
               <div><Label className="text-xs uppercase tracking-wider text-slate-500">Condición de pago</Label>
                 <Select value={f.condicion_pago} onValueChange={(v) => set("condicion_pago", v)}>
                   <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>

@@ -38,9 +38,9 @@ export default function Ventas() {
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
-  const copiar = (s) => {
-    const items = s.items.map((i) => ({ product_id: i.product_id, codigo: i.codigo, descripcion: i.descripcion, cantidad: i.cantidad, unidad: i.unidad, precio: i.precio, iva_tasa: i.iva_tasa, descuento: i.descuento }));
-    nav("/app/pos", { state: { copyItems: items } });
+  const remitir = (s) => {
+    const items = s.items.map((i) => ({ product_id: i.product_id, codigo: i.codigo, descripcion: i.descripcion, cantidad: i.cantidad, unidad: i.unidad, precio: i.precio, iva_tasa: i.iva_tasa, descuento: i.descuento, precios: i.precios || [], precio_minimo: i.precio_minimo ?? 0 }));
+    nav("/app/pos", { state: { copyItems: items, cliente_id: s.cliente_id, descuento_global: 0, lista_precios: s.lista_precios } });
   };
 
   return (
@@ -90,7 +90,7 @@ export default function Ventas() {
                 <td className="p-3">
                   <div className="flex gap-1 justify-end">
                     <Button size="icon" variant="ghost" onClick={() => setDetalle(s)} data-testid={`ver-${s.folio}`}><Eye className="w-4 h-4" /></Button>
-                    <Button size="icon" variant="ghost" onClick={() => copiar(s)} title="Copiar"><Copy className="w-4 h-4" /></Button>
+                    <Button size="sm" variant="outline" onClick={() => remitir(s)} title="Remitir (duplicar venta)" data-testid={`remitir-${s.folio}`}><Copy className="w-4 h-4 mr-1" /> Remitir</Button>
                     {s.estado === "confirmada" && can("venta.cancelar") && <Button size="icon" variant="ghost" onClick={() => setCancelSale(s)} className="text-red-500" data-testid={`cancelar-${s.folio}`}><XCircle className="w-4 h-4" /></Button>}
                   </div>
                 </td>

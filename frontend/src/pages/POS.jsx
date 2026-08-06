@@ -12,14 +12,22 @@ import { toast } from "sonner";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, PauseCircle, PlayCircle, X, Package,
   Banknote, ArrowLeftRight, CreditCard, Tag, Printer, Hash, Keyboard, FileText,
+  Smartphone, Landmark, Gift, DollarSign, User as UserIcon, Check, Tags,
 } from "lucide-react";
 
-const METODOS = [["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferencia", "Transferencia"], ["deposito", "Depósito"], ["otros", "Otros"]];
+const METODOS = [
+  ["efectivo", "Efectivo", Banknote],
+  ["tarjeta", "Tarjeta", CreditCard],
+  ["transferencia", "Transferencia", Landmark],
+  ["spei", "SPEI", Smartphone],
+  ["deposito", "Depósito", ArrowLeftRight],
+  ["otros", "Otro", Gift],
+];
 
 export default function POS() {
   const location = useLocation();
   const nav = useNavigate();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [cart, setCart] = useState([]);
@@ -30,6 +38,12 @@ export default function POS() {
   const [vendedorId, setVendedorId] = useState("");
   const [lista, setLista] = useState(1);
   const [descGlobal, setDescGlobal] = useState(0);
+  const [descPct, setDescPct] = useState(0);
+  const [incluyeIva, setIncluyeIva] = useState(true);
+  const [clientQuery, setClientQuery] = useState("");
+  const [clientOpen, setClientOpen] = useState(false);
+  const [linePrice, setLinePrice] = useState(null); // item para selector de precio
+  const [libreVal, setLibreVal] = useState("");
   const [tipoVenta, setTipoVenta] = useState("directa");
   const [formaPago, setFormaPago] = useState("contado"); // contado | transferencia | credito
   const [payOpen, setPayOpen] = useState(false);
@@ -66,7 +80,7 @@ export default function POS() {
       if (pub) setClienteId(pub.id);
     });
     api.get("/vendedores").then((r) => setVendedores(r.data));
-    api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); });
+    api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); if (r.data && r.data.precios_incluyen_iva !== undefined) setIncluyeIva(!!r.data.precios_incluyen_iva); });
     loadSuspended();
     refreshFolio();
   }, []);
@@ -89,11 +103,23 @@ export default function POS() {
 
   useEffect(() => {
     if (location.state?.copyItems) {
-      setCart(location.state.copyItems.map((it) => ({ ...it })));
-      toast.info("Venta copiada al carrito");
+      const st = location.state;
+      setCart(st.copyItems.map((it) => ({ ...it })));
+      if (st.cliente_id) setClienteId(st.cliente_id);
+      if (st.descuento_global != null) setDescGlobal(st.descuento_global);
+      if (st.lista_precios) setLista(Number(st.lista_precios));
+      toast.info("Venta cargada en el POS");
       nav("/app/pos", { replace: true, state: {} });
     }
   }, [location.state]); // eslint-disable-line
+
+  // Sincroniza el texto del buscador de cliente cuando cambia el clienteId por código
+  useEffect(() => {
+    if (clienteId && !clientQuery) {
+      const c = clients.find((x) => x.id === clienteId);
+      if (c) setClientQuery(c.nombre);
+    }
+  }, [clienteId, clients]); // eslint-disable-line
 
   const loadSuspended = async () => { const { data } = await api.get("/sales-suspended"); setSuspended(data); };
 
@@ -104,20 +130,44 @@ export default function POS() {
     setResults(data.slice(0, 20));
   };
 
-  const priceOf = (p) => {
-    const idx = Math.min(Math.max(lista - 1, 0), (p.precios?.length || 1) - 1);
-    return p.precios?.[idx]?.precio_con_iva ?? p.precios?.[0]?.precio_con_iva ?? 0;
+  const priceFromList = (p, l) => {
+    if (Number(l) === 6) return p.precio_minimo ?? 0;
+    const arr = p.precios || [];
+    const idx = Math.min(Math.max(Number(l) - 1, 0), (arr.length || 1) - 1);
+    return arr[idx]?.precio_con_iva ?? arr[0]?.precio_con_iva ?? 0;
   };
+  const priceOf = (p) => priceFromList(p, lista);
 
   const addToCart = (p) => {
     setCart((c) => {
       const ex = c.find((i) => i.product_id === p.id);
       if (ex) return c.map((i) => (i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i));
-      return [...c, { product_id: p.id, codigo: p.codigo, descripcion: p.descripcion, cantidad: 1, unidad: p.unidad_medida, precio: priceOf(p), iva_tasa: p.iva_tasa || 16, descuento: 0 }];
+      return [...c, { product_id: p.id, codigo: p.codigo, descripcion: p.descripcion, cantidad: 1, unidad: p.unidad_medida, precio: priceOf(p), iva_tasa: p.iva_tasa || 16, descuento: 0, precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0 }];
     });
     setSelected(p.id);
     setQ(""); qRef.current = ""; setResults([]);
     searchRef.current?.focus();
+  };
+  // Al cambiar la lista de precios se actualizan automáticamente los precios del carrito
+  const applyLista = (l) => {
+    setLista(l);
+    setCart((c) => c.map((i) => (i.precios?.length ? { ...i, precio: priceFromList({ precios: i.precios, precio_minimo: i.precio_minimo }, l) } : i)));
+  };
+  // Cliente searchable + aplica su lista de precios y descuento
+  const pickClient = (c) => {
+    setClienteId(c.id);
+    setClientQuery(c.nombre);
+    setClientOpen(false);
+    const l = Number(c.precio_venta || c.lista_precios || 1);
+    if (l >= 1 && l <= 6) applyLista(l);
+    setDescPct(Number(c.descuento_permanente || 0));
+  };
+  const filteredClients = clientQuery
+    ? clients.filter((c) => `${c.nombre} ${c.codigo}`.toLowerCase().includes(clientQuery.toLowerCase())).slice(0, 30)
+    : clients.slice(0, 30);
+  const setLinePrecio = (item, precio) => {
+    setCart((c) => c.map((i) => (i.product_id === item.product_id ? { ...i, precio: Number(precio) || 0 } : i)));
+    setLinePrice(null); setLibreVal("");
   };
   const updateQty = (id, d) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Math.max(0.001, +(i.cantidad + d).toFixed(3)) } : i)));
   const setQty = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Number(v) || 0 } : i)));
@@ -125,16 +175,20 @@ export default function POS() {
   const remove = (id) => setCart((c) => c.filter((i) => i.product_id !== id));
 
   const totals = useMemo(() => {
+    let brutoTotal = 0; // con IVA
+    cart.forEach((i) => { brutoTotal += i.cantidad * i.precio - (i.descuento || 0); });
+    const descPctAmount = +(brutoTotal * (Number(descPct) || 0) / 100).toFixed(2);
+    const descGlobalTotal = +((Number(descGlobal) || 0) + descPctAmount).toFixed(2);
     let subtotal = 0, iva = 0;
     cart.forEach((i) => {
       const base = i.cantidad * i.precio - (i.descuento || 0);
       const neto = base / (1 + i.iva_tasa / 100);
       subtotal += neto; iva += base - neto;
     });
-    const sub = subtotal - Number(descGlobal || 0);
+    const sub = subtotal - descGlobalTotal;
     const total = Math.max(0, +(sub + iva).toFixed(2));
-    return { subtotal: +sub.toFixed(2), iva: +iva.toFixed(2), total };
-  }, [cart, descGlobal]);
+    return { subtotal: +sub.toFixed(2), iva: +iva.toFixed(2), total, descPctAmount, descGlobalTotal };
+  }, [cart, descGlobal, descPct]);
 
   const pagado = pagos.reduce((s, p) => s + Number(p.monto || 0), 0);
   const cambio = Math.max(0, +(pagado - totals.total).toFixed(2));
@@ -147,11 +201,11 @@ export default function POS() {
       if (e.key === "F8") { const t = target(); if (t) { updateQty(t, 1); setSelected(t); } }
       else if (e.key === "F9") { const t = target(); if (t) { updateQty(t, -1); setSelected(t); } }
       else if (e.key === "F7") { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }
-      else if (e.key === "F6") { setLista((l) => { const n = l >= 5 ? 1 : l + 1; toast.info(`Lista: ${listaNames[n - 1]}`); return n; }); }
+      else if (e.key === "F6") { const n = lista >= 5 ? 1 : lista + 1; applyLista(n); toast.info(`Lista: ${listaNames[n - 1]}`); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, cart, listaNames]);
+  }, [selected, cart, listaNames, lista]);
 
   const pcSearch = async (val) => {
     setPcQuery(val);
@@ -174,7 +228,7 @@ export default function POS() {
       const payload = {
         cliente_id: clienteId || null,
         items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo, descripcion: i.descripcion, cantidad: Number(i.cantidad), unidad: i.unidad, precio: Number(i.precio), iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0) })),
-        descuento_global: Number(descGlobal || 0),
+        descuento_global: totals.descGlobalTotal,
         condicion,
         pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0) })) : [],
         lista_precios: Number(lista),
@@ -202,10 +256,40 @@ export default function POS() {
     <div className="flex flex-col lg:flex-row gap-4 -m-6 p-6 h-[calc(100vh-4rem)]" data-testid="pos-page">
       {/* Izquierda */}
       <div className="lg:w-[58%] flex flex-col min-h-0">
+        {/* Cliente (ancho completo, con búsqueda) + Lista de precios */}
+        <div className="flex flex-col sm:flex-row gap-2 mb-3">
+          <div className="relative flex-1">
+            <UserIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input
+              value={clientQuery}
+              onChange={(e) => { setClientQuery(e.target.value); setClientOpen(true); if (!e.target.value) setClienteId(""); }}
+              onFocus={() => setClientOpen(true)}
+              placeholder="Cliente: escribe para buscar por nombre o clave..."
+              className="pl-10 h-12" data-testid="pos-cliente-search" />
+            {clientOpen && filteredClients.length > 0 && (
+              <div className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-64 overflow-y-auto" data-testid="pos-cliente-list">
+                {filteredClients.map((c) => (
+                  <button key={c.id} onClick={() => pickClient(c)} data-testid={`pos-cliente-opt-${c.codigo}`}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between">
+                    <span className="truncate"><b className="text-[#0055A4] mr-1">{c.codigo}</b> {c.nombre}</span>
+                    {Number(c.descuento_permanente) > 0 && <Badge variant="outline" className="text-[10px] ml-2">-{c.descuento_permanente}%</Badge>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <Select value={String(lista)} onValueChange={(v) => applyLista(Number(v))}>
+            <SelectTrigger className="h-12 sm:w-44" data-testid="pos-lista"><Tags className="w-4 h-4 mr-1 text-slate-400" /><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {listaNames.map((n, i) => <SelectItem key={i} value={String(i + 1)}>{n}</SelectItem>)}
+              <SelectItem value="6">Precio mínimo</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex items-center gap-2 mb-3">
           <div className="relative flex-1">
             <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input ref={searchRef} autoFocus value={q} onChange={(e) => search(e.target.value)} placeholder="Buscar producto por código, descripción, SKU..." className="pl-10 h-12 text-base" data-testid="pos-search-input" />
+            <Input ref={searchRef} autoFocus value={q} onChange={(e) => search(e.target.value)} placeholder="Buscar producto por código, código de barras o descripción..." className="pl-10 h-12 text-base" data-testid="pos-search-input" />
           </div>
           <Button variant="outline" className="h-12" onClick={() => { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }} data-testid="verificar-precio-btn"><Tag className="w-4 h-4 mr-1" /> Precio <kbd className="ml-1 text-[10px] bg-slate-100 px-1 rounded">F7</kbd></Button>
           <Button variant="outline" className="h-12" onClick={() => setSuspOpen(true)} data-testid="ver-suspendidas"><PlayCircle className="w-4 h-4 mr-1" /> {suspended.length}</Button>
@@ -258,14 +342,12 @@ export default function POS() {
               <SelectTrigger className="h-9" data-testid="pos-vendedor"><SelectValue placeholder="Vendedor" /></SelectTrigger>
               <SelectContent>{vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
             </Select>
-            <Select value={clienteId} onValueChange={setClienteId}>
-              <SelectTrigger className="h-9" data-testid="pos-cliente"><SelectValue placeholder="Cliente" /></SelectTrigger>
-              <SelectContent>{clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.nombre}</SelectItem>)}</SelectContent>
-            </Select>
-            <Select value={String(lista)} onValueChange={(v) => setLista(Number(v))}>
-              <SelectTrigger className="h-9" data-testid="pos-lista"><SelectValue /></SelectTrigger>
-              <SelectContent>{listaNames.map((n, i) => <SelectItem key={i} value={String(i + 1)}>{n}</SelectItem>)}</SelectContent>
-            </Select>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <UserIcon className="w-3.5 h-3.5" />
+            <span className="truncate">{clienteSel ? clienteSel.nombre : "Público General"}</span>
+            <Badge variant="outline" className="ml-auto text-[10px]" data-testid="pos-lista-badge">{Number(lista) === 6 ? "Precio mínimo" : listaNames[lista - 1]}</Badge>
+            {Number(descPct) > 0 && <Badge className="bg-[#FF5A00]/10 text-[#FF5A00] text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
           </div>
           {credInfo && (
             <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2" data-testid="pos-credito-indicador">
@@ -291,7 +373,10 @@ export default function POS() {
               <div className="flex justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{i.descripcion}</div>
-                  <div className="text-xs text-slate-400">{i.codigo} · {money(i.precio)}</div>
+                  <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
+                    className="text-xs text-slate-400 hover:text-[#0055A4] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
+                    {i.codigo} · <span className="underline decoration-dotted">{money(i.precio)}</span> <Tag className="w-3 h-3" />
+                  </button>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
               </div>
@@ -322,11 +407,18 @@ export default function POS() {
           <div className="flex items-center gap-2">
             <Label className="text-xs text-slate-500 whitespace-nowrap">Desc. global $</Label>
             <Input type="number" value={descGlobal} onChange={(e) => setDescGlobal(e.target.value)} className="h-8" data-testid="pos-desc-global" />
-            <Badge variant="outline" className="text-[10px] whitespace-nowrap">IVA incluido</Badge>
+            <button
+              onClick={() => { if (can("config") || can("producto.precio")) setIncluyeIva((v) => !v); else toast.error("Sin permiso para cambiar IVA"); }}
+              className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#0055A4] text-[#0055A4] bg-[#0055A4]/5" : "border-slate-200 text-slate-400"}`}
+              data-testid="pos-incluye-iva">
+              <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#0055A4] border-[#0055A4]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
+              Precios incluyen IVA
+            </button>
           </div>
           <div className="text-sm space-y-0.5">
-            <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>
-            <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>
+            {!incluyeIva && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>}
+            {!incluyeIva && <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>}
+            {totals.descPctAmount > 0 && <div className="flex justify-between text-[#FF5A00]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
             <div className="flex justify-between font-display text-2xl font-black pt-1"><span>Total</span><span data-testid="pos-total">{money(totals.total)}</span></div>
           </div>
           {creditoBloqueado && (
@@ -354,8 +446,8 @@ export default function POS() {
               {pagos.map((p, i) => (
                 <div key={i} className="flex gap-2 items-center">
                   <Select value={p.metodo} onValueChange={(v) => setPagos((s) => s.map((x, idx) => idx === i ? { ...x, metodo: v } : x))}>
-                    <SelectTrigger className="w-40" data-testid={`pago-metodo-${i}`}><SelectValue /></SelectTrigger>
-                    <SelectContent>{METODOS.map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}</SelectContent>
+                    <SelectTrigger className="w-44" data-testid={`pago-metodo-${i}`}><SelectValue /></SelectTrigger>
+                    <SelectContent>{METODOS.map(([k, l, Ic]) => <SelectItem key={k} value={k}><span className="flex items-center gap-2"><Ic className="w-4 h-4" /> {l}</span></SelectItem>)}</SelectContent>
                   </Select>
                   <Input type="number" value={p.monto} onChange={(e) => setPagos((s) => s.map((x, idx) => idx === i ? { ...x, monto: e.target.value } : x))} placeholder="0.00" data-testid={`pago-monto-${i}`} />
                   {pagos.length > 1 && <button onClick={() => setPagos((s) => s.filter((_, idx) => idx !== i))}><X className="w-4 h-4 text-slate-400" /></button>}
@@ -367,6 +459,40 @@ export default function POS() {
             </div>
           )}
           <DialogFooter><Button variant="outline" onClick={() => setPayOpen(false)}>Cancelar</Button><Button onClick={confirmar} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="confirmar-venta">Confirmar venta</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Selector de precio por línea */}
+      <Dialog open={!!linePrice} onOpenChange={(o) => { if (!o) { setLinePrice(null); setLibreVal(""); } }}>
+        <DialogContent data-testid="line-price-dialog">
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Tag className="w-5 h-5" /> Precio · {linePrice?.descripcion}</DialogTitle></DialogHeader>
+          {linePrice && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                {(linePrice.precios || []).map((pr, i) => (
+                  <button key={i} onClick={() => setLinePrecio(linePrice, pr.precio_con_iva)} data-testid={`line-precio-${i + 1}`}
+                    className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-[#0055A4] ${Math.abs(linePrice.precio - pr.precio_con_iva) < 0.001 ? "border-[#0055A4] bg-[#0055A4]/5" : "border-slate-200"}`}>
+                    <span className="text-sm text-slate-500">{listaNames[i] || `Precio ${i + 1}`}</span>
+                    <span className="font-display font-bold text-[#0055A4]">{money(pr.precio_con_iva)}</span>
+                  </button>
+                ))}
+                <button onClick={() => setLinePrecio(linePrice, linePrice.precio_minimo)} data-testid="line-precio-min"
+                  className="flex items-center justify-between border rounded-md px-3 py-2 hover:border-amber-500 border-slate-200">
+                  <span className="text-sm text-slate-500">Precio mínimo</span>
+                  <span className="font-display font-bold text-amber-600">{money(linePrice.precio_minimo || 0)}</span>
+                </button>
+              </div>
+              <div className="border-t pt-3">
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Precio libre</Label>
+                {can("producto.precio") ? (
+                  <div className="flex gap-2 mt-1">
+                    <Input type="number" value={libreVal} onChange={(e) => setLibreVal(e.target.value)} placeholder="0.00" data-testid="line-precio-libre-input" />
+                    <Button onClick={() => setLinePrecio(linePrice, libreVal)} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="line-precio-libre-apply">Aplicar</Button>
+                  </div>
+                ) : <p className="text-xs text-slate-400 mt-1">No tienes permiso para capturar precio libre.</p>}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -438,9 +564,10 @@ export default function POS() {
                 </tbody>
               </table>
               <div className="border-t border-dashed border-black my-1" />
-              <div className="flex justify-between"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>
-              <div className="flex justify-between"><span>IVA</span><span>{money(ticket.iva_total)}</span></div>
+              {!incluyeIva && <div className="flex justify-between"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>}
+              {!incluyeIva && <div className="flex justify-between"><span>IVA</span><span>{money(ticket.iva_total)}</span></div>}
               <div className="flex justify-between font-bold text-[14px]"><span>TOTAL</span><span>{money(ticket.total)}</span></div>
+              {incluyeIva && <div className="text-center text-[10px]">Precios con IVA incluido</div>}
               {ticket.tipo_venta === "directa" && ticket.condicion === "contado" && (<><div className="flex justify-between mt-1"><span>Pagado</span><span>{money((ticket.pagos || []).reduce((s, p) => s + p.monto, 0))}</span></div><div className="flex justify-between"><span>Cambio</span><span>{money(ticket.cambio)}</span></div></>)}
               {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CRÉDITO ** Saldo: {money(ticket.saldo)}</div>}
               <div className="border-t border-dashed border-black my-1" />

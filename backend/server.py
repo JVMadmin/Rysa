@@ -284,6 +284,7 @@ class ClientInput(BaseModel):
     credito_autorizado: bool = False        # CREDITO
     limite_credito: float = 0.0             # LIMCREDITO
     lim_descuento: Optional[float] = 0.0    # LIMDESCTO
+    descuento_permanente: Optional[float] = 0.0  # % descuento fijo del cliente
     dias_credito: Optional[int] = 0         # DIASCREDIT
     saldo: Optional[float] = 0.0            # SALDO
     venta_credito: Optional[float] = 0.0    # VTACREDITO
@@ -374,6 +375,7 @@ class SettingsInput(BaseModel):
     cp: Optional[str] = ""
     iva_tasa: float = 16.0
     moneda: str = "MXN"
+    precios_incluyen_iva: bool = True
     listas_precios_nombres: List[str] = Field(default_factory=lambda: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"])
     sucursales: List[SucursalItem] = Field(default_factory=list)
 

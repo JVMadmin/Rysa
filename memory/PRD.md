@@ -56,6 +56,26 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - UI: tarjetas resumen, barra de antigüedad, tabla de deudores con aging por cubeta y días de mora, diálogo de abono (monto/saldo total/método/referencia/nota) y estado de cuenta (ventas Pagada/Vigente/Vencida + abonos).
 - Verificado con curl (venta crédito→CxC saldo/aging, abono parcial FIFO 500 saldo 1160→660, caja efectivo, validación exceso 400) y capturas (deudor demo con venta vencida 45d en bucket 31-60).
 
+## Implementado (2026-08-06) — Fase 2 Bloque A: POS + Clientes + Ventas
+- BUGFIX crítico (verificado testing agent iter.3): "el monto es menor que la venta". Causa: `calcular_venta` trataba el precio como neto y sumaba IVA encima, pero el POS envía precio_con_iva. Ahora extrae el IVA (neto=bruto/(1+tasa)); validación de contado con tolerancia de 1 centavo.
+- POS: selector de cliente movido a la izquierda, ancho completo, con búsqueda por nombre/clave (filtra al escribir, `pos-cliente-search`). Al elegir cliente aplica su lista de precios predeterminada y su descuento permanente.
+- POS: selector de lista de precios junto al cliente; al cambiar lista se recalculan todos los precios del carrito (F6 también). Incluye "Precio mínimo".
+- POS: selector de precio por línea (`cart-price-*` → dialog) con Precio 1-5 + Precio mínimo (con importes) + Precio Libre (requiere permiso `producto.precio`).
+- POS: casilla "Precios incluyen IVA" (default settings.precios_incluyen_iva=True, toggle requiere `config`/`producto.precio`). Cuando activa, el ticket muestra solo el total sin desglose de IVA.
+- POS: métodos de pago con iconos + SPEI (Efectivo/Tarjeta/Transferencia/SPEI/Depósito/Otro).
+- Clientes: nuevos campos `descuento_permanente` (%) y lista predeterminada con opción "Precio mínimo"; edición de lista/descuento solo con permiso `producto.precio` (cajero solo lectura).
+- Ventas: botón "Remitir" (duplica venta con cliente/cantidades/precios/lista y abre el POS con todo cargado). Cancelar con motivo ya existía.
+- Backend: Settings.precios_incluyen_iva (bool), ClientInput.descuento_permanente.
+- Verificado por captura: POS renderiza sin errores, dialog de precio por línea, ticket sin desglose de IVA, total correcto.
+
+### Fase 2 pendiente (por bloques, requiere aprobación/credenciales)
+- Bloque B: Usuarios con permisos granulares + constructor de roles.
+- Bloque C: Movimientos de Inventario + Kardex (entradas/salidas/ajustes/mermas/transferencias, motivo obligatorio).
+- Bloque D: Productos (código de barras + búsqueda + subir imágenes con almacenamiento en la nube integrado; imágenes también en Categorías).
+- Bloque E: Facturación CFDI 4.0 (Facturama) — dejar estructura lista sin credenciales; timbres en config y barra superior.
+- Config: logo en tickets, tamaños POS80/Carta, decimales, IVA default, moneda, series/folios.
+- WhatsApp: envío por enlace wa.me (ticket/factura/cotización). Correo (reenvío): pospuesto.
+
 
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones
