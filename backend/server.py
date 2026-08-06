@@ -15,6 +15,8 @@ from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 import pandas as pd
 from datetime import datetime, date, timedelta
+import httpx
+import base64
 
 from deps import (
     db, client, now_utc, iso_now, hash_password, verify_password, create_access_token,
@@ -1590,6 +1592,186 @@ async def sales_next_folio(user: dict = Depends(get_current_user)):
     vn = (v["seq"] if v else 0) + 1
     cn = (c["seq"] if c else 0) + 1
     return {"venta": f"V{str(vn).zfill(6)}", "cotizacion": f"COT{str(cn).zfill(6)}"}
+
+# =========================================================================
+# FACTURACIÓN CFDI 4.0 (PAC-agnóstico; Facturama primero)
+# =========================================================================
+class PacConfigInput(BaseModel):
+    provider: str = "facturama"
+    environment: str = "sandbox"        # sandbox | produccion
+    api_user: Optional[str] = ""
+    api_password: Optional[str] = ""     # si viene vacío en PUT, se conserva la existente
+    rfc: Optional[str] = ""
+    razon_social: Optional[str] = ""
+    regimen_fiscal: Optional[str] = "601"
+    serie: Optional[str] = "A"
+    folio: Optional[int] = 1
+    lugar_expedicion: Optional[str] = ""  # CP
+    timbres_alerta: Optional[int] = 20    # avisar cuando queden menos
+
+FACTURAMA_URLS = {"sandbox": "https://apisandbox.facturama.mx", "produccion": "https://api.facturama.mx"}
+
+async def get_pac_config():
+    return await db.pac_config.find_one({"_id": "pac"}, {"_id": 0})
+
+def pac_configurado(cfg):
+    return bool(cfg and cfg.get("api_user") and cfg.get("api_password") and cfg.get("rfc"))
+
+def facturama_request(cfg, method, path, **kwargs):
+    base = FACTURAMA_URLS.get(cfg.get("environment", "sandbox"), FACTURAMA_URLS["sandbox"])
+    with httpx.Client(base_url=base, auth=(cfg["api_user"], cfg["api_password"]), timeout=30.0) as c:
+        r = c.request(method, path, **kwargs)
+        if r.status_code >= 400:
+            raise HTTPException(r.status_code, f"PAC: {r.text[:500]}")
+        return r.json()
+
+def _money(x):
+    return f"{round(float(x) + 1e-9, 2):.2f}"
+
+def sale_to_cfdi_payload(sale, cliente, cfg):
+    forma_map = {"efectivo": "01", "tarjeta": "04", "transferencia": "03", "spei": "03", "deposito": "03", "otros": "99"}
+    pago = (sale.get("pagos") or [{}])
+    forma = forma_map.get((pago[0].get("metodo") if pago else "efectivo"), "01")
+    rfc = (cliente.get("rfc") if cliente else "") or "XAXX010101000"
+    generico = rfc == "XAXX010101000"
+    receiver = {
+        "Rfc": rfc.upper(),
+        "Name": ((cliente.get("nombre") if cliente else "") or "PUBLICO EN GENERAL").upper(),
+        "CfdiUse": (cliente.get("uso_cfdi") if cliente else "") or ("S01" if generico else "G03"),
+        "FiscalRegime": (cliente.get("reg_fiscal") if cliente else "") or ("616" if generico else "601"),
+        "TaxZipCode": (cliente.get("cp") if cliente else "") or cfg.get("lugar_expedicion") or "00000",
+    }
+    items = []
+    for it in sale.get("items", []):
+        tasa = float(it.get("iva_tasa", 16)) / 100
+        bruto_unit = float(it["precio"])
+        base_unit = round(bruto_unit / (1 + tasa), 2)
+        base = round(base_unit * it["cantidad"], 2)
+        tax = round(base * tasa, 2)
+        items.append({
+            "Quantity": _money(it["cantidad"]), "ProductCode": it.get("clave_sat") or "01010101",
+            "UnitCode": it.get("clave_unidad") or "H87", "Unit": it.get("unidad") or "Pieza",
+            "Description": it["descripcion"], "IdentificationNumber": it.get("codigo", ""),
+            "UnitPrice": _money(base_unit), "Subtotal": _money(base), "TaxObject": "02",
+            "Taxes": [{"Name": "IVA", "Rate": f"{tasa}", "Total": _money(tax), "Base": _money(base),
+                       "IsRetention": False, "IsFederalTax": True}],
+            "Total": _money(base + tax),
+        })
+    return {
+        "CfdiType": "I", "NameId": "1", "ExpeditionPlace": cfg.get("lugar_expedicion") or "00000",
+        "Serie": cfg.get("serie") or "A", "PaymentForm": forma, "PaymentMethod": "PUE",
+        "Exportation": "01", "Currency": "MXN", "Receiver": receiver, "Items": items,
+    }
+
+@api.get("/facturacion/config")
+async def get_pac_config_ep(user: dict = Depends(require_permission("config"))):
+    cfg = await get_pac_config() or {}
+    cfg = dict(cfg)
+    cfg["api_password_set"] = bool(cfg.get("api_password"))
+    cfg.pop("api_password", None)
+    cfg["configurado"] = pac_configurado(await get_pac_config())
+    return cfg
+
+@api.put("/facturacion/config")
+async def put_pac_config(data: PacConfigInput, user: dict = Depends(require_permission("config"))):
+    doc = data.model_dump()
+    existing = await get_pac_config() or {}
+    if not doc.get("api_password"):  # conservar contraseña si no se reenvía
+        doc["api_password"] = existing.get("api_password", "")
+    await db.pac_config.update_one({"_id": "pac"}, {"$set": doc}, upsert=True)
+    await log_audit(user, "editar", "facturacion", "config", f"PAC {doc.get('provider')} ({doc.get('environment')})")
+    return {"ok": True, "configurado": pac_configurado(doc)}
+
+@api.get("/facturacion/timbres")
+async def timbres(user: dict = Depends(get_current_user)):
+    cfg = await get_pac_config()
+    if not pac_configurado(cfg):
+        return {"configurado": False, "disponibles": None, "plan": None}
+    try:
+        data = facturama_request(cfg, "GET", "/SuscriptionPlan")
+        disp = int(data.get("CurrentFolios") or 0)
+        res = {"configurado": True, "disponibles": disp, "plan": data.get("Plan"),
+               "expira": data.get("ExpirationDate"), "actualizado": iso_now(),
+               "alerta": disp <= int(cfg.get("timbres_alerta", 20))}
+        await db.pac_config.update_one({"_id": "pac"}, {"$set": {"timbres_cache": res}})
+        return res
+    except HTTPException as e:
+        cached = (cfg.get("timbres_cache") or {})
+        cached["configurado"] = True
+        cached["error"] = str(e.detail)[:200]
+        return cached
+
+@api.get("/facturacion")
+async def list_cfdi(user: dict = Depends(get_current_user)):
+    docs = await db.cfdi_documents.find({}, {"_id": 0, "response": 0}).sort("fecha", -1).to_list(2000)
+    return docs
+
+@api.get("/facturacion/facturables")
+async def ventas_facturables(user: dict = Depends(get_current_user)):
+    sales = await db.sales.find({"tipo_venta": {"$ne": "cotizacion"}, "estado": "confirmada",
+                                 "facturado": {"$ne": True}}, {"_id": 0}).sort("fecha", -1).to_list(500)
+    return sales
+
+@api.post("/facturacion/sale/{sale_id}")
+async def emitir_cfdi(sale_id: str, user: dict = Depends(require_permission("venta.crear"))):
+    cfg = await get_pac_config()
+    if not pac_configurado(cfg):
+        raise HTTPException(400, "El PAC no está configurado. Ve a Configuración → Facturación y captura tus credenciales.")
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
+    if not sale:
+        raise HTTPException(404, "Venta no encontrada")
+    if sale.get("facturado"):
+        raise HTTPException(400, "Esta venta ya fue facturada")
+    cliente = await db.clients.find_one({"id": sale.get("cliente_id")}, {"_id": 0}) if sale.get("cliente_id") else None
+    payload = sale_to_cfdi_payload(sale, cliente, cfg)
+    result = facturama_request(cfg, "POST", "/3/cfdis", json=payload)
+    fid = result.get("Id")
+    uuid_ = ((result.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid")
+    doc = {"id": uid(), "sale_id": sale_id, "folio_venta": sale.get("folio"),
+           "facturama_id": fid, "uuid": uuid_, "serie": result.get("Serie"), "folio": result.get("Folio"),
+           "status": "vigente", "total": result.get("Total", sale.get("total")),
+           "cliente_nombre": (cliente.get("nombre") if cliente else "PUBLICO EN GENERAL"),
+           "rfc": payload["Receiver"]["Rfc"], "fecha": iso_now(), "provider": cfg.get("provider"),
+           "response": result}
+    await db.cfdi_documents.insert_one(doc)
+    await db.sales.update_one({"id": sale_id}, {"$set": {"facturado": True, "cfdi_uuid": uuid_, "cfdi_id": fid}})
+    await log_audit(user, "facturar", "venta", sale_id, f"CFDI {uuid_}")
+    return {"ok": True, "facturama_id": fid, "uuid": uuid_, "folio": result.get("Folio")}
+
+@api.get("/facturacion/{cfdi_id}/{fmt}")
+async def descargar_cfdi(cfdi_id: str, fmt: str, user: dict = Depends(get_current_user)):
+    if fmt not in ("xml", "pdf"):
+        raise HTTPException(400, "Formato inválido")
+    cfg = await get_pac_config()
+    doc = await db.cfdi_documents.find_one({"id": cfdi_id}, {"_id": 0})
+    if not doc or not pac_configurado(cfg):
+        raise HTTPException(404, "CFDI o PAC no disponible")
+    data = facturama_request(cfg, "GET", f"/cfdi/{fmt}/issued/{doc['facturama_id']}")
+    raw = base64.b64decode(data["Content"])
+    media = "application/xml" if fmt == "xml" else "application/pdf"
+    return StreamingResponse(io.BytesIO(raw), media_type=media,
+        headers={"Content-Disposition": f"attachment; filename={doc.get('folio_venta','cfdi')}.{fmt}"})
+
+@api.post("/facturacion/{cfdi_id}/cancel")
+async def cancelar_cfdi(cfdi_id: str, motivo: str = "02", uuid_reemplazo: Optional[str] = None,
+                        user: dict = Depends(require_permission("venta.cancelar"))):
+    cfg = await get_pac_config()
+    doc = await db.cfdi_documents.find_one({"id": cfdi_id})
+    if not doc or not pac_configurado(cfg):
+        raise HTTPException(404, "CFDI o PAC no disponible")
+    if motivo not in ("01", "02", "03", "04"):
+        raise HTTPException(422, "Motivo de cancelación inválido")
+    if motivo == "01" and not uuid_reemplazo:
+        raise HTTPException(422, "El motivo 01 requiere UUID de reemplazo")
+    params = {"type": "issued", "motive": motivo}
+    if uuid_reemplazo:
+        params["uuidReplacement"] = uuid_reemplazo
+    result = facturama_request(cfg, "DELETE", f"/cfdi/{doc['facturama_id']}", params=params)
+    await db.cfdi_documents.update_one({"id": cfdi_id}, {"$set": {"status": "cancelado", "cancelacion": result}})
+    if doc.get("sale_id"):
+        await db.sales.update_one({"id": doc["sale_id"]}, {"$set": {"facturado": False}})
+    await log_audit(user, "cancelar", "facturacion", cfdi_id, f"motivo {motivo}")
+    return {"ok": True, "result": result}
 
 # =========================================================================
 # STARTUP

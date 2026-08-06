@@ -76,6 +76,15 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - Config: logo en tickets, tamaños POS80/Carta, decimales, IVA default, moneda, series/folios.
 - WhatsApp: envío por enlace wa.me (ticket/factura/cotización). Correo (reenvío): pospuesto.
 
+## Implementado (2026-08-06) — Fase 2 Bloque E: Facturación CFDI 4.0 (estructura Facturama)
+- Arquitectura PAC-agnóstica (Facturama primero). Backend en server.py:
+  - `pac_config` (colección): provider, environment sandbox/produccion, api_user, api_password (no se devuelve), rfc, razón social, régimen, serie, folio, lugar expedición, timbres_alerta.
+  - Endpoints: GET/PUT `/facturacion/config` (contraseña enmascarada), GET `/facturacion/timbres` (Facturama /SuscriptionPlan, con alerta y cache), GET `/facturacion` (CFDI emitidos), GET `/facturacion/facturables` (ventas confirmadas no facturadas), POST `/facturacion/sale/{id}` (timbra CFDI 4.0 vía POST /3/cfdis, mapea venta→payload, marca sale.facturado), GET `/facturacion/{id}/{xml|pdf}` (descarga base64), POST `/facturacion/{id}/cancel?motivo=&uuid_reemplazo=` (motivos 01-04).
+  - Mapeo de venta: precio_con_iva → base/IVA extraídos; receptor genérico XAXX010101000/S01/616 si no hay cliente.
+  - httpx con Basic Auth. Si no está configurado, emitir devuelve 400 claro (verificado).
+- Frontend `Facturacion.jsx` + ruta `/app/facturacion` + nav "Facturación": pestañas Emitidas / Por facturar / Configuración PAC. Badge de timbres en la barra superior (verde/rojo según alerta; "PAC sin configurar" si faltan credenciales). WhatsApp por enlace wa.me. XML/PDF y cancelar/sustituir.
+- NOTA: sin credenciales de Facturama aún; el timbrado en vivo NO se pudo probar. La estructura está lista: al capturar usuario/contraseña API en Configuración → Facturación (y cargar el CSD en la cuenta Facturama), timbrará automáticamente. Verificado: config guarda, timbres responde "no configurado", emitir sin PAC devuelve mensaje claro, UI renderiza sin errores.
+
 
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones

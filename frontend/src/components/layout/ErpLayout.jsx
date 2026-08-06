@@ -1,15 +1,17 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
-  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins,
+  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp,
 } from "lucide-react";
 
 const NAV = [
   { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/pos", label: "Punto de Venta", icon: ShoppingCart, perm: "venta.crear" },
   { to: "/app/ventas", label: "Ventas", icon: Receipt },
+  { to: "/app/facturacion", label: "Facturación", icon: FileText },
   { to: "/app/productos", label: "Productos", icon: Package },
   { to: "/app/categorias", label: "Categorías", icon: Tags },
   { to: "/app/clientes", label: "Clientes", icon: Users },
@@ -26,6 +28,11 @@ export default function ErpLayout() {
   const [collapsed, setCollapsed] = useState(false);
 
   const doLogout = async () => { await logout(); nav("/login"); };
+
+  const [timbres, setTimbres] = useState(null);
+  useEffect(() => {
+    api.get("/facturacion/timbres").then((r) => setTimbres(r.data)).catch(() => {});
+  }, []);
 
   return (
     <div className="min-h-screen flex bg-[#F1F5F9]">
@@ -74,6 +81,12 @@ export default function ErpLayout() {
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
           <div className="font-display font-bold text-slate-800 text-lg">Grupo RYSA</div>
           <div className="flex items-center gap-4">
+            {timbres && timbres.configurado && (
+              <div title="Timbres CFDI disponibles" data-testid="timbres-badge"
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${timbres.alerta ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>
+                <Stamp className="w-3.5 h-3.5" /> {timbres.disponibles ?? "—"} timbres
+              </div>
+            )}
             <div className="text-right leading-tight">
               <div className="text-sm font-semibold text-slate-800" data-testid="user-name">{user?.name}</div>
               <div className="text-xs uppercase tracking-wider text-[#FF5A00] font-medium">{user?.role}</div>
