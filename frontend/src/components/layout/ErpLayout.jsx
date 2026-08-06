@@ -4,13 +4,14 @@ import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
-  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp,
+  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3,
 } from "lucide-react";
 
 const NAV = [
   { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/pos", label: "Punto de Venta", icon: ShoppingCart, perm: "venta.crear" },
   { to: "/app/ventas", label: "Ventas", icon: Receipt },
+  { to: "/app/reportes", label: "Reportes", icon: BarChart3, perm: "reportes.ver" },
   { to: "/app/facturacion", label: "Facturación", icon: FileText },
   { to: "/app/productos", label: "Productos", icon: Package },
   { to: "/app/categorias", label: "Categorías", icon: Tags },

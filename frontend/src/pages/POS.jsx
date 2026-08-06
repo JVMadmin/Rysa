@@ -106,6 +106,7 @@ export default function POS() {
       const st = location.state;
       setCart(st.copyItems.map((it) => ({ ...it })));
       if (st.cliente_id) setClienteId(st.cliente_id);
+      if (st.cliente_nombre) setClientQuery(st.cliente_nombre);
       if (st.descuento_global != null) setDescGlobal(st.descuento_global);
       if (st.lista_precios) setLista(Number(st.lista_precios));
       toast.info("Venta cargada en el POS");

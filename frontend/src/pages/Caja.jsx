@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2 } from "lucide-react";
+import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2, History, Search } from "lucide-react";
 
 export default function Caja() {
   const [data, setData] = useState(null);
@@ -18,9 +18,23 @@ export default function Caja() {
   const [closeOpen, setCloseOpen] = useState(false);
   const [contado, setContado] = useState("");
   const [cierre, setCierre] = useState(null);
+  const [hist, setHist] = useState([]);
+  const [histDesde, setHistDesde] = useState("");
+  const [histHasta, setHistHasta] = useState("");
+  const [histEstado, setHistEstado] = useState("all");
+  const [detCaja, setDetCaja] = useState(null);
+
+  const loadHist = async () => {
+    const params = {};
+    if (histDesde) params.desde = histDesde;
+    if (histHasta) params.hasta = histHasta;
+    if (histEstado !== "all") params.estado = histEstado;
+    const { data } = await api.get("/caja/historial", { params });
+    setHist(data);
+  };
 
   const load = async () => { setLoading(true); const { data } = await api.get("/caja/actual"); setData(data); setLoading(false); };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadHist(); /* eslint-disable-next-line */ }, []);
 
   const abrir = async () => {
     try { await api.post("/caja/abrir", { fondo_inicial: Number(fondo || 0) }); toast.success("Caja abierta"); setFondo(""); load(); }
@@ -104,6 +118,66 @@ export default function Caja() {
           </div>
         </div>
       )}
+
+      {/* Historial de aperturas y cortes de caja */}
+      <div className="bg-white border border-slate-200 rounded-md p-4 space-y-3" data-testid="caja-historial">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-display font-bold flex items-center gap-2"><History className="w-5 h-5 text-[#0055A4]" /> Historial de cortes y aperturas</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input type="date" value={histDesde} onChange={(e) => setHistDesde(e.target.value)} className="w-40 h-9" data-testid="hist-desde" />
+            <span className="text-slate-400 text-sm">a</span>
+            <Input type="date" value={histHasta} onChange={(e) => setHistHasta(e.target.value)} className="w-40 h-9" data-testid="hist-hasta" />
+            <Select value={histEstado} onValueChange={setHistEstado}>
+              <SelectTrigger className="w-36 h-9" data-testid="hist-estado"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="all">Todas</SelectItem><SelectItem value="abierta">Abiertas</SelectItem><SelectItem value="cerrada">Cerradas</SelectItem></SelectContent>
+            </Select>
+            <Button variant="outline" className="h-9" onClick={loadHist} data-testid="hist-buscar"><Search className="w-4 h-4" /></Button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
+              <th className="p-2">Estado</th><th className="p-2">Cajero</th><th className="p-2">Apertura</th><th className="p-2">Cierre</th>
+              <th className="p-2 text-right">Fondo</th><th className="p-2 text-right">Esperado</th><th className="p-2 text-right">Contado</th><th className="p-2 text-right">Diferencia</th><th className="p-2"></th>
+            </tr></thead>
+            <tbody>
+              {hist.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-slate-400">Sin registros en el rango.</td></tr>}
+              {hist.map((c) => (
+                <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`caja-hist-${c.id}`}>
+                  <td className="p-2"><Badge className={c.estado === "abierta" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}>{c.estado}</Badge></td>
+                  <td className="p-2">{c.usuario_nombre}</td>
+                  <td className="p-2 text-slate-500">{(c.fecha_apertura || "").slice(0, 16).replace("T", " ")}</td>
+                  <td className="p-2 text-slate-500">{c.fecha_cierre ? c.fecha_cierre.slice(0, 16).replace("T", " ") : "—"}</td>
+                  <td className="p-2 text-right">{money(c.fondo_inicial)}</td>
+                  <td className="p-2 text-right">{c.cierre ? money(c.cierre.efectivo_esperado) : "—"}</td>
+                  <td className="p-2 text-right">{c.cierre ? money(c.cierre.efectivo_contado) : "—"}</td>
+                  <td className={`p-2 text-right font-semibold ${c.cierre && c.cierre.diferencia < 0 ? "text-red-600" : "text-green-600"}`}>{c.cierre ? money(c.cierre.diferencia) : "—"}</td>
+                  <td className="p-2 text-right"><Button size="sm" variant="ghost" onClick={() => setDetCaja(c)} data-testid={`caja-hist-ver-${c.id}`}>Ver</Button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Dialog open={!!detCaja} onOpenChange={(o) => !o && setDetCaja(null)}>
+        <DialogContent data-testid="caja-hist-detalle">
+          <DialogHeader><DialogTitle className="font-display">Corte de caja · {detCaja?.usuario_nombre}</DialogTitle></DialogHeader>
+          {detCaja && (
+            <div className="text-sm space-y-1">
+              <div className="flex justify-between"><span>Apertura</span><span>{(detCaja.fecha_apertura || "").slice(0, 16).replace("T", " ")}</span></div>
+              <div className="flex justify-between"><span>Cierre</span><span>{detCaja.fecha_cierre ? detCaja.fecha_cierre.slice(0, 16).replace("T", " ") : "En operación"}</span></div>
+              <div className="flex justify-between"><span>Fondo inicial</span><span>{money(detCaja.fondo_inicial)}</span></div>
+              {detCaja.cierre && <>
+                <div className="flex justify-between"><span>Efectivo esperado</span><span>{money(detCaja.cierre.efectivo_esperado)}</span></div>
+                <div className="flex justify-between"><span>Efectivo contado</span><span>{money(detCaja.cierre.efectivo_contado)}</span></div>
+                <div className="flex justify-between border-t pt-2 font-bold"><span>Diferencia</span><span className={detCaja.cierre.diferencia < 0 ? "text-red-600" : "text-green-600"}>{money(detCaja.cierre.diferencia)}</span></div>
+              </>}
+            </div>
+          )}
+          <DialogFooter><Button variant="outline" onClick={() => setDetCaja(null)}>Cerrar</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={movOpen} onOpenChange={setMovOpen}>
         <DialogContent data-testid="mov-dialog">

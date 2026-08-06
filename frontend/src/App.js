@@ -12,6 +12,7 @@ import Categorias from "@/pages/Categorias";
 import Clientes from "@/pages/Clientes";
 import CuentasPorCobrar from "@/pages/CuentasPorCobrar";
 import Facturacion from "@/pages/Facturacion";
+import Reportes from "@/pages/Reportes";
 import Caja from "@/pages/Caja";
 import POS from "@/pages/POS";
 import Ventas from "@/pages/Ventas";
@@ -35,6 +36,7 @@ function App() {
             <Route path="/app/clientes" element={<Clientes />} />
             <Route path="/app/cxc" element={<CuentasPorCobrar />} />
             <Route path="/app/facturacion" element={<Facturacion />} />
+            <Route path="/app/reportes" element={<Reportes />} />
             <Route path="/app/caja" element={<Caja />} />
             <Route path="/app/pos" element={<POS />} />
             <Route path="/app/ventas" element={<Ventas />} />

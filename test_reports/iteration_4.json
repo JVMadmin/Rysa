@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend-only regression of Ventas 'Remitir' bug fix, Facturar directo, filtros y Reportes. All 5 scenarios PASS. The main bug (cliente not preselected in POS after Remitir) is FIXED: POS cliente input now shows the sale's cliente_nombre (verified 'ARMANDO GOMEZ' and 'ARNULFO TRUJILLO'). Copiar-y-cancelar cancels the original ticket automatically. Facturar preselects the sale's client and, without PAC configured, shows a clear toast error instead of crashing. Filters (Hoy/Semana/Mes/Mes anterior/Todas/Fecha a fecha), vendedor filter, and Vendedor column all work. Reportes cards, grouping toggles and date range work with no errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "IMPORTANT: Restore sale V000007 (ARNULFO TRUJILLO, $46.30, contado). It was cancelled by this test agent as part of 'Copiar y cancelar original' verification (motivo='Remitida a nueva venta'). The related POS copy was NOT confirmed, so the cancellation should be reverted / the sale re-created from history if needed.",
+    "V000008 was already 'cancelada' before this run — not caused by this iteration."
+  ],
+  "critical_code_review_comments": [
+    "Ventas.jsx irRemitir() correctly forwards cliente_id + cliente_nombre to POS via router state; POS.jsx (line 108-109) sets clienteId and clientQuery from state.cliente_nombre — the fix is correct and verified end-to-end.",
+    "Facturar path: PUT /sales/{id}/cliente is only called when the receptor differs from sale.cliente_id AND is not 'publico'; when the user keeps the preselected same client, no update is sent — correct.",
+    "Ventas.jsx facturar() shows a clean toast on 400 (PAC no configurado) via formatApiError, no unhandled promise / no white screen. Good UX.",
+    "Ventas.jsx load() effect depends on [rango, estado, vendedorId, desde, hasta] but not on 'q'; the search input triggers load only on Enter. This is intentional but worth documenting for users."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (skip)", "frontend": "100% (5/5)"},
+  "test_credentials": "REDACTED / REDACTED (admin)",
+  "seed_data_creation": "None. Only side-effect: V000007 was cancelled (state: cancelada, motivo: 'Remitida a nueva venta') as part of the required 'Copiar y cancelar original' verification. Reported for restoration.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Real sales in DB at time of test: V000001,V000002 (Público General), V000006 (ARMANDO GOMEZ), V000007 (ARNULFO TRUJILLO — cancelled by this run), V000008 (DESARROLLO... — already cancelada), V000009 (Público General). POS cliente input is data-testid=pos-cliente-search; verifying input_value() on it returns the copied client name. Reportes route is /app/reportes; cards use rep-ventas/rep-utilidad/rep-margen, grouping toggles rep-group-dia/rep-group-mes exist and work.",
+  "rca of the issue": "Root cause of the original Remitir bug: on POS mount, the copyItems effect was applying items+lista_precios but not writing cliente_id/cliente_nombre from router state, so the client search input remained empty. Fix (already applied by main agent): (a) Ventas.jsx passes cliente_id + cliente_nombre in nav state; (b) POS.jsx copyItems effect calls setClienteId(st.cliente_id) and setClientQuery(st.cliente_nombre). Verified: after Remitir on V000006, pos-cliente-search value = 'ARMANDO GOMEZ'; after Remitir + Cancelar on V000007, POS shows 'ARNULFO TRUJILLO' and V000007 estado = 'cancelada'."
+}

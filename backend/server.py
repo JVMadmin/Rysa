@@ -379,6 +379,7 @@ class SettingsInput(BaseModel):
     moneda: str = "MXN"
     precios_incluyen_iva: bool = True
     listas_precios_nombres: List[str] = Field(default_factory=lambda: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"])
+    listas_precios_pct: List[float] = Field(default_factory=lambda: [40, 30, 20, 15, 10])
     sucursales: List[SucursalItem] = Field(default_factory=list)
 
 # =========================================================================
@@ -897,8 +898,16 @@ async def cerrar_caja(data: CajaClose, user: dict = Depends(require_permission("
     return {"cierre": cierre}
 
 @api.get("/caja/historial")
-async def caja_historial(user: dict = Depends(get_current_user)):
-    cajas = await db.cajas.find({"estado": "cerrada"}, {"_id": 0}).sort("fecha_cierre", -1).to_list(100)
+async def caja_historial(desde: Optional[str] = None, hasta: Optional[str] = None,
+                         estado: Optional[str] = None, user: dict = Depends(get_current_user)):
+    query = {}
+    if estado in ("abierta", "cerrada"):
+        query["estado"] = estado
+    cajas = await db.cajas.find(query, {"_id": 0}).sort("fecha_apertura", -1).to_list(500)
+    d = desde[:10] if desde else None
+    h = hasta[:10] if hasta else None
+    if d or h:
+        cajas = [c for c in cajas if (not d or (c.get("fecha_apertura", "")[:10] >= d)) and (not h or (c.get("fecha_apertura", "")[:10] <= h))]
     return cajas
 
 # =========================================================================
@@ -927,23 +936,36 @@ def calcular_venta(items: List[dict], descuento_global: float):
 
 @api.get("/sales")
 async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
+                     desde: Optional[str] = None, hasta: Optional[str] = None,
+                     vendedor_id: Optional[str] = None, q: Optional[str] = None,
                      user: dict = Depends(get_current_user)):
     query = {}
     if estado:
         query["estado"] = estado
-    sales = await db.sales.find(query, {"_id": 0}).sort("fecha", -1).to_list(1000)
-    if rango:
-        now = now_utc()
-        def keep(s):
-            f = s.get("fecha", "")
-            if rango == "hoy":
-                return f[:10] == now.date().isoformat()
-            if rango == "mes":
-                return f[:7] == now.strftime("%Y-%m")
-            if rango == "anio":
-                return f[:4] == str(now.year)
-            return True
-        sales = [s for s in sales if keep(s)]
+    if vendedor_id:
+        query["vendedor_id"] = vendedor_id
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"folio": rx}, {"cliente_nombre": rx}]
+    sales = await db.sales.find(query, {"_id": 0}).sort("fecha", -1).to_list(3000)
+    now = now_utc()
+    d = desde[:10] if desde else None
+    h = hasta[:10] if hasta else None
+    if rango and rango not in ("all", "rango"):
+        if rango == "hoy":
+            d = h = now.date().isoformat()
+        elif rango == "semana":
+            d = (now - timedelta(days=now.weekday())).date().isoformat(); h = now.date().isoformat()
+        elif rango == "mes":
+            d = now.strftime("%Y-%m-01"); h = now.date().isoformat()
+        elif rango == "mes_anterior":
+            first_this = now.replace(day=1)
+            last_prev = first_this - timedelta(days=1)
+            d = last_prev.strftime("%Y-%m-01"); h = last_prev.date().isoformat()
+        elif rango == "anio":
+            d = f"{now.year}-01-01"; h = now.date().isoformat()
+    if d or h:
+        sales = [s for s in sales if (not d or s.get("fecha", "")[:10] >= d) and (not h or s.get("fecha", "")[:10] <= h)]
     return sales
 
 @api.get("/sales/{sale_id}")
@@ -952,6 +974,17 @@ async def get_sale(sale_id: str, user: dict = Depends(get_current_user)):
     if not s:
         raise HTTPException(404, "Venta no encontrada")
     return s
+
+@api.put("/sales/{sale_id}/cliente")
+async def set_sale_cliente(sale_id: str, payload: dict, user: dict = Depends(require_permission("venta.crear"))):
+    s = await db.sales.find_one({"id": sale_id})
+    if not s:
+        raise HTTPException(404, "Venta no encontrada")
+    if s.get("facturado"):
+        raise HTTPException(400, "La venta ya fue facturada")
+    await db.sales.update_one({"id": sale_id}, {"$set": {
+        "cliente_id": payload.get("cliente_id"), "cliente_nombre": payload.get("cliente_nombre", "")}})
+    return {"ok": True}
 
 @api.post("/sales")
 async def create_sale(data: SaleInput, user: dict = Depends(require_permission("venta.crear"))):
@@ -1772,6 +1805,62 @@ async def cancelar_cfdi(cfdi_id: str, motivo: str = "02", uuid_reemplazo: Option
         await db.sales.update_one({"id": doc["sale_id"]}, {"$set": {"facturado": False}})
     await log_audit(user, "cancelar", "facturacion", cfdi_id, f"motivo {motivo}")
     return {"ok": True, "result": result}
+
+# =========================================================================
+# REPORTES DE VENTAS Y UTILIDAD
+# =========================================================================
+@api.get("/reports/ventas")
+async def reporte_ventas(desde: Optional[str] = None, hasta: Optional[str] = None,
+                         group: str = "dia", user: dict = Depends(get_current_user)):
+    now = now_utc()
+    d = (desde[:10] if desde else now.strftime("%Y-%m-01"))
+    h = (hasta[:10] if hasta else now.date().isoformat())
+    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(50000)
+    sales = [s for s in sales if d <= s.get("fecha", "")[:10] <= h]
+    # costos de productos
+    prods = await db.products.find({}, {"_id": 0, "id": 1, "costo": 1}).to_list(50000)
+    costo_map = {p["id"]: float(p.get("costo") or 0) for p in prods}
+    por_producto = {}
+    serie = {}
+    total_ingreso = total_costo = total_ventas = 0.0
+    for s in sales:
+        key = s.get("fecha", "")[:7] if group == "mes" else s.get("fecha", "")[:10]
+        serie[key] = serie.get(key, 0) + float(s.get("total", 0))
+        total_ventas += float(s.get("total", 0))
+        for it in s.get("items", []):
+            tasa = float(it.get("iva_tasa", 16)) / 100
+            neto = (it["cantidad"] * it["precio"] - (it.get("descuento", 0) or 0)) / (1 + tasa)
+            costo = costo_map.get(it.get("product_id"), 0) * it["cantidad"]
+            pid = it.get("product_id") or it.get("codigo")
+            p = por_producto.get(pid)
+            if not p:
+                p = {"codigo": it.get("codigo"), "descripcion": it.get("descripcion"),
+                     "cantidad": 0, "ingreso": 0.0, "costo": 0.0}
+                por_producto[pid] = p
+            p["cantidad"] += it["cantidad"]
+            p["ingreso"] += neto
+            p["costo"] += costo
+            total_ingreso += neto
+            total_costo += costo
+    productos = []
+    for p in por_producto.values():
+        util = p["ingreso"] - p["costo"]
+        productos.append({**p, "ingreso": round(p["ingreso"], 2), "costo": round(p["costo"], 2),
+                          "utilidad": round(util, 2),
+                          "margen": round(util / p["ingreso"] * 100, 2) if p["ingreso"] else 0})
+    top_vendidos = sorted(productos, key=lambda x: x["cantidad"], reverse=True)[:15]
+    top_utilidad = sorted(productos, key=lambda x: x["utilidad"], reverse=True)[:15]
+    series = [{"periodo": k, "total": round(v, 2)} for k, v in sorted(serie.items())]
+    util_total = round(total_ingreso - total_costo, 2)
+    return {
+        "desde": d, "hasta": h, "group": group,
+        "totales": {"ventas": round(total_ventas, 2), "ingreso_neto": round(total_ingreso, 2),
+                    "costo": round(total_costo, 2), "utilidad": util_total,
+                    "margen": round(util_total / total_ingreso * 100, 2) if total_ingreso else 0,
+                    "tickets": len(sales)},
+        "series": series, "top_vendidos": top_vendidos, "top_utilidad": top_utilidad,
+        "productos": sorted(productos, key=lambda x: x["utilidad"], reverse=True),
+    }
 
 # =========================================================================
 # STARTUP

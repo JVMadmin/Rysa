@@ -192,12 +192,12 @@ export default function Productos() {
             <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
               <th className="p-3">Estado</th><th className="p-3">Código</th><th className="p-3">Descripción</th>
               <th className="p-3">Línea</th><th className="p-3 text-right">Costo</th><th className="p-3 text-right">Exist.</th>
-              <th className="p-3">U.M.</th><th className="p-3 text-right">Precio</th><th className="p-3 text-right">Min</th><th className="p-3"></th>
+              <th className="p-3">U.M.</th><th className="p-3 text-right">Precio</th><th className="p-3 text-right">Utilidad</th><th className="p-3 text-right">Min</th><th className="p-3"></th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
+            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
             {!loading && rows.map((p) => {
               const [color, label] = dot(p);
               return (
@@ -210,6 +210,9 @@ export default function Productos() {
                   <td className="p-3 text-right font-semibold">{p.existencia}</td>
                   <td className="p-3">{p.unidad_medida}</td>
                   <td className="p-3 text-right">{money(p.precios?.[0]?.precio_con_iva)}</td>
+                  <td className="p-3 text-right" data-testid={`prod-utilidad-${p.codigo}`}>
+                    {(() => { const psi = p.precios?.[0]?.precio_sin_iva ?? 0; const u = psi - (p.costo || 0); const m = psi ? (u / psi * 100) : 0; return (<span className={u > 0 ? "text-emerald-700 font-semibold" : "text-red-600"}>{money(u)} <span className="text-xs text-slate-400">({m.toFixed(0)}%)</span></span>); })()}
+                  </td>
                   <td className="p-3 text-right text-slate-500">{p.stock_minimo}</td>
                   <td className="p-3">
                     <div className="flex gap-1 justify-end">

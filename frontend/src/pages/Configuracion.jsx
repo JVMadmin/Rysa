@@ -12,10 +12,11 @@ export default function Configuracion() {
   const [s, setS] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], ...r.data })); }, []);
+  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: [40, 30, 20, 15, 10], ...r.data })); }, []);
 
   const set = (k, v) => setS((x) => ({ ...x, [k]: v }));
   const setLista = (i, v) => setS((x) => ({ ...x, listas_precios_nombres: x.listas_precios_nombres.map((n, idx) => idx === i ? v : n) }));
+  const setListaPct = (i, v) => setS((x) => ({ ...x, listas_precios_pct: (x.listas_precios_pct || [40, 30, 20, 15, 10]).map((n, idx) => idx === i ? v : n) }));
   const setSuc = (i, k, v) => setS((x) => ({ ...x, sucursales: x.sucursales.map((su, idx) => idx === i ? { ...su, [k]: v } : su) }));
   const addSuc = () => setS((x) => ({ ...x, sucursales: [...x.sucursales, { nombre: "", direccion: "", ciudad: "", estado: "", cp: "", telefono: "", activa: true }] }));
   const delSuc = (i) => setS((x) => ({ ...x, sucursales: x.sucursales.filter((_, idx) => idx !== i) }));
@@ -75,15 +76,20 @@ export default function Configuracion() {
               {I("Moneda", "moneda")}
             </div>
             <div>
-              <Label className="text-xs uppercase tracking-wider text-slate-500 mb-2 block">Nombres de las listas de precios</Label>
+              <Label className="text-xs uppercase tracking-wider text-slate-500 mb-2 block">Listas de precios (nombre y % de utilidad sobre costo)</Label>
               <div className="space-y-2">
                 {s.listas_precios_nombres.map((n, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <span className="text-sm text-slate-400 w-16">Lista {i + 1}</span>
-                    <Input value={n} onChange={(e) => setLista(i, e.target.value)} data-testid={`cfg-lista-${i}`} />
+                    <Input value={n} onChange={(e) => setLista(i, e.target.value)} data-testid={`cfg-lista-${i}`} placeholder={`Precio ${i + 1}`} />
+                    <div className="relative w-28">
+                      <Input type="number" value={(s.listas_precios_pct || [])[i] ?? ""} onChange={(e) => setListaPct(i, Number(e.target.value))} className="pr-6" data-testid={`cfg-lista-pct-${i}`} placeholder="%" />
+                      <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+                    </div>
                   </div>
                 ))}
               </div>
+              <p className="text-[11px] text-slate-400 mt-2">El % define la utilidad sugerida de cada lista sobre el costo (referencia para nuevos precios).</p>
             </div>
           </div>
         </TabsContent>
