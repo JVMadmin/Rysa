@@ -9,7 +9,7 @@ import pytest
 import requests
 import pandas as pd
 
-BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/") if os.environ.get("REACT_APP_BACKEND_URL") else "https://rysa-erp-categorias.preview.emergentagent.com"
+BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/") if os.environ.get("REACT_APP_BACKEND_URL") else "https://erp-inventory-32.preview.emergentagent.com"
 API = f"{BASE_URL}/api"
 
 ADMIN_EMAIL = "REDACTED"

@@ -386,16 +386,21 @@ class SettingsInput(BaseModel):
 # INVENTARIO (KARDEX) - helper
 # =========================================================================
 async def registrar_movimiento(product: dict, tipo: str, entrada: float, salida: float,
-                                usuario: dict, documento: str = "", referencia: str = ""):
-    nueva_existencia = round(float(product.get("existencia", 0)) + entrada - salida, 3)
+                                usuario: dict, documento: str = "", referencia: str = "",
+                                costo: float = 0.0, motivo: str = "", observaciones: str = ""):
+    anterior = round(float(product.get("existencia", 0)), 3)
+    nueva_existencia = round(anterior + entrada - salida, 3)
     await db.products.update_one({"id": product["id"]}, {"$set": {"existencia": nueva_existencia, "updated_at": iso_now()}})
+    now = now_utc()
     await db.inventory_movements.insert_one({
         "id": uid(), "product_id": product["id"], "codigo": product.get("codigo"),
         "descripcion": product.get("descripcion"), "tipo": tipo,
         "documento": documento, "entrada": entrada, "salida": salida,
-        "existencia_resultante": nueva_existencia,
+        "existencia_anterior": anterior, "existencia_resultante": nueva_existencia,
+        "costo": round(float(costo or 0), 4), "motivo": motivo, "observaciones": observaciones,
         "usuario_id": usuario.get("id"), "usuario_nombre": usuario.get("name"),
         "referencia": referencia, "fecha": iso_now(),
+        "hora": now.strftime("%H:%M:%S"),
     })
     return nueva_existencia
 
