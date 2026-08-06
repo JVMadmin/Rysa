@@ -96,6 +96,15 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - Verificado por testing agent (iter.4): Remitir/cliente, cancelar original, facturar directo (toast claro sin PAC), filtros, vendedor, reportes. Dato de prueba V000007 restaurado a 'confirmada'.
 
 
+## Implementado (2026-08-06) — Fase 2 Bloque C: Movimientos de Inventario y Kardex (dentro de Productos)
+- Backend: `InventoryAdjust` ampliado con `costo`, `motivo`, `observaciones`. `POST /products/{id}/ajuste` soporta tipos entrada/salida/ajuste(±)/merma/devolución/corrección; costo por defecto = costo del producto si no se envía. `registrar_movimiento` ya guardaba existencia_anterior/resultante, costo, motivo, observaciones, usuario y hora.
+- Nuevo endpoint global `GET /inventory/movements?tipo=&q=&desde=&hasta=&skip=&limit=` (filtros por tipo, búsqueda código/descripción/documento/usuario, rango de fechas) → {total, movimientos} ordenados desc.
+- Frontend (integrado en `Productos.jsx` por decisión del usuario — NO página independiente):
+  - Botón "Movimientos" en la barra → diálogo global con filtros (tipo, búsqueda, desde/hasta) y tabla (fecha, código, producto, tipo, doc, motivo, usuario, entrada/salida, existencia resultante).
+  - Kardex por producto (ícono reloj) ahora incluye formulario de registro (tipo, cantidad ±, costo unitario prellenado, documento, motivo, observaciones) con permiso `inventario.ajuste`; muestra existencia actual y recarga tras registrar.
+- NO incluye transferencia entre sucursales/almacenes (pospuesto por decisión del usuario, multi-almacén no construido).
+- Verificado con curl (entrada +10, merma -3, ajuste -2 → existencia 7→12; filtro global tipo=merma; kardex con costo/motivo/usuario) y capturas (diálogo global y kardex por producto).
+
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones
 - P2: Facturación electrónica, Multi-almacén/sucursales, Catálogo online/e-commerce, Pedidos WhatsApp, App móvil, reportes avanzados, recuperación de contraseña por email, código de barras/escáner

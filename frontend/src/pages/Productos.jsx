@@ -9,9 +9,10 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import ProductForm from "@/components/ProductForm";
 import { toast } from "sonner";
-import { Plus, Search, Download, Upload, Pencil, History, Loader2, Boxes, FileDown } from "lucide-react";
+import { Plus, Search, Download, Upload, Pencil, History, Loader2, Boxes, FileDown, ArrowDownUp } from "lucide-react";
 
 const dot = (p) => {
   const ex = Number(p.existencia || 0), min = Number(p.stock_minimo || 0);
@@ -20,6 +21,15 @@ const dot = (p) => {
   return ["bg-green-500", "Stock normal"];
 };
 const estadoBadge = { activo: "bg-green-100 text-green-700", baja: "bg-slate-200 text-slate-600", suspendido: "bg-amber-100 text-amber-700" };
+const MOV_TIPOS = [
+  { v: "entrada", label: "Entrada", cls: "bg-green-100 text-green-700" },
+  { v: "salida", label: "Salida", cls: "bg-red-100 text-red-700" },
+  { v: "ajuste", label: "Ajuste (+/-)", cls: "bg-blue-100 text-blue-700" },
+  { v: "merma", label: "Merma", cls: "bg-orange-100 text-orange-700" },
+  { v: "devolucion", label: "Devolución", cls: "bg-teal-100 text-teal-700" },
+];
+const movBadge = (t) => (MOV_TIPOS.find((x) => x.v === t)?.cls) || "bg-slate-100 text-slate-600";
+const fmtFecha = (f) => (f || "").slice(0, 16).replace("T", " ");
 
 export default function Productos() {
   const { can } = useAuth();
@@ -35,6 +45,13 @@ export default function Productos() {
   const [editing, setEditing] = useState(null);
   const [movProd, setMovProd] = useState(null);
   const [movs, setMovs] = useState([]);
+  const [movForm, setMovForm] = useState({ tipo: "entrada", cantidad: "", costo: "", documento: "", motivo: "", observaciones: "" });
+  const [savingMov, setSavingMov] = useState(false);
+  const [gOpen, setGOpen] = useState(false);
+  const [gMovs, setGMovs] = useState([]);
+  const [gTotal, setGTotal] = useState(0);
+  const [gLoading, setGLoading] = useState(false);
+  const [gf, setGf] = useState({ tipo: "all", q: "", desde: "", hasta: "" });
   const [importOpen, setImportOpen] = useState(false);
   const [preview, setPreview] = useState(null);
   const [importMode, setImportMode] = useState("ambos");
@@ -66,9 +83,49 @@ export default function Productos() {
 
   const openMovs = async (p) => {
     setMovProd(p);
+    setMovForm({ tipo: "entrada", cantidad: "", costo: p.costo ? String(p.costo) : "", documento: "", motivo: "", observaciones: "" });
     const { data } = await api.get(`/products/${p.id}/movimientos`);
     setMovs(data);
   };
+
+  const submitMov = async () => {
+    const cant = Number(movForm.cantidad);
+    if (!cant || (movForm.tipo !== "ajuste" && cant <= 0)) return toast.error("Ingresa una cantidad válida");
+    setSavingMov(true);
+    try {
+      await api.post(`/products/${movProd.id}/ajuste`, {
+        tipo: movForm.tipo,
+        cantidad: cant,
+        concepto: movForm.observaciones || "",
+        documento: movForm.documento || "",
+        costo: Number(movForm.costo) || 0,
+        motivo: movForm.motivo || "",
+        observaciones: movForm.observaciones || "",
+      });
+      toast.success("Movimiento registrado");
+      setMovForm({ tipo: "entrada", cantidad: "", costo: movProd.costo ? String(movProd.costo) : "", documento: "", motivo: "", observaciones: "" });
+      const { data } = await api.get(`/products/${movProd.id}/movimientos`);
+      setMovs(data);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setSavingMov(false); }
+  };
+
+  const loadGlobal = async () => {
+    setGLoading(true);
+    try {
+      const params = { limit: 300 };
+      if (gf.tipo !== "all") params.tipo = gf.tipo;
+      if (gf.q) params.q = gf.q;
+      if (gf.desde) params.desde = gf.desde;
+      if (gf.hasta) params.hasta = gf.hasta;
+      const { data } = await api.get("/inventory/movements", { params });
+      setGMovs(data.movimientos);
+      setGTotal(data.total);
+    } catch (e) { toast.error("Error al cargar movimientos"); }
+    finally { setGLoading(false); }
+  };
+  const openGlobal = () => { setGOpen(true); loadGlobal(); };
 
   const changeEstado = async (p, e) => {
     await api.patch(`/products/${p.id}/estado`, null, { params: { estado: e } });
@@ -145,6 +202,7 @@ export default function Productos() {
           <Button variant="outline" onClick={() => download("/products/plantilla/excel", "plantilla_productos.xlsx")} data-testid="plantilla-btn"><FileDown className="w-4 h-4 mr-1" /> Plantilla</Button>
           {can("importar") && <Button variant="outline" onClick={() => fileRef.current.click()} data-testid="import-btn"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
           <Button variant="outline" onClick={exportExcel} data-testid="export-btn"><Download className="w-4 h-4 mr-1" /> Exportar</Button>
+          <Button variant="outline" onClick={openGlobal} data-testid="movimientos-btn"><ArrowDownUp className="w-4 h-4 mr-1" /> Movimientos</Button>
           {can("producto.crear") && <Button onClick={() => { setEditing(null); setFormOpen(true); }} data-testid="nuevo-producto-btn" className="bg-[#0055A4] hover:bg-[#004385]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
         </div>
@@ -248,31 +306,140 @@ export default function Productos() {
 
       <ProductForm open={formOpen} onClose={() => setFormOpen(false)} product={editing} onSaved={load} />
 
-      {/* Movimientos / Kardex */}
+      {/* Movimientos / Kardex por producto */}
       <Dialog open={!!movProd} onOpenChange={(o) => !o && setMovProd(null)}>
-        <DialogContent className="max-w-2xl" data-testid="kardex-dialog">
-          <DialogHeader><DialogTitle className="font-display">Kardex · {movProd?.descripcion}</DialogTitle></DialogHeader>
-          <div className="max-h-96 overflow-y-auto">
+        <DialogContent className="max-w-3xl" data-testid="kardex-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display">Kardex · {movProd?.descripcion}</DialogTitle>
+            <p className="text-sm text-slate-500">Existencia actual: <span className="font-semibold text-slate-700" data-testid="kardex-existencia">{movProd?.existencia}</span> {movProd?.unidad_medida}</p>
+          </DialogHeader>
+
+          {can("inventario.ajuste") && (
+            <div className="bg-slate-50 border border-slate-200 rounded-md p-3 space-y-3" data-testid="mov-form">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">Tipo</Label>
+                  <Select value={movForm.tipo} onValueChange={(v) => setMovForm((f) => ({ ...f, tipo: v }))}>
+                    <SelectTrigger className="h-9" data-testid="mov-tipo"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {MOV_TIPOS.map((t) => <SelectItem key={t.v} value={t.v}>{t.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">Cantidad {movForm.tipo === "ajuste" && "(+/-)"}</Label>
+                  <Input type="number" step="any" value={movForm.cantidad} onChange={(e) => setMovForm((f) => ({ ...f, cantidad: e.target.value }))} className="h-9" data-testid="mov-cantidad" placeholder="0" />
+                </div>
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">Costo unitario</Label>
+                  <Input type="number" step="any" value={movForm.costo} onChange={(e) => setMovForm((f) => ({ ...f, costo: e.target.value }))} className="h-9" data-testid="mov-costo" placeholder="0.00" />
+                </div>
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">Documento</Label>
+                  <Input value={movForm.documento} onChange={(e) => setMovForm((f) => ({ ...f, documento: e.target.value }))} className="h-9" data-testid="mov-documento" placeholder="Factura / Ref." />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">Motivo</Label>
+                  <Input value={movForm.motivo} onChange={(e) => setMovForm((f) => ({ ...f, motivo: e.target.value }))} className="h-9" data-testid="mov-motivo" placeholder="Compra, merma por daño, ajuste físico..." />
+                </div>
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">Observaciones</Label>
+                  <Textarea rows={1} value={movForm.observaciones} onChange={(e) => setMovForm((f) => ({ ...f, observaciones: e.target.value }))} className="min-h-9" data-testid="mov-observaciones" placeholder="Notas adicionales..." />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={submitMov} disabled={savingMov} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="mov-guardar">
+                  {savingMov ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />} Registrar movimiento
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="max-h-80 overflow-y-auto border border-slate-200 rounded-md">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50"><tr className="text-left text-xs uppercase text-slate-500">
-                <th className="p-2">Fecha</th><th className="p-2">Movimiento</th><th className="p-2">Doc</th>
+              <thead className="bg-slate-50 sticky top-0"><tr className="text-left text-xs uppercase text-slate-500">
+                <th className="p-2">Fecha</th><th className="p-2">Movimiento</th><th className="p-2">Doc</th><th className="p-2">Motivo</th>
                 <th className="p-2 text-right">Entrada</th><th className="p-2 text-right">Salida</th><th className="p-2 text-right">Exist.</th>
               </tr></thead>
               <tbody>
                 {movs.map((m) => (
                   <tr key={m.id} className="border-t border-slate-100">
-                    <td className="p-2 text-slate-500">{m.fecha?.slice(0, 16).replace("T", " ")}</td>
-                    <td className="p-2"><Badge variant="outline">{m.tipo}</Badge></td>
+                    <td className="p-2 text-slate-500">{fmtFecha(m.fecha)}</td>
+                    <td className="p-2"><Badge className={movBadge(m.tipo)}>{m.tipo}</Badge></td>
                     <td className="p-2">{m.documento}</td>
+                    <td className="p-2 text-slate-500 truncate max-w-[140px]" title={m.motivo || m.observaciones}>{m.motivo || m.observaciones}</td>
                     <td className="p-2 text-right text-green-600">{m.entrada || ""}</td>
                     <td className="p-2 text-right text-red-600">{m.salida || ""}</td>
                     <td className="p-2 text-right font-semibold">{m.existencia_resultante}</td>
                   </tr>
                 ))}
-                {movs.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-slate-400">Sin movimientos.</td></tr>}
+                {movs.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">Sin movimientos.</td></tr>}
               </tbody>
             </table>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Movimientos globales de inventario */}
+      <Dialog open={gOpen} onOpenChange={setGOpen}>
+        <DialogContent className="max-w-5xl" data-testid="movimientos-globales-dialog">
+          <DialogHeader><DialogTitle className="font-display">Movimientos de Inventario</DialogTitle></DialogHeader>
+          <div className="flex flex-wrap gap-2 items-end">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input placeholder="Producto, código, documento, usuario..." value={gf.q}
+                onChange={(e) => setGf((f) => ({ ...f, q: e.target.value }))} onKeyDown={(e) => e.key === "Enter" && loadGlobal()}
+                className="pl-9 h-9" data-testid="gmov-q" />
+            </div>
+            <Select value={gf.tipo} onValueChange={(v) => setGf((f) => ({ ...f, tipo: v }))}>
+              <SelectTrigger className="w-40 h-9" data-testid="gmov-tipo"><SelectValue placeholder="Tipo" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los tipos</SelectItem>
+                {MOV_TIPOS.map((t) => <SelectItem key={t.v} value={t.v}>{t.label}</SelectItem>)}
+                <SelectItem value="venta">Venta</SelectItem>
+                <SelectItem value="correccion">Corrección</SelectItem>
+              </SelectContent>
+            </Select>
+            <div>
+              <Label className="text-xs text-slate-500">Desde</Label>
+              <Input type="date" value={gf.desde} onChange={(e) => setGf((f) => ({ ...f, desde: e.target.value }))} className="h-9 w-40" data-testid="gmov-desde" />
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Hasta</Label>
+              <Input type="date" value={gf.hasta} onChange={(e) => setGf((f) => ({ ...f, hasta: e.target.value }))} className="h-9 w-40" data-testid="gmov-hasta" />
+            </div>
+            <Button variant="outline" onClick={loadGlobal} className="h-9" data-testid="gmov-buscar"><Search className="w-4 h-4" /></Button>
+          </div>
+          <div className="max-h-[26rem] overflow-y-auto border border-slate-200 rounded-md">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 sticky top-0"><tr className="text-left text-xs uppercase text-slate-500">
+                <th className="p-2">Fecha</th><th className="p-2">Código</th><th className="p-2">Producto</th><th className="p-2">Tipo</th>
+                <th className="p-2">Doc</th><th className="p-2">Motivo</th><th className="p-2">Usuario</th>
+                <th className="p-2 text-right">Entrada</th><th className="p-2 text-right">Salida</th><th className="p-2 text-right">Exist.</th>
+              </tr></thead>
+              <tbody>
+                {gLoading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
+                {!gLoading && gMovs.map((m) => (
+                  <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`gmov-row-${m.id}`}>
+                    <td className="p-2 text-slate-500 whitespace-nowrap">{fmtFecha(m.fecha)}</td>
+                    <td className="p-2 font-medium text-[#0055A4]">{m.codigo}</td>
+                    <td className="p-2 max-w-[200px] truncate" title={m.descripcion}>{m.descripcion}</td>
+                    <td className="p-2"><Badge className={movBadge(m.tipo)}>{m.tipo}</Badge></td>
+                    <td className="p-2">{m.documento}</td>
+                    <td className="p-2 text-slate-500 max-w-[160px] truncate" title={m.motivo || m.observaciones}>{m.motivo || m.observaciones}</td>
+                    <td className="p-2 text-slate-500">{m.usuario_nombre}</td>
+                    <td className="p-2 text-right text-green-600">{m.entrada || ""}</td>
+                    <td className="p-2 text-right text-red-600">{m.salida || ""}</td>
+                    <td className="p-2 text-right font-semibold">{m.existencia_resultante}</td>
+                  </tr>
+                ))}
+                {!gLoading && gMovs.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-slate-400">Sin movimientos.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-slate-400" data-testid="gmov-total">{gTotal} movimientos {gMovs.length < gTotal && `(mostrando ${gMovs.length})`}</p>
         </DialogContent>
       </Dialog>
 

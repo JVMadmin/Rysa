@@ -225,10 +225,13 @@ class ProductInput(BaseModel):
     imagen_url: Optional[str] = ""
 
 class InventoryAdjust(BaseModel):
-    tipo: str  # entrada | ajuste | devolucion | correccion
+    tipo: str  # entrada | salida | ajuste | merma | devolucion | correccion
     cantidad: float
     concepto: Optional[str] = ""
     documento: Optional[str] = ""
+    costo: Optional[float] = 0.0
+    motivo: Optional[str] = ""
+    observaciones: Optional[str] = ""
 
 class ClientInput(BaseModel):
     # --- General ---
@@ -576,19 +579,48 @@ async def adjust_inventory(product_id: str, data: InventoryAdjust, user: dict = 
     if not p:
         raise HTTPException(404, "Producto no encontrado")
     entrada = salida = 0.0
-    if data.tipo in ("entrada", "devolucion", "correccion") and data.cantidad >= 0:
+    if data.tipo in ("entrada", "devolucion"):
         entrada = abs(data.cantidad)
-    elif data.tipo == "ajuste":
-        # ajuste puede ser + o -
+    elif data.tipo in ("salida", "merma"):
+        salida = abs(data.cantidad)
+    elif data.tipo in ("ajuste", "correccion"):
+        # ajuste/corrección puede ser + o -
         if data.cantidad >= 0:
             entrada = data.cantidad
         else:
             salida = abs(data.cantidad)
     else:
-        salida = abs(data.cantidad)
-    nueva = await registrar_movimiento(p, data.tipo, entrada, salida, user, data.documento, data.concepto)
+        raise HTTPException(400, "Tipo de movimiento inválido")
+    costo = float(data.costo) if (data.costo and float(data.costo) > 0) else float(p.get("costo", 0) or 0)
+    nueva = await registrar_movimiento(p, data.tipo, entrada, salida, user, data.documento,
+                                       data.concepto, costo=costo, motivo=data.motivo or "",
+                                       observaciones=data.observaciones or "")
     await log_audit(user, "ajuste_inventario", "producto", product_id, f"{data.tipo} {data.cantidad}")
     return {"existencia": nueva}
+
+@api.get("/inventory/movements")
+async def inventory_movements(tipo: Optional[str] = None, q: Optional[str] = None,
+                              desde: Optional[str] = None, hasta: Optional[str] = None,
+                              skip: int = 0, limit: int = 200,
+                              user: dict = Depends(get_current_user)):
+    limit = max(1, min(int(limit), 500))
+    skip = max(0, int(skip))
+    query: dict = {}
+    if tipo and tipo != "all":
+        query["tipo"] = tipo
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"documento": rx}, {"usuario_nombre": rx}]
+    if desde or hasta:
+        rango: dict = {}
+        if desde:
+            rango["$gte"] = desde
+        if hasta:
+            rango["$lte"] = hasta + "T23:59:59"
+        query["fecha"] = rango
+    total = await db.inventory_movements.count_documents(query)
+    docs = await db.inventory_movements.find(query, {"_id": 0}).sort("fecha", -1).skip(skip).limit(limit).to_list(limit)
+    return {"total": total, "movimientos": docs}
 
 # =========================================================================
 # CATEGORÍAS
