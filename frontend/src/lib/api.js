@@ -23,3 +23,6 @@ export const money = (n) =>
   new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(Number(n || 0));
 
 export const BLOB = API;
+
+// Convierte una URL relativa de archivo (/api/files/...) en absoluta usando el backend.
+export const fileUrl = (u) => (!u ? "" : /^https?:\/\//.test(u) ? u : `${process.env.REACT_APP_BACKEND_URL}${u.startsWith("/") ? "" : "/"}${u}`);

@@ -11,9 +11,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import ProductForm from "@/components/ProductForm";
+import { TableScroller } from "@/components/TableScroller";
 import { toast } from "sonner";
 import { Plus, Search, Download, Upload, Pencil, History, Loader2, Boxes, FileDown, ArrowDownUp } from "lucide-react";
-
 const dot = (p) => {
   const ex = Number(p.existencia || 0), min = Number(p.stock_minimo || 0);
   if (ex <= 0) return ["bg-red-500", "Sin existencia"];
@@ -244,7 +244,8 @@ export default function Productos() {
         <Button variant="outline" onClick={doSearch}><Search className="w-4 h-4" /></Button>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+      <div className="bg-white border border-slate-200 rounded-md">
+        <TableScroller testid="productos-scroller">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 sticky top-0">
             <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
@@ -293,6 +294,7 @@ export default function Productos() {
             })}
           </tbody>
         </table>
+        </TableScroller>
       </div>
 
       {/* Paginación */}

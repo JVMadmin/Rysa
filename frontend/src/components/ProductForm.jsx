@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { api, formatApiError, money } from "@/lib/api";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus, X, Barcode } from "lucide-react";
+import { ImageUpload } from "@/components/ImageUpload";
 
 // Tipo por campo (C/M texto, N numero, D fecha, L booleano)
 const T = {
@@ -31,6 +32,7 @@ const ALL = Object.keys(T);
 
 const SECTIONS = [
   { id: "ident", label: "Identificación", fields: ["posicion", "codigo", "descrip", "descriplrg", "status"] },
+  { id: "barras", label: "Códigos de barras", customBarras: true },
   { id: "clasif", label: "Clasificación", fields: ["clasifica", "categoria", "categocve", "deptocve", "linea"] },
   { id: "unid", label: "Unidades", fields: ["unimedida", "unimedcve", "empaque", "unimedempq"] },
   { id: "inv", label: "Inventario", fields: ["existencia", "ubicacion", "stockmin", "stockmax", "xentregar", "xrecibir", "porpedir"] },
@@ -40,7 +42,7 @@ const SECTIONS = [
   { id: "prov", label: "Proveedor", fields: ["proveedor"] },
   { id: "hist", label: "Historial", fields: ["fechaalta", "ultfcompra", "ultccompra", "ultfdevcom", "ultcdevcom", "ultfdevven", "ultcdevven", "ultfventa", "ultcventa", "ultprecio", "vta_mes", "vta_anual"] },
   { id: "cfg", label: "Configuración", fields: ["insumo", "numseries", "factcoment", "integrado", "valexist", "modiprecio", "aplidescto", "topecosto", "inventario", "movkardex", "ventaweb", "lotes", "controlado", "bascula", "asociado", "flete"] },
-  { id: "media", label: "Multimedia", fields: ["imagen", "foto", "fichatec"] },
+  { id: "media", label: "Multimedia", customMedia: true },
   { id: "coment", label: "Comentarios", fields: ["comentario", "rotacion"] },
   { id: "comis", label: "Comisiones", fields: ["comision", "comitipo"] },
 ];
@@ -51,6 +53,7 @@ const blank = () => {
   const f = {};
   ALL.forEach((k) => (f[k] = T[k] === "L" ? false : ""));
   f.status = "A"; f.impuesto = 16; f.unimedida = "PZA";
+  f.codigos_barras = [];
   return f;
 };
 
@@ -73,6 +76,7 @@ function toForm(p) {
   }
   if (f.preciomin === "" && p.precio_minimo) f.preciomin = p.precio_minimo;
   if (!f.imagen) f.imagen = p.imagen_url || "";
+  f.codigos_barras = Array.isArray(p.codigos_barras) ? p.codigos_barras : (p.codigos_barras ? [String(p.codigos_barras)] : []);
   return f;
 }
 
@@ -81,11 +85,20 @@ const num = (v) => (v === "" || v == null ? 0 : Number(v));
 export default function ProductForm({ open, onClose, product, onSaved }) {
   const [f, setF] = useState(blank());
   const [saving, setSaving] = useState(false);
+  const [barcodeInput, setBarcodeInput] = useState("");
   const isEdit = !!product;
 
   useEffect(() => { if (open) setF(product ? toForm(product) : blank()); }, [open, product]);
 
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+
+  const addBarcode = (code) => {
+    const v = String(code ?? barcodeInput).trim();
+    if (!v) return;
+    setF((s) => (s.codigos_barras.includes(v) ? s : { ...s, codigos_barras: [...s.codigos_barras, v] }));
+    setBarcodeInput("");
+  };
+  const removeBarcode = (v) => setF((s) => ({ ...s, codigos_barras: s.codigos_barras.filter((x) => x !== v) }));
 
   const setPrecio = (i, field, val) => {
     setF((s) => {
@@ -120,6 +133,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
       payload.estado = STATUS_TO_ESTADO[String(f.status).toUpperCase()] || "activo";
       payload.precio_minimo = num(f.preciomin);
       payload.imagen_url = f.imagen;
+      payload.codigos_barras = (f.codigos_barras || []).map((x) => String(x).trim()).filter(Boolean);
       payload.precios = [1, 2, 3, 4, 5].map((i) => ({
         nombre: `Precio ${i}`, utilidad_pct: num(f[`utilpreci${i}`]),
         precio_sin_iva: 0, precio_con_iva: num(f[`precio${i}`]),
@@ -194,6 +208,40 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
                     </tbody>
                   </table>
                   <p className="text-xs text-slate-400">Precio con IVA usado por el POS. UTILPRECIn ↔ PRECIOn.</p>
+                </div>
+              ) : s.customBarras ? (
+                <div className="space-y-3 max-w-xl" data-testid="prod-barras-section">
+                  <div className="flex items-center gap-2 text-slate-700 font-semibold text-sm"><Barcode className="w-4 h-4 text-[#0055A4]" /> Códigos de barras del producto</div>
+                  <p className="text-xs text-slate-400">Escanea con el lector o escribe el código y presiona Enter / Agregar. Puedes registrar varios códigos y sobreescribirlos.</p>
+                  <div className="flex gap-2">
+                    <Input
+                      value={barcodeInput}
+                      onChange={(e) => setBarcodeInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBarcode(); } }}
+                      placeholder="Escanea o escribe un código de barras"
+                      data-testid="prod-barcode-input" />
+                    <Button type="button" onClick={() => addBarcode()} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="prod-barcode-add"><Plus className="w-4 h-4 mr-1" /> Agregar</Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2" data-testid="prod-barcode-list">
+                    {(f.codigos_barras || []).length === 0 && <span className="text-xs text-slate-400">Sin códigos de barras.</span>}
+                    {(f.codigos_barras || []).map((code) => (
+                      <span key={code} className="inline-flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-full pl-3 pr-2 py-1 text-sm font-mono" data-testid={`prod-barcode-chip-${code}`}>
+                        {code}
+                        <button type="button" onClick={() => removeBarcode(code)} className="text-slate-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : s.customMedia ? (
+                <div className="space-y-4 max-w-lg" data-testid="prod-media-section">
+                  <div>
+                    <Label className="text-xs uppercase tracking-wider text-slate-500 mb-1 block">Imagen del producto</Label>
+                    <ImageUpload value={f.imagen} onChange={(v) => set("imagen", v)} testid="prod-image-upload" />
+                  </div>
+                  <div>
+                    <Label className="text-xs uppercase tracking-wider text-slate-500">Ficha técnica</Label>
+                    <Textarea value={f.fichatec ?? ""} onChange={(e) => set("fichatec", e.target.value)} className="mt-1" data-testid="prod-fichatec" placeholder="Material, medidas, presentación..." />
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2, Tags, Pencil, PackageSearch, ImageIcon } from "lucide-react";
+import { ImageUpload } from "@/components/ImageUpload";
+import { fileUrl } from "@/lib/api";
 
 export default function Categorias() {
   const { can } = useAuth();
@@ -48,7 +50,7 @@ export default function Categorias() {
               <div key={c.nombre} className="group bg-white border border-slate-200 rounded-md overflow-hidden hover:shadow-md transition-all" data-testid={`cat-card-${c.nombre}`}>
                 <div className="h-32 bg-slate-100 relative overflow-hidden">
                   {c.imagen_url
-                    ? <img src={c.imagen_url} alt={c.nombre} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                    ? <img src={fileUrl(c.imagen_url)} alt={c.nombre} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                     : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#0055A4]/10 to-[#FF5A00]/10"><ImageIcon className="w-8 h-8 text-slate-300" /></div>}
                   <Badge className="absolute top-2 right-2 bg-[#0055A4] text-white">{c.count}</Badge>
                 </div>
@@ -73,9 +75,8 @@ export default function Categorias() {
         <DialogContent className="max-w-lg" data-testid="categoria-form">
           <DialogHeader><DialogTitle className="font-display">Categoría · {f.nombre}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            {f.imagen_url && <img src={f.imagen_url} alt="preview" className="w-full h-36 object-cover rounded-md border border-slate-200" />}
-            <div><Label className="text-xs uppercase tracking-wider text-slate-500">URL de imagen</Label>
-              <Input value={f.imagen_url} onChange={(e) => setF((s) => ({ ...s, imagen_url: e.target.value }))} className="mt-1" data-testid="cat-imagen" placeholder="https://..." /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500 mb-1 block">Imagen de la categoría</Label>
+              <ImageUpload value={f.imagen_url} onChange={(v) => setF((s) => ({ ...s, imagen_url: v }))} testid="cat-image-upload" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Clave</Label>
               <Input value={f.clave} onChange={(e) => setF((s) => ({ ...s, clave: e.target.value }))} className="mt-1" data-testid="cat-clave" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Información / Descripción</Label>

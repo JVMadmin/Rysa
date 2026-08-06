@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, formatApiError, money } from "@/lib/api";
+import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, PauseCircle, PlayCircle, X, Package,
   Banknote, ArrowLeftRight, CreditCard, Tag, Printer, Hash, Keyboard, FileText,
-  Smartphone, Landmark, Gift, DollarSign, User as UserIcon, Check, Tags,
+  Smartphone, Landmark, Gift, DollarSign, User as UserIcon, Check, Tags, MessageCircle, Loader2,
 } from "lucide-react";
 
 const METODOS = [
@@ -51,6 +51,8 @@ export default function POS() {
   const [suspended, setSuspended] = useState([]);
   const [suspOpen, setSuspOpen] = useState(false);
   const [ticket, setTicket] = useState(null);
+  const [waPhone, setWaPhone] = useState("");
+  const [waSending, setWaSending] = useState(false);
   const [settings, setSettings] = useState({});
   const [nextFolio, setNextFolio] = useState({ venta: "", cotizacion: "" });
   const [listaNames, setListaNames] = useState(["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"]);
@@ -129,6 +131,40 @@ export default function POS() {
     if (val.length < 1) return setResults([]);
     const { data } = await api.get("/products", { params: { q: val, estado: "activo" } });
     setResults(data.slice(0, 20));
+  };
+
+  // Lector de código de barras: al presionar Enter, agrega el producto exacto (código o código de barras).
+  const onSearchKey = async (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const val = q.trim();
+    if (!val) return;
+    const matches = (p) => p.codigo?.toLowerCase() === val.toLowerCase() || (p.codigos_barras || []).some((b) => String(b) === val);
+    let hit = results.find(matches) || (results.length === 1 ? results[0] : null);
+    if (!hit) {
+      try {
+        const { data } = await api.get("/products", { params: { q: val, estado: "activo" } });
+        hit = data.find(matches) || (data.length === 1 ? data[0] : null);
+      } catch {}
+    }
+    if (hit) addToCart(hit);
+    else toast.error("Producto no encontrado");
+  };
+
+  const sendWhatsApp = async () => {
+    if (!ticket?.id) return toast.error("Ticket no disponible");
+    setWaSending(true);
+    try {
+      const { data } = await api.post(`/sales/${ticket.id}/ticket-pdf`);
+      const url = fileUrl(data.url);
+      const digits = (waPhone || "").replace(/\D/g, "");
+      const phone = digits ? (digits.length === 10 ? "52" + digits : digits) : "";
+      const msg = `Hola${ticket.cliente_nombre ? " " + ticket.cliente_nombre : ""}, aquí está tu ${ticket.tipo_venta === "cotizacion" ? "cotización" : "ticket"} ${ticket.folio} de ${settings.empresa_nombre || "Grupo RYSA"}. Total: ${money(ticket.total)}. Descárgalo aquí: ${url}`;
+      const wa = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+      window.open(wa, "_blank");
+      toast.success("PDF generado, abriendo WhatsApp...");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setWaSending(false); }
   };
 
   const priceFromList = (p, l) => {
@@ -238,6 +274,7 @@ export default function POS() {
       };
       const { data } = await api.post("/sales", payload);
       setTicket(data);
+      setWaPhone(clienteSel?.whatsapp || clienteSel?.telefono || clienteSel?.celular || "");
       toast.success(`${tipoVenta === "cotizacion" ? "Cotización" : "Venta"} ${data.folio} registrada`);
       setCart([]); setDescGlobal(0); setPayOpen(false); setPagos([{ metodo: "efectivo", monto: "" }]); setSelected(null);
       refreshFolio();
@@ -290,7 +327,7 @@ export default function POS() {
         <div className="flex items-center gap-2 mb-3">
           <div className="relative flex-1">
             <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input ref={searchRef} autoFocus value={q} onChange={(e) => search(e.target.value)} placeholder="Buscar producto por código, código de barras o descripción..." className="pl-10 h-12 text-base" data-testid="pos-search-input" />
+            <Input ref={searchRef} autoFocus value={q} onChange={(e) => search(e.target.value)} onKeyDown={onSearchKey} placeholder="Buscar producto por código, código de barras o descripción..." className="pl-10 h-12 text-base" data-testid="pos-search-input" />
           </div>
           <Button variant="outline" className="h-12" onClick={() => { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }} data-testid="verificar-precio-btn"><Tag className="w-4 h-4 mr-1" /> Precio <kbd className="ml-1 text-[10px] bg-slate-100 px-1 rounded">F7</kbd></Button>
           <Button variant="outline" className="h-12" onClick={() => setSuspOpen(true)} data-testid="ver-suspendidas"><PlayCircle className="w-4 h-4 mr-1" /> {suspended.length}</Button>
@@ -575,6 +612,15 @@ export default function POS() {
               <div className="text-center text-[11px]">¡Gracias por su compra!</div>
             </div>
           )}
+          <div className="border-t border-slate-200 pt-3 space-y-2" data-testid="ticket-whatsapp-box">
+            <Label className="text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5 text-green-600" /> Enviar por WhatsApp</Label>
+            <div className="flex gap-2">
+              <Input value={waPhone} onChange={(e) => setWaPhone(e.target.value)} placeholder="Teléfono (10 dígitos)" className="h-10" data-testid="ticket-wa-phone" />
+              <Button onClick={sendWhatsApp} disabled={waSending} className="h-10 bg-[#25D366] hover:bg-[#1ebe57] text-white whitespace-nowrap" data-testid="ticket-wa-send">
+                {waSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <><MessageCircle className="w-4 h-4 mr-1" /> Enviar PDF</>}
+              </Button>
+            </div>
+          </div>
           <DialogFooter><Button onClick={() => window.print()} variant="outline" data-testid="ticket-print"><Printer className="w-4 h-4 mr-1" /> Imprimir</Button><Button onClick={() => setTicket(null)} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="ticket-nueva">Nueva venta</Button></DialogFooter>
         </DialogContent>
       </Dialog>

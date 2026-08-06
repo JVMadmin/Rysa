@@ -4,17 +4,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import Usuarios from "@/pages/Usuarios";
-import { Building2, MapPin, DollarSign, Store, UserCog, Loader2, Plus, Trash2, Save } from "lucide-react";
+import { ImageUpload } from "@/components/ImageUpload";
+import { fileUrl } from "@/lib/api";
+import { Building2, MapPin, DollarSign, Store, UserCog, Loader2, Plus, Trash2, Save, Receipt } from "lucide-react";
 
 export default function Configuracion() {
   const [s, setS] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: [40, 30, 20, 15, 10], ...r.data })); }, []);
+  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: [40, 30, 20, 15, 10], logo_url: "", ticket_config: {}, ...r.data, ticket_config: { tamano: "80mm", mostrar_rfc: true, mostrar_direccion: true, mostrar_telefono: true, encabezado: "", pie: "¡Gracias por su compra!", ...(r.data?.ticket_config || {}) } })); }, []);
 
   const set = (k, v) => setS((x) => ({ ...x, [k]: v }));
+  const setTc = (k, v) => setS((x) => ({ ...x, ticket_config: { ...(x.ticket_config || {}), [k]: v } }));
   const setLista = (i, v) => setS((x) => ({ ...x, listas_precios_nombres: x.listas_precios_nombres.map((n, idx) => idx === i ? v : n) }));
   const setListaPct = (i, v) => setS((x) => ({ ...x, listas_precios_pct: (x.listas_precios_pct || [40, 30, 20, 15, 10]).map((n, idx) => idx === i ? v : n) }));
   const setSuc = (i, k, v) => setS((x) => ({ ...x, sucursales: x.sucursales.map((su, idx) => idx === i ? { ...su, [k]: v } : su) }));
@@ -51,6 +56,7 @@ export default function Configuracion() {
           <TabsTrigger value="empresa" data-testid="tab-empresa"><Building2 className="w-4 h-4 mr-1" /> Empresa / Ubicación</TabsTrigger>
           <TabsTrigger value="precios" data-testid="tab-precios"><DollarSign className="w-4 h-4 mr-1" /> Precios</TabsTrigger>
           <TabsTrigger value="sucursales" data-testid="tab-sucursales"><Store className="w-4 h-4 mr-1" /> Sucursales</TabsTrigger>
+          <TabsTrigger value="ticket" data-testid="tab-ticket"><Receipt className="w-4 h-4 mr-1" /> Diseño de ticket</TabsTrigger>
           <TabsTrigger value="usuarios" data-testid="tab-usuarios"><UserCog className="w-4 h-4 mr-1" /> Usuarios</TabsTrigger>
         </TabsList>
 
@@ -108,6 +114,70 @@ export default function Configuracion() {
               </div>
             ))}
             <Button variant="outline" onClick={addSuc} data-testid="add-sucursal"><Plus className="w-4 h-4 mr-1" /> Agregar sucursal</Button>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="ticket" className="pt-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="bg-white border border-slate-200 rounded-md p-5 space-y-4">
+              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#0055A4]" /> Diseño de ticket</div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500 mb-1 block">Logo del negocio</Label>
+                <ImageUpload value={s.logo_url} onChange={(v) => set("logo_url", v)} testid="cfg-logo-upload" heightClass="h-28" />
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Tamaño de papel</Label>
+                <div className="flex gap-2 mt-1">
+                  {[["80mm", "Ticket 80mm"], ["carta", "Carta"]].map(([v, l]) => (
+                    <button key={v} type="button" onClick={() => setTc("tamano", v)} data-testid={`cfg-ticket-size-${v}`}
+                      className={`flex-1 py-2 rounded-md border text-sm font-medium ${(s.ticket_config?.tamano || "80mm") === v ? "border-[#0055A4] bg-[#0055A4]/5 text-[#0055A4]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Campos a mostrar</Label>
+                {[["mostrar_rfc", "RFC"], ["mostrar_direccion", "Dirección"], ["mostrar_telefono", "Teléfono"]].map(([k, l]) => (
+                  <div key={k} className="flex items-center justify-between border border-slate-200 rounded-md px-3 py-2">
+                    <span className="text-sm">{l}</span>
+                    <Switch checked={s.ticket_config?.[k] !== false} onCheckedChange={(v) => setTc(k, v)} data-testid={`cfg-ticket-${k}`} />
+                  </div>
+                ))}
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Texto de encabezado</Label>
+                <Input value={s.ticket_config?.encabezado || ""} onChange={(e) => setTc("encabezado", e.target.value)} className="mt-1" data-testid="cfg-ticket-encabezado" placeholder="Ej. Sucursal Centro" />
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Mensaje al pie</Label>
+                <Textarea value={s.ticket_config?.pie || ""} onChange={(e) => setTc("pie", e.target.value)} className="mt-1" data-testid="cfg-ticket-pie" placeholder="¡Gracias por su compra!" />
+              </div>
+            </div>
+
+            {/* Vista previa en vivo */}
+            <div className="flex flex-col items-center">
+              <Label className="text-xs uppercase tracking-wider text-slate-500 mb-2 self-start">Vista previa</Label>
+              <div className={`bg-white border border-slate-300 shadow-sm rounded-md p-4 font-mono text-[11px] text-black ${(s.ticket_config?.tamano || "80mm") === "carta" ? "w-full" : "w-64"}`} data-testid="cfg-ticket-preview">
+                <div className="text-center">
+                  {s.logo_url && <img src={fileUrl(s.logo_url)} alt="logo" className="h-12 mx-auto mb-1 object-contain" />}
+                  <div className="font-bold text-[13px]">{s.empresa_nombre || "Grupo RYSA"}</div>
+                  {s.ticket_config?.mostrar_rfc !== false && s.rfc && <div>RFC: {s.rfc}</div>}
+                  {s.ticket_config?.mostrar_direccion !== false && s.direccion && <div>{s.direccion}</div>}
+                  {s.ticket_config?.mostrar_telefono !== false && s.telefono && <div>Tel: {s.telefono}</div>}
+                  {s.ticket_config?.encabezado && <div>{s.ticket_config.encabezado}</div>}
+                </div>
+                <div className="border-t border-dashed border-black my-1" />
+                <div>FOLIO: V000123</div>
+                <div>Cliente: Público General</div>
+                <div className="border-t border-dashed border-black my-1" />
+                <div className="flex justify-between"><span>2 x Producto demo</span><span>$100.00</span></div>
+                <div className="flex justify-between"><span>1 x Otro artículo</span><span>$50.00</span></div>
+                <div className="border-t border-dashed border-black my-1" />
+                <div className="flex justify-between font-bold text-[13px]"><span>TOTAL</span><span>$150.00</span></div>
+                <div className="border-t border-dashed border-black my-1" />
+                <div className="text-center">{s.ticket_config?.pie || "¡Gracias por su compra!"}</div>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2 text-center max-w-xs">Así se verá el ticket/PDF que se imprime y se envía por WhatsApp. Guarda para aplicar los cambios.</p>
+            </div>
           </div>
         </TabsContent>
 

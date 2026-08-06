@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { TableScroller } from "@/components/TableScroller";
 import { toast } from "sonner";
 import { Plus, Search, Download, Upload, Pencil, Loader2, Users, FileDown, CheckCircle2, AlertTriangle, RefreshCw, X, ArrowUp, ArrowDown, ArrowUpDown, EyeOff, Eye, ChevronLeft, ChevronRight } from "lucide-react";
 
@@ -249,7 +250,8 @@ export default function Clientes() {
         </Button>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+      <div className="bg-white border border-slate-200 rounded-md">
+        <TableScroller testid="clientes-scroller">
         <table className="w-full text-sm whitespace-nowrap">
           <thead className="bg-slate-50"><tr className="text-xs uppercase tracking-wider text-slate-500">
             {visibleCols.map((col) => (
@@ -316,6 +318,7 @@ export default function Clientes() {
             })}
           </tbody>
         </table>
+        </TableScroller>
       </div>
 
       {/* Barra de navegación / paginación */}

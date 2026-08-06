@@ -23,6 +23,7 @@ from deps import (
     get_current_user, require_permission, has_permission, next_counter, log_audit,
     ROLE_PERMISSIONS,
 )
+import storage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rysa")
@@ -223,6 +224,7 @@ class ProductInput(BaseModel):
     proveedores: List[str] = Field(default_factory=list)
     sinonimos: List[str] = Field(default_factory=list)
     imagen_url: Optional[str] = ""
+    codigos_barras: List[str] = Field(default_factory=list)
 
 class InventoryAdjust(BaseModel):
     tipo: str  # entrada | salida | ajuste | merma | devolucion | correccion
@@ -383,6 +385,8 @@ class SettingsInput(BaseModel):
     precios_incluyen_iva: bool = True
     listas_precios_nombres: List[str] = Field(default_factory=lambda: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"])
     listas_precios_pct: List[float] = Field(default_factory=lambda: [40, 30, 20, 15, 10])
+    logo_url: Optional[str] = ""
+    ticket_config: dict = Field(default_factory=dict)
     sucursales: List[SucursalItem] = Field(default_factory=list)
 
 # =========================================================================
@@ -507,7 +511,8 @@ async def list_products(response: Response, estado: Optional[str] = None, q: Opt
     if q:
         rx = {"$regex": q, "$options": "i"}
         query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
-                        {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx}]
+                        {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx},
+                        {"codigos_barras": rx}]
     if filtro in ("bajo_stock", "sin_existencia"):
         docs = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).to_list(20000)
         if filtro == "bajo_stock":
@@ -1384,7 +1389,8 @@ async def export_products(estado: Optional[str] = None, q: Optional[str] = None,
     if q:
         rx = {"$regex": q, "$options": "i"}
         query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
-                        {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx}]
+                        {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx},
+                        {"codigos_barras": rx}]
     products = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).to_list(100000)
     rows = []
     for p in products:
@@ -1655,6 +1661,65 @@ async def update_settings(data: SettingsInput, user: dict = Depends(require_perm
     await log_audit(user, "editar", "configuracion", "app", "Actualización de configuración")
     return doc
 
+# =========================================================================
+# ARCHIVOS / OBJECT STORAGE (imágenes de productos/categorías, PDFs de ticket)
+# =========================================================================
+@api.post("/uploads/image")
+async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    ext = (file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "png")
+    if ext not in storage.MIME_TYPES:
+        raise HTTPException(400, "Formato no permitido. Usa JPG, PNG, WEBP o GIF.")
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "La imagen no debe superar 8 MB.")
+    path = f"{storage.APP_NAME}/uploads/{uid()}.{ext}"
+    ctype = file.content_type or storage.MIME_TYPES.get(ext, "application/octet-stream")
+    try:
+        result = storage.put_object(path, data, ctype)
+    except Exception as e:
+        logger.error("Upload imagen falló: %s", str(e)[:160])
+        raise HTTPException(502, "No se pudo subir la imagen al almacenamiento.")
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": uid(), "storage_path": stored, "original_filename": file.filename,
+        "content_type": ctype, "size": result.get("size", len(data)),
+        "is_deleted": False, "created_at": iso_now(),
+    })
+    return {"path": stored, "url": f"/api/files/{stored}"}
+
+@api.get("/files/{path:path}")
+async def serve_file(path: str):
+    record = await db.files.find_one({"storage_path": path, "is_deleted": False})
+    if not record:
+        raise HTTPException(404, "Archivo no encontrado")
+    try:
+        data, ctype = storage.get_object(path)
+    except Exception:
+        raise HTTPException(404, "Archivo no disponible")
+    return Response(content=data, media_type=record.get("content_type", ctype))
+
+@api.post("/sales/{sale_id}/ticket-pdf")
+async def sale_ticket_pdf(sale_id: str, user: dict = Depends(get_current_user)):
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
+    if not sale:
+        raise HTTPException(404, "Venta no encontrada")
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    try:
+        pdf_bytes = storage.build_ticket_pdf(sale, settings)
+        path = f"{storage.APP_NAME}/tickets/{sale.get('folio', sale_id)}-{uid()[:8]}.pdf"
+        result = storage.put_object(path, pdf_bytes, "application/pdf")
+    except Exception as e:
+        logger.error("Ticket PDF falló: %s", str(e)[:160])
+        raise HTTPException(502, "No se pudo generar el PDF del ticket.")
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": uid(), "storage_path": stored, "original_filename": f"ticket-{sale.get('folio')}.pdf",
+        "content_type": "application/pdf", "size": result.get("size", len(pdf_bytes)),
+        "sale_id": sale_id, "is_deleted": False, "created_at": iso_now(),
+    })
+    return {"path": stored, "url": f"/api/files/{stored}"}
+
+
 @api.get("/vendedores")
 async def vendedores(user: dict = Depends(get_current_user)):
     return await db.users.find({"active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(200)
@@ -1908,6 +1973,11 @@ async def reporte_ventas(desde: Optional[str] = None, hasta: Optional[str] = Non
 # =========================================================================
 @app.on_event("startup")
 async def startup():
+    try:
+        storage.init_storage()
+        logger.info("Object storage inicializado")
+    except Exception as e:
+        logger.error("Storage init falló: %s", str(e)[:160])
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
     await db.products.create_index("codigo")
