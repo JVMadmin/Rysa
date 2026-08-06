@@ -901,22 +901,25 @@ async def caja_historial(user: dict = Depends(get_current_user)):
 # VENTAS / POS
 # =========================================================================
 def calcular_venta(items: List[dict], descuento_global: float):
-    subtotal = 0.0
+    # Los precios que envía el POS YA incluyen IVA (precio_con_iva). Se extrae el
+    # IVA de cada línea en lugar de sumarlo encima, para coincidir con el ticket.
+    subtotal = 0.0   # neto (sin IVA)
     iva_total = 0.0
     desc_lineas = 0.0
     for it in items:
-        base = it["cantidad"] * it["precio"]
-        desc = it.get("descuento", 0.0)
-        neto = base - desc
+        base = it["cantidad"] * it["precio"]          # con IVA
+        desc = it.get("descuento", 0.0)               # con IVA
+        bruto = base - desc                           # con IVA
+        tasa = it.get("iva_tasa", 16.0) / 100
+        neto = bruto / (1 + tasa) if (1 + tasa) else bruto
         subtotal += neto
-        iva_total += neto * (it.get("iva_tasa", 16.0) / 100)
+        iva_total += bruto - neto
         desc_lineas += desc
-    descuento_global = min(max(descuento_global, 0.0), subtotal)
-    subtotal_final = subtotal - descuento_global
-    iva_final = subtotal_final / subtotal * iva_total if subtotal else 0
-    total = round(subtotal_final + iva_final, 2)
-    return {"subtotal": round(subtotal_final, 2), "iva_total": round(iva_final, 2),
-            "descuento_total": round(desc_lineas + descuento_global, 2), "total": total}
+    dg = min(max(descuento_global, 0.0), subtotal + iva_total)
+    subtotal_final = subtotal - dg
+    total = max(0.0, round(subtotal_final + iva_total, 2))
+    return {"subtotal": round(subtotal_final, 2), "iva_total": round(iva_total, 2),
+            "descuento_total": round(desc_lineas + dg, 2), "total": total}
 
 @api.get("/sales")
 async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
@@ -987,9 +990,9 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
         estado = "cotizacion"
     else:
         if data.condicion == "contado":
-            if round(pagado, 2) < round(total, 2):
-                raise HTTPException(400, "El pago es menor al total")
-            cambio = round(pagado - total, 2)
+            if round(pagado, 2) + 0.01 < round(total, 2):
+                raise HTTPException(400, f"El pago ({round(pagado,2)}) es menor al total ({round(total,2)})")
+            cambio = max(0.0, round(pagado - total, 2))
         else:
             if not cliente:
                 raise HTTPException(400, "Selecciona un cliente para venta a crédito")
