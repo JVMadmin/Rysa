@@ -20,8 +20,8 @@ export default function Login() {
     setLoading(true);
     try {
       await login(email.trim(), password);
-      toast.success("Bienvenido a Grupo RYSA");
       nav("/app/dashboard");
+      setTimeout(() => toast.success("Bienvenido a Grupo RYSA"), 60);
     } catch (err) {
       toast.error(formatApiError(err.response?.data?.detail) || "Error al iniciar sesión");
     } finally {
