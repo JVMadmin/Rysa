@@ -85,6 +85,16 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - Frontend `Facturacion.jsx` + ruta `/app/facturacion` + nav "Facturación": pestañas Emitidas / Por facturar / Configuración PAC. Badge de timbres en la barra superior (verde/rojo según alerta; "PAC sin configurar" si faltan credenciales). WhatsApp por enlace wa.me. XML/PDF y cancelar/sustituir.
 - NOTA: sin credenciales de Facturama aún; el timbrado en vivo NO se pudo probar. La estructura está lista: al capturar usuario/contraseña API en Configuración → Facturación (y cargar el CSD en la cuenta Facturama), timbrará automáticamente. Verificado: config guarda, timbres responde "no configurado", emitir sin PAC devuelve mensaje claro, UI renderiza sin errores.
 
+## Implementado (2026-08-06) — Fase 2 Bloque F: Ventas, Remitir, Reportes, Caja, Config precios
+- BUGFIX (verificado testing agent iter.4, 5/5): al Remitir NO se seleccionaba el cliente en el POS. Fix: Ventas pasa cliente_id + cliente_nombre en el state; POS copyItems hace setClienteId + setClientQuery.
+- Ventas: diálogo Remitir con leyenda y opciones "Solo copiar" / "Copiar y cancelar original" (cancela el ticket original automáticamente). Botón directo "Facturar" por venta (preselecciona el cliente de la venta, permite cambiarlo vía PUT /sales/{id}/cliente, luego POST /facturacion/sale/{id}). Filtros rápidos Hoy/Esta semana/Este mes/Mes anterior/Todas + "Fecha a fecha" (desde/hasta) + filtro por vendedor + búsqueda folio/cliente. Columna Vendedor visible.
+- Backend: list_sales con filtros rango(semana/mes_anterior)/desde/hasta/vendedor_id/q; PUT /sales/{id}/cliente; /caja/historial con desde/hasta/estado (incluye aperturas y cierres); /reports/ventas (totales ventas/ingreso/costo/utilidad/margen/tickets, series por día/mes, top vendidos, top utilidad, utilidad por producto).
+- Reportes (submódulo en Ventas, ruta /app/reportes, nav): tarjetas de totales, gráfica de línea (recharts) por día/mes, barras top vendidos y mayor utilidad, tabla utilidad por producto con margen. Rango de fechas.
+- Caja: visualizador de historial de cortes/aperturas con filtro por fechas y estado + detalle de corte.
+- Configuración → Precios: editar nombre y % de cada lista de precios (listas_precios_pct en settings).
+- Productos: columna Utilidad ($ y %) por producto (precio_sin_iva − costo).
+- Verificado por testing agent (iter.4): Remitir/cliente, cancelar original, facturar directo (toast claro sin PAC), filtros, vendedor, reportes. Dato de prueba V000007 restaurado a 'confirmada'.
+
 
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones
