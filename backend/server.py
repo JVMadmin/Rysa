@@ -1590,6 +1590,7 @@ async def import_clients_preview(file: UploadFile = File(...), user: dict = Depe
 async def import_clients(payload: dict, user: dict = Depends(require_permission("importar"))):
     rows = payload.get("rows", [])
     mode = payload.get("mode", "ambos")  # nuevos | actualizar | ambos
+    actualizar_saldo = bool(payload.get("actualizar_saldo", False))
     creados = actualizados = omitidos = 0
     for r in rows:
         if r.get("errores"):
@@ -1607,7 +1608,10 @@ async def import_clients(payload: dict, user: dict = Depends(require_permission(
                 continue
             doc = normalize_client_doc(dict(data))
             doc.pop("id", None)
-            doc.pop("saldo", None)  # saldo lo gobiernan las ventas
+            if actualizar_saldo:
+                doc["saldo"] = float(data.get("saldo") or 0.0)  # carga de saldo inicial desde archivo
+            else:
+                doc.pop("saldo", None)  # por defecto el saldo lo gobiernan las ventas
             doc["codigo"] = clave
             doc["updated_at"] = iso_now()
             await db.clients.update_one({"codigo": clave}, {"$set": doc})

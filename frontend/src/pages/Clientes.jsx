@@ -80,6 +80,7 @@ export default function Clientes() {
   const [impOpen, setImpOpen] = useState(false);
   const [preview, setPreview] = useState(null);
   const [impMode, setImpMode] = useState("ambos");
+  const [impSaldo, setImpSaldo] = useState(false);
   const [importing, setImporting] = useState(false);
   // Navegación / orden / columnas
   const [sort, setSort] = useState({ key: "nombre", dir: "asc" });
@@ -168,7 +169,7 @@ export default function Clientes() {
   const confirmImport = async () => {
     setImporting(true);
     try {
-      const { data } = await api.post("/clients/import/confirm", { rows: preview.preview, mode: impMode });
+      const { data } = await api.post("/clients/import/confirm", { rows: preview.preview, mode: impMode, actualizar_saldo: impSaldo });
       toast.success(`${data.creados} creados · ${data.actualizados} actualizados · ${data.omitidos} omitidos`);
       setImpOpen(false); setPreview(null); load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
@@ -503,6 +504,10 @@ export default function Clientes() {
                       <SelectItem value="actualizar">Solo actualizar existentes</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="flex items-center gap-2 border border-amber-200 bg-amber-50 rounded-md px-3 py-1.5">
+                  <Switch checked={impSaldo} onCheckedChange={setImpSaldo} data-testid="imp-saldo" />
+                  <span className="text-xs text-amber-800">Importar/actualizar saldos desde el archivo</span>
                 </div>
                 {preview.con_errores > 0 && <Button variant="outline" size="sm" onClick={downloadErrores} data-testid="imp-download-errores"><FileDown className="w-4 h-4 mr-1" /> Descargar errores</Button>}
               </div>
