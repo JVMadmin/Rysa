@@ -4,12 +4,13 @@ import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
-  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3,
+  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3, Smartphone,
 } from "lucide-react";
 
 const NAV = [
   { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/pos", label: "Punto de Venta", icon: ShoppingCart, perm: "venta.crear" },
+  { to: "/app/recargas", label: "Recargas", icon: Smartphone, perm: "venta.crear" },
   { to: "/app/ventas", label: "Ventas", icon: Receipt },
   { to: "/app/reportes", label: "Reportes", icon: BarChart3, perm: "reportes.ver" },
   { to: "/app/facturacion", label: "Facturación", icon: FileText },
@@ -78,7 +79,7 @@ export default function ErpLayout() {
         </button>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-br from-[#8B3A1A]/25 via-[#A64621]/12 to-[#F1F5F9]">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
           <div className="font-display font-bold text-slate-800 text-lg">Grupo RYSA</div>
           <div className="flex items-center gap-4">

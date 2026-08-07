@@ -15,6 +15,7 @@ import Facturacion from "@/pages/Facturacion";
 import Reportes from "@/pages/Reportes";
 import Caja from "@/pages/Caja";
 import POS from "@/pages/POS";
+import Recargas from "@/pages/Recargas";
 import Ventas from "@/pages/Ventas";
 import Usuarios from "@/pages/Usuarios";
 import Auditoria from "@/pages/Auditoria";
@@ -39,6 +40,7 @@ function App() {
             <Route path="/app/reportes" element={<Reportes />} />
             <Route path="/app/caja" element={<Caja />} />
             <Route path="/app/pos" element={<POS />} />
+            <Route path="/app/recargas" element={<Recargas />} />
             <Route path="/app/ventas" element={<Ventas />} />
             <Route path="/app/usuarios" element={<Usuarios />} />
             <Route path="/app/configuracion" element={<Configuracion />} />

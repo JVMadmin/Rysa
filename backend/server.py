@@ -362,6 +362,14 @@ class SaleInput(BaseModel):
 class CancelInput(BaseModel):
     motivo: str
 
+class RecargaInput(BaseModel):
+    compania: str
+    telefono: str
+    monto: float
+    metodo: str = "efectivo"
+    referencia_tae: Optional[str] = ""
+    comision: Optional[float] = 0.0
+
 class SucursalItem(BaseModel):
     nombre: str = ""
     direccion: Optional[str] = ""
@@ -1113,6 +1121,41 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
         if data.condicion == "credito" and cliente:
             await db.clients.update_one({"id": cliente["id"]}, {"$inc": {"saldo": total}})
     await log_audit(user, "crear", "cotizacion" if es_cotizacion else "venta", sale["id"], f"{folio} total {total}")
+    return await db.sales.find_one({"id": sale["id"]}, {"_id": 0})
+
+@api.post("/recargas")
+async def crear_recarga(data: RecargaInput, user: dict = Depends(require_permission("venta.crear"))):
+    if data.monto <= 0:
+        raise HTTPException(400, "El monto debe ser mayor a 0")
+    if not data.telefono.strip():
+        raise HTTPException(400, "Captura el número de teléfono")
+    now = now_utc()
+    folio = await next_counter("recarga", "R", 6)
+    descripcion = f"Recarga {data.compania} · {data.telefono}".strip()
+    total = round(float(data.monto), 2)
+    items = [{"product_id": None, "codigo": "RECARGA", "descripcion": descripcion, "cantidad": 1,
+              "unidad": "SERV", "precio": total, "iva_tasa": 0, "descuento": 0, "importe": total}]
+    caja = await caja_abierta_de(user["id"])
+    sale = {
+        "id": uid(), "folio": folio, "fecha": iso_now(), "hora": now.strftime("%H:%M"),
+        "usuario_id": user["id"], "usuario_nombre": user["name"],
+        "vendedor_id": user["id"], "vendedor_nombre": user["name"],
+        "cliente_id": None, "cliente_nombre": "Público General",
+        "items": items, "subtotal": total, "iva_total": 0.0, "descuento_global": 0.0, "total": total,
+        "tipo_venta": "recarga", "condicion": "contado",
+        "pagos": [{"metodo": data.metodo, "monto": total}], "cambio": 0.0, "saldo": 0.0,
+        "estado": "confirmada", "factura": False, "caja_id": caja["id"] if caja else None,
+        "lista_precios": 1, "compania": data.compania, "telefono": data.telefono,
+        "referencia_tae": (data.referencia_tae or "").strip(),
+        "comision": round(float(data.comision or 0), 2),
+    }
+    await db.sales.insert_one(sale)
+    if caja and data.metodo == "efectivo":
+        await db.caja_movimientos.insert_one({
+            "id": uid(), "caja_id": caja["id"], "tipo": "venta", "concepto": f"Recarga {folio}",
+            "monto": total, "referencia": folio, "usuario_id": user["id"],
+            "usuario_nombre": user["name"], "fecha": iso_now()})
+    await log_audit(user, "crear", "recarga", sale["id"], f"{folio} {descripcion} {total}")
     return await db.sales.find_one({"id": sale["id"]}, {"_id": 0})
 
 @api.post("/sales/{sale_id}/cancelar")
