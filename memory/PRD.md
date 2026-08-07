@@ -105,6 +105,15 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - NO incluye transferencia entre sucursales/almacenes (pospuesto por decisión del usuario, multi-almacén no construido).
 - Verificado con curl (entrada +10, merma -3, ajuste -2 → existencia 7→12; filtro global tipo=merma; kardex con costo/motivo/usuario) y capturas (diálogo global y kardex por producto).
 
+## Implementado (2026-06 — Fase 2 Bloque G: WhatsApp, imágenes, código de barras, editor de ticket, scroll flotante)
+- Object storage (Emergent) integrado en `backend/storage.py` (init/put/get) + `EMERGENT_LLM_KEY` en `.env`. Endpoints: `POST /uploads/image` (multipart, valida tipo/≤8MB, guarda en `db.files`), `GET /files/{path}` (PÚBLICO, sirve desde storage), `POST /sales/{id}/ticket-pdf` (genera PDF con reportlab 80mm/Carta y lo sube). Helper front `fileUrl()`.
+- WhatsApp en ticket (POS): tras cobrar, caja WhatsApp con teléfono (prefill del cliente) + botón "Enviar PDF" → genera PDF y abre `wa.me` con mensaje + enlace público del PDF.
+- Subir imágenes desde el dispositivo (o URL) para Productos (pestaña Multimedia) y Categorías vía componente reutilizable `ImageUpload.jsx`.
+- Código de barras editable por producto (varios, ver/escribir/sobreescribir) en pestaña "Códigos de barras"; búsqueda backend incluye `codigos_barras`; en POS al escanear/escribir un código y Enter (`onSearchKey`) agrega el producto al carrito.
+- Editor de diseño de ticket en Configuración (pestaña "Diseño de ticket"): logo, tamaño 80mm/Carta, toggles RFC/Dirección/Teléfono, encabezado y pie, vista previa en vivo. `SettingsInput.logo_url` + `ticket_config`. El PDF respeta esta config.
+- Barra de scroll flotante para tablas anchas (`TableScroller.jsx`): botones laterales izquierda/derecha + barra inferior sticky sincronizada. Aplicado a Productos y Clientes.
+- Verificado por testing agent (iter.6): backend 4/4, frontend 100% (todos los flujos y testids). Sin issues.
+
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones
 - P2: Facturación electrónica, Multi-almacén/sucursales, Catálogo online/e-commerce, Pedidos WhatsApp, App móvil, reportes avanzados, recuperación de contraseña por email, código de barras/escáner
