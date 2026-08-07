@@ -114,6 +114,12 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - Barra de scroll flotante para tablas anchas (`TableScroller.jsx`): botones laterales izquierda/derecha + barra inferior sticky sincronizada. Aplicado a Productos y Clientes.
 - Verificado por testing agent (iter.6): backend 4/4, frontend 100% (todos los flujos y testids). Sin issues.
 
+## Implementado (2026-06 — Fondo óxido + Módulo Recargas de celular)
+- Diseño: fondo con degradado rojo óxido sutil solo en el área interna del ERP (`ErpLayout` wrapper: `bg-gradient-to-br from-[#8B3A1A]/25 via-[#A64621]/12 to-[#F1F5F9]`); sidebar oscuro y paneles/tablas en blanco (legibilidad intacta).
+- Módulo Recargas (`/app/recargas`, nav "Recargas", `Recargas.jsx`): botón que abre el portal externo TAE (https://recargastae.com/Account/SignIn.aspx) en pestaña nueva (no hay API/incrustación por seguridad del portal) + formulario para confirmar/registrar la recarga (compañía, teléfono, monto, método, referencia TAE, comisión). Genera comprobante con impresión y envío por WhatsApp (PDF). Lista "Recargas de hoy".
+- Backend: `POST /api/recargas` crea una venta con `tipo_venta='recarga'` (entra a Ventas y, si hay caja abierta y efectivo, a Caja); valida monto>0 y teléfono. Modelo `RecargaInput`. Reutiliza `/sales/{id}/ticket-pdf` para el PDF.
+- Verificado por testing agent (iter.7): backend 7/7, frontend 100%, sin issues.
+
 ## Backlog (futuras fases — NO construir hasta solicitud)
 - P1: Proveedores, Compras, Cuentas por cobrar/pagar, Cotizaciones
 - P2: Facturación electrónica, Multi-almacén/sucursales, Catálogo online/e-commerce, Pedidos WhatsApp, App móvil, reportes avanzados, recuperación de contraseña por email, código de barras/escáner
