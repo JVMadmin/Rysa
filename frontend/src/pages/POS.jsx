@@ -309,7 +309,7 @@ export default function POS() {
                 {filteredClients.map((c) => (
                   <button key={c.id} onClick={() => pickClient(c)} data-testid={`pos-cliente-opt-${c.codigo}`}
                     className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between">
-                    <span className="truncate"><b className="text-[#0055A4] mr-1">{c.codigo}</b> {c.nombre}</span>
+                    <span className="truncate"><b className="text-[#B95A3A] mr-1">{c.codigo}</b> {c.nombre}</span>
                     {Number(c.descuento_permanente) > 0 && <Badge variant="outline" className="text-[10px] ml-2">-{c.descuento_permanente}%</Badge>}
                   </button>
                 ))}
@@ -348,11 +348,11 @@ export default function POS() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
               {results.map((p) => (
                 <button key={p.id} onClick={() => addToCart(p)} data-testid={`pos-prod-${p.codigo}`}
-                  className="text-left border border-slate-200 rounded-md p-3 hover:border-[#0055A4] hover:bg-slate-50 transition-colors">
+                  className="text-left border border-slate-200 rounded-md p-3 hover:border-[#B95A3A] hover:bg-slate-50 transition-colors">
                   <div className="text-xs text-slate-400">{p.codigo}</div>
                   <div className="text-sm font-medium line-clamp-2 h-10">{p.descripcion}</div>
                   <div className="flex items-center justify-between mt-1">
-                    <span className="font-display font-bold text-[#0055A4]">{money(priceOf(p))}</span>
+                    <span className="font-display font-bold text-[#B95A3A]">{money(priceOf(p))}</span>
                     <Badge variant="outline" className="text-xs">{p.existencia}</Badge>
                   </div>
                 </button>
@@ -366,9 +366,9 @@ export default function POS() {
       <div className="lg:w-[42%] flex flex-col bg-white border border-slate-200 rounded-md min-h-0">
         <div className="p-3 border-b border-slate-200 space-y-2">
           <div className="flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5 text-[#0055A4]" />
+            <ShoppingCart className="w-5 h-5 text-[#B95A3A]" />
             <span className="font-display font-bold">Ticket</span>
-            <Badge className="bg-[#0055A4]/10 text-[#0055A4] font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
+            <Badge className="bg-[#B95A3A]/10 text-[#B95A3A] font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
             <span className="ml-auto text-sm text-slate-400">{cart.length} items</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -385,7 +385,7 @@ export default function POS() {
             <UserIcon className="w-3.5 h-3.5" />
             <span className="truncate">{clienteSel ? clienteSel.nombre : "Público General"}</span>
             <Badge variant="outline" className="ml-auto text-[10px]" data-testid="pos-lista-badge">{Number(lista) === 6 ? "Precio mínimo" : listaNames[lista - 1]}</Badge>
-            {Number(descPct) > 0 && <Badge className="bg-[#FF5A00]/10 text-[#FF5A00] text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
+            {Number(descPct) > 0 && <Badge className="bg-[#B95A3A]/10 text-[#B95A3A] text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
           </div>
           {credInfo && (
             <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2" data-testid="pos-credito-indicador">
@@ -407,12 +407,12 @@ export default function POS() {
           {cart.length === 0 && <div className="p-8 text-center text-slate-300 text-sm">Carrito vacío</div>}
           {cart.map((i) => (
             <div key={i.product_id} onClick={() => setSelected(i.product_id)}
-              className={`p-3 cursor-pointer ${selected === i.product_id ? "bg-[#0055A4]/5 ring-1 ring-inset ring-[#0055A4]/30" : ""}`} data-testid={`cart-item-${i.codigo}`}>
+              className={`p-3 cursor-pointer ${selected === i.product_id ? "bg-[#B95A3A]/5 ring-1 ring-inset ring-[#B95A3A]/30" : ""}`} data-testid={`cart-item-${i.codigo}`}>
               <div className="flex justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{i.descripcion}</div>
                   <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
-                    className="text-xs text-slate-400 hover:text-[#0055A4] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
+                    className="text-xs text-slate-400 hover:text-[#B95A3A] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
                     {i.codigo} · <span className="underline decoration-dotted">{money(i.precio)}</span> <Tag className="w-3 h-3" />
                   </button>
                 </div>
@@ -436,7 +436,7 @@ export default function POS() {
             <div className="grid grid-cols-3 gap-2">
               {[["contado", "Contado", Banknote], ["transferencia", "Transferencia", ArrowLeftRight], ["credito", "Crédito", CreditCard]].map(([k, l, Ic]) => (
                 <button key={k} onClick={() => setFormaPago(k)} data-testid={`forma-pago-${k}`}
-                  className={`flex flex-col items-center gap-1 py-2 rounded-md border text-xs font-medium transition-colors ${formaPago === k ? "border-[#0055A4] bg-[#0055A4]/5 text-[#0055A4]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                  className={`flex flex-col items-center gap-1 py-2 rounded-md border text-xs font-medium transition-colors ${formaPago === k ? "border-[#B95A3A] bg-[#B95A3A]/5 text-[#B95A3A]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                   <Ic className="w-4 h-4" /> {l}
                 </button>
               ))}
@@ -447,16 +447,16 @@ export default function POS() {
             <Input type="number" value={descGlobal} onChange={(e) => setDescGlobal(e.target.value)} className="h-8" data-testid="pos-desc-global" />
             <button
               onClick={() => { if (can("config") || can("producto.precio")) setIncluyeIva((v) => !v); else toast.error("Sin permiso para cambiar IVA"); }}
-              className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#0055A4] text-[#0055A4] bg-[#0055A4]/5" : "border-slate-200 text-slate-400"}`}
+              className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#B95A3A] text-[#B95A3A] bg-[#B95A3A]/5" : "border-slate-200 text-slate-400"}`}
               data-testid="pos-incluye-iva">
-              <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#0055A4] border-[#0055A4]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
+              <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#B95A3A] border-[#B95A3A]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
               Precios incluyen IVA
             </button>
           </div>
           <div className="text-sm space-y-0.5">
             {!incluyeIva && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>}
             {!incluyeIva && <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>}
-            {totals.descPctAmount > 0 && <div className="flex justify-between text-[#FF5A00]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
+            {totals.descPctAmount > 0 && <div className="flex justify-between text-[#B95A3A]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
             <div className="flex justify-between font-display text-2xl font-black pt-1"><span>Total</span><span data-testid="pos-total">{money(totals.total)}</span></div>
           </div>
           {creditoBloqueado && (
@@ -466,7 +466,7 @@ export default function POS() {
           )}
           <div className="flex gap-2">
             <Button variant="outline" className="h-12" onClick={suspender} data-testid="pos-suspend"><PauseCircle className="w-5 h-5" /></Button>
-            <Button className="flex-1 h-12 bg-[#FF5A00] hover:bg-[#E04F00] text-base font-bold" onClick={openPay} disabled={creditoBloqueado} data-testid="pos-cobrar">
+            <Button className="flex-1 h-12 bg-[#B95A3A] hover:bg-[#8B3A2A] text-base font-bold" onClick={openPay} disabled={creditoBloqueado} data-testid="pos-cobrar">
               {tipoVenta === "cotizacion" ? <><FileText className="w-5 h-5 mr-2" /> Guardar cotización</> : <>Cobrar · {money(totals.total)}</>}
             </Button>
           </div>
@@ -496,7 +496,7 @@ export default function POS() {
               <div className="flex justify-between text-lg font-bold"><span>Cambio</span><span data-testid="pos-cambio" className="text-green-600">{money(cambio)}</span></div>
             </div>
           )}
-          <DialogFooter><Button variant="outline" onClick={() => setPayOpen(false)}>Cancelar</Button><Button onClick={confirmar} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="confirmar-venta">Confirmar venta</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setPayOpen(false)}>Cancelar</Button><Button onClick={confirmar} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="confirmar-venta">Confirmar venta</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -509,9 +509,9 @@ export default function POS() {
               <div className="grid grid-cols-2 gap-2">
                 {(linePrice.precios || []).map((pr, i) => (
                   <button key={i} onClick={() => setLinePrecio(linePrice, pr.precio_con_iva)} data-testid={`line-precio-${i + 1}`}
-                    className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-[#0055A4] ${Math.abs(linePrice.precio - pr.precio_con_iva) < 0.001 ? "border-[#0055A4] bg-[#0055A4]/5" : "border-slate-200"}`}>
+                    className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-[#B95A3A] ${Math.abs(linePrice.precio - pr.precio_con_iva) < 0.001 ? "border-[#B95A3A] bg-[#B95A3A]/5" : "border-slate-200"}`}>
                     <span className="text-sm text-slate-500">{listaNames[i] || `Precio ${i + 1}`}</span>
-                    <span className="font-display font-bold text-[#0055A4]">{money(pr.precio_con_iva)}</span>
+                    <span className="font-display font-bold text-[#B95A3A]">{money(pr.precio_con_iva)}</span>
                   </button>
                 ))}
                 <button onClick={() => setLinePrecio(linePrice, linePrice.precio_minimo)} data-testid="line-precio-min"
@@ -525,7 +525,7 @@ export default function POS() {
                 {can("producto.precio") ? (
                   <div className="flex gap-2 mt-1">
                     <Input type="number" value={libreVal} onChange={(e) => setLibreVal(e.target.value)} placeholder="0.00" data-testid="line-precio-libre-input" />
-                    <Button onClick={() => setLinePrecio(linePrice, libreVal)} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="line-precio-libre-apply">Aplicar</Button>
+                    <Button onClick={() => setLinePrecio(linePrice, libreVal)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="line-precio-libre-apply">Aplicar</Button>
                   </div>
                 ) : <p className="text-xs text-slate-400 mt-1">No tienes permiso para capturar precio libre.</p>}
               </div>
@@ -549,7 +549,7 @@ export default function POS() {
                 <div className="text-xs text-slate-400 mb-2">{p.codigo}</div>
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   {(p.precios || []).map((pr, i) => (
-                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-[#0055A4]">{money(pr.precio_con_iva)}</div></div>
+                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-[#B95A3A]">{money(pr.precio_con_iva)}</div></div>
                   ))}
                 </div>
               </div>
@@ -568,7 +568,7 @@ export default function POS() {
             {suspended.map((s) => (
               <div key={s.id} className="flex items-center justify-between border border-slate-200 rounded-md p-3">
                 <div><div className="text-sm font-medium">{s.payload.items.length} productos</div><div className="text-xs text-slate-400">{s.fecha?.slice(0, 16).replace("T", " ")}</div></div>
-                <Button size="sm" onClick={() => recuperar(s)} className="bg-[#0055A4] hover:bg-[#004385]"><PlayCircle className="w-4 h-4 mr-1" /> Recuperar</Button>
+                <Button size="sm" onClick={() => recuperar(s)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]"><PlayCircle className="w-4 h-4 mr-1" /> Recuperar</Button>
               </div>
             ))}
           </div>
@@ -621,7 +621,7 @@ export default function POS() {
               </Button>
             </div>
           </div>
-          <DialogFooter><Button onClick={() => window.print()} variant="outline" data-testid="ticket-print"><Printer className="w-4 h-4 mr-1" /> Imprimir</Button><Button onClick={() => setTicket(null)} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="ticket-nueva">Nueva venta</Button></DialogFooter>
+          <DialogFooter><Button onClick={() => window.print()} variant="outline" data-testid="ticket-print"><Printer className="w-4 h-4 mr-1" /> Imprimir</Button><Button onClick={() => setTicket(null)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="ticket-nueva">Nueva venta</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

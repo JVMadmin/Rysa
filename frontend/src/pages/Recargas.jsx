@@ -72,7 +72,7 @@ export default function Recargas() {
     <div className="space-y-5" data-testid="recargas-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><Smartphone className="w-6 h-6 text-[#0055A4]" /> Recargas de celular</h1>
+          <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><Smartphone className="w-6 h-6 text-[#B95A3A]" /> Recargas de celular</h1>
           <p className="text-slate-500 text-sm">Realiza la recarga en el portal TAE y regístrala aquí para que entre a Caja y Ventas.</p>
         </div>
         <Button onClick={openPortal} className="bg-[#8B3A1A] hover:bg-[#733015] h-11" data-testid="recargas-open-portal">
@@ -83,7 +83,7 @@ export default function Recargas() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Formulario de registro */}
         <div className="bg-white border border-slate-200 rounded-md p-5 space-y-4" data-testid="recargas-form">
-          <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#0055A4]" /> Confirmar / registrar recarga</div>
+          <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#B95A3A]" /> Confirmar / registrar recarga</div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="text-xs uppercase tracking-wider text-slate-500">Compañía</Label>
@@ -102,7 +102,7 @@ export default function Recargas() {
             <div className="flex flex-wrap gap-2 mt-1">
               {MONTOS.map((m) => (
                 <button key={m} type="button" onClick={() => set("monto", m)} data-testid={`recarga-monto-${m}`}
-                  className={`px-3 py-1.5 rounded-md border text-sm font-medium ${Number(f.monto) === m ? "border-[#0055A4] bg-[#0055A4]/5 text-[#0055A4]" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>${m}</button>
+                  className={`px-3 py-1.5 rounded-md border text-sm font-medium ${Number(f.monto) === m ? "border-[#B95A3A] bg-[#B95A3A]/5 text-[#B95A3A]" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>${m}</button>
               ))}
             </div>
             <Input type="number" value={f.monto} onChange={(e) => set("monto", e.target.value)} className="mt-2 max-w-[160px]" placeholder="Otro monto" data-testid="recarga-monto-input" />
@@ -124,7 +124,7 @@ export default function Recargas() {
             <Label className="text-xs uppercase tracking-wider text-slate-500">Referencia TAE (folio del portal)</Label>
             <Input value={f.referencia_tae} onChange={(e) => set("referencia_tae", e.target.value)} className="mt-1" placeholder="Folio/autorización que arroja TAE" data-testid="recarga-referencia" />
           </div>
-          <Button onClick={registrar} disabled={saving} className="w-full h-11 bg-[#FF5A00] hover:bg-[#E04F00] font-bold" data-testid="recarga-registrar">
+          <Button onClick={registrar} disabled={saving} className="w-full h-11 bg-[#B95A3A] hover:bg-[#8B3A2A] font-bold" data-testid="recarga-registrar">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-2" /> Registrar recarga en Caja</>}
           </Button>
         </div>
@@ -139,7 +139,7 @@ export default function Recargas() {
 
           <div className="bg-white border border-slate-200 rounded-md p-5">
             <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#0055A4]" /> Recargas de hoy</div>
+              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#B95A3A]" /> Recargas de hoy</div>
               <Badge variant="outline" data-testid="recargas-count">{history.length}</Badge>
             </div>
             <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
@@ -150,7 +150,7 @@ export default function Recargas() {
                     <div className="font-medium">{r.compania} · {r.telefono}</div>
                     <div className="text-xs text-slate-400">{r.folio} · {r.hora}</div>
                   </div>
-                  <span className="font-semibold text-[#0055A4]">{money(r.total)}</span>
+                  <span className="font-semibold text-[#B95A3A]">{money(r.total)}</span>
                 </div>
               ))}
             </div>
@@ -191,7 +191,7 @@ export default function Recargas() {
           </div>
           <DialogFooter>
             <Button onClick={() => window.print()} variant="outline" data-testid="recarga-print"><Printer className="w-4 h-4 mr-1" /> Imprimir</Button>
-            <Button onClick={() => setTicket(null)} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="recarga-nueva">Nueva recarga</Button>
+            <Button onClick={() => setTicket(null)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="recarga-nueva">Nueva recarga</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

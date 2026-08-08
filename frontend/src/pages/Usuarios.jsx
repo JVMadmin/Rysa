@@ -36,7 +36,7 @@ export default function Usuarios({ embedded = false }) {
     <div className="space-y-5" data-testid="usuarios-page">
       <div className="flex items-center justify-between">
         <div>{!embedded && <><h1 className="font-display text-2xl font-black tracking-tight">Usuarios y Roles</h1><p className="text-slate-500 text-sm">{rows.length} usuarios</p></>}{embedded && <p className="text-slate-500 text-sm">{rows.length} usuarios</p>}</div>
-        <Button onClick={() => setOpen(true)} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="nuevo-usuario-btn"><Plus className="w-4 h-4 mr-1" /> Nuevo usuario</Button>
+        <Button onClick={() => setOpen(true)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="nuevo-usuario-btn"><Plus className="w-4 h-4 mr-1" /> Nuevo usuario</Button>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
@@ -45,7 +45,7 @@ export default function Usuarios({ embedded = false }) {
             <th className="p-3">Nombre</th><th className="p-3">Correo</th><th className="p-3">Rol</th><th className="p-3">Activo</th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={4} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
+            {loading && <tr><td colSpan={4} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
             {!loading && rows.map((u) => (
               <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50">
                 <td className="p-3 font-medium">{u.name}</td><td className="p-3 text-slate-500">{u.email}</td>
@@ -71,7 +71,7 @@ export default function Usuarios({ embedded = false }) {
               </Select>
             </div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={save} disabled={saving} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="user-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Crear"}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={save} disabled={saving} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="user-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Crear"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

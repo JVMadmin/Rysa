@@ -228,7 +228,7 @@ export default function Clientes() {
           <Button variant="outline" onClick={downloadPlantilla} data-testid="cli-plantilla"><FileDown className="w-4 h-4 mr-1" /> Plantilla</Button>
           {can("importar") && <Button variant="outline" onClick={() => fileRef.current.click()} data-testid="cli-import-btn"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
           <Button variant="outline" onClick={exportExcel} data-testid="cli-export"><Download className="w-4 h-4 mr-1" /> Exportar</Button>
-          {can("cliente.crear") && <Button onClick={openNew} data-testid="nuevo-cliente-btn" className="bg-[#0055A4] hover:bg-[#004385]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
+          {can("cliente.crear") && <Button onClick={openNew} data-testid="nuevo-cliente-btn" className="bg-[#B95A3A] hover:bg-[#8B3A2A]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
         </div>
       </div>
@@ -245,7 +245,7 @@ export default function Clientes() {
         </Select>
         <Button variant="outline" onClick={load} data-testid="cli-buscar"><Search className="w-4 h-4" /></Button>
         <Button variant={hideEmpty ? "default" : "outline"} onClick={() => setHideEmpty((v) => !v)}
-          className={hideEmpty ? "bg-[#0055A4] hover:bg-[#004385]" : ""} data-testid="cli-hide-empty" title="Ocultar columnas sin datos">
+          className={hideEmpty ? "bg-[#B95A3A] hover:bg-[#8B3A2A]" : ""} data-testid="cli-hide-empty" title="Ocultar columnas sin datos">
           {hideEmpty ? <Eye className="w-4 h-4 mr-1" /> : <EyeOff className="w-4 h-4 mr-1" />} Columnas vacías
         </Button>
       </div>
@@ -256,7 +256,7 @@ export default function Clientes() {
           <thead className="bg-slate-50"><tr className="text-xs uppercase tracking-wider text-slate-500">
             {visibleCols.map((col) => (
               <th key={col.key} onClick={() => toggleSort(col.key)} data-testid={`sort-${col.key}`}
-                className={`p-3 cursor-pointer select-none hover:text-[#0055A4] ${col.right ? "text-right" : col.center ? "text-center" : "text-left"}`}>
+                className={`p-3 cursor-pointer select-none hover:text-[#B95A3A] ${col.right ? "text-right" : col.center ? "text-center" : "text-left"}`}>
                 <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
                   {col.label}
                   {sort.key === col.key
@@ -268,7 +268,7 @@ export default function Clientes() {
             <th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
+            {loading && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
             {!loading && pageRows.length === 0 && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center text-slate-400"><Users className="w-8 h-8 mx-auto mb-2" />Sin clientes.</td></tr>}
             {!loading && pageRows.map((c) => {
               const cs = creditStatus(c);
@@ -299,7 +299,7 @@ export default function Clientes() {
                       </td>
                     );
                     const v = colVal(c, col.key);
-                    const cls = col.key === "codigo" ? "font-medium text-[#0055A4]"
+                    const cls = col.key === "codigo" ? "font-medium text-[#B95A3A]"
                       : col.key === "nombre" ? "max-w-[220px] truncate"
                       : col.key === "saldo" ? `font-semibold ${c.saldo > 0 ? "text-red-600" : ""}`
                       : (col.money || col.center) ? "" : "text-slate-500";
@@ -476,7 +476,7 @@ export default function Clientes() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={save} disabled={saving} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="cli-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button>
+            <Button onClick={save} disabled={saving} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="cli-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -486,13 +486,13 @@ export default function Clientes() {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="import-dialog">
           <DialogHeader><DialogTitle className="font-display">Importar clientes</DialogTitle></DialogHeader>
           {!preview ? (
-            <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#0055A4]" /></div>
+            <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div>
           ) : (
             <div className="space-y-4">
               <div className="grid grid-cols-4 gap-3 text-center">
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Total</div><div className="font-display font-bold text-lg" data-testid="imp-total">{preview.total}</div></div>
                 <div className="bg-green-50 rounded p-3"><div className="text-xs text-slate-400">Nuevos</div><div className="font-display font-bold text-lg text-green-700" data-testid="imp-nuevos">{preview.nuevos}</div></div>
-                <div className="bg-blue-50 rounded p-3"><div className="text-xs text-slate-400">A actualizar</div><div className="font-display font-bold text-lg text-[#0055A4]" data-testid="imp-existentes">{preview.existentes}</div></div>
+                <div className="bg-blue-50 rounded p-3"><div className="text-xs text-slate-400">A actualizar</div><div className="font-display font-bold text-lg text-[#B95A3A]" data-testid="imp-existentes">{preview.existentes}</div></div>
                 <div className="bg-red-50 rounded p-3"><div className="text-xs text-slate-400">Con errores</div><div className="font-display font-bold text-lg text-red-600" data-testid="imp-errores">{preview.con_errores}</div></div>
               </div>
 
@@ -530,7 +530,7 @@ export default function Clientes() {
                           {r.errores?.length
                             ? <span className="inline-flex items-center gap-1 text-red-600"><X className="w-3 h-3" /> omitir</span>
                             : r.existe
-                              ? <span className="inline-flex items-center gap-1 text-[#0055A4]"><RefreshCw className="w-3 h-3" /> actualizar</span>
+                              ? <span className="inline-flex items-center gap-1 text-[#B95A3A]"><RefreshCw className="w-3 h-3" /> actualizar</span>
                               : <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="w-3 h-3" /> crear</span>}
                         </td>
                         <td className="p-2 text-slate-500">
@@ -545,7 +545,7 @@ export default function Clientes() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => { setImpOpen(false); setPreview(null); }}>Cancelar</Button>
-            <Button onClick={confirmImport} disabled={!preview || importing} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="imp-confirm">
+            <Button onClick={confirmImport} disabled={!preview || importing} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="imp-confirm">
               {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar importación"}
             </Button>
           </DialogFooter>

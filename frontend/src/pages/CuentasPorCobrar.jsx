@@ -124,11 +124,11 @@ export default function CuentasPorCobrar() {
             <th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
+            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
             {!loading && data.clientes.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin cuentas por cobrar. ¡Todo al día!</td></tr>}
             {!loading && data.clientes.map((c) => (
               <tr key={c.cliente_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cxc-row-${c.codigo}`}>
-                <td className="p-3"><div className="font-medium text-[#0055A4]">{c.codigo}</div><div className="text-slate-700 max-w-[200px] truncate" title={c.nombre}>{c.nombre}</div></td>
+                <td className="p-3"><div className="font-medium text-[#B95A3A]">{c.codigo}</div><div className="text-slate-700 max-w-[200px] truncate" title={c.nombre}>{c.nombre}</div></td>
                 <td className="p-3 text-slate-500 text-xs">{c.telefono || c.celular || "—"}</td>
                 <td className="p-3 text-right font-semibold">{money(c.saldo)}</td>
                 <td className={`p-3 text-right font-semibold ${c.vencido > 0 ? "text-red-600" : "text-slate-300"}`}>{money(c.vencido)}</td>
@@ -141,7 +141,7 @@ export default function CuentasPorCobrar() {
                 <td className="p-3">
                   <div className="flex gap-1 justify-end">
                     <Button size="sm" variant="outline" onClick={() => openDetalle(c)} data-testid={`cxc-detalle-${c.codigo}`}><Receipt className="w-4 h-4 mr-1" /> Ver</Button>
-                    {puedeCobrar && <Button size="sm" className="bg-[#FF5A00] hover:bg-[#E04F00]" onClick={() => openAbono(c)} data-testid={`cxc-abonar-${c.codigo}`}><HandCoins className="w-4 h-4 mr-1" /> Abonar</Button>}
+                    {puedeCobrar && <Button size="sm" className="bg-[#B95A3A] hover:bg-[#8B3A2A]" onClick={() => openAbono(c)} data-testid={`cxc-abonar-${c.codigo}`}><HandCoins className="w-4 h-4 mr-1" /> Abonar</Button>}
                   </div>
                 </td>
               </tr>
@@ -153,7 +153,7 @@ export default function CuentasPorCobrar() {
       {/* Diálogo de abono */}
       <Dialog open={!!abonoCli} onOpenChange={(o) => !o && setAbonoCli(null)}>
         <DialogContent data-testid="abono-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#FF5A00]" /> Registrar abono</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#B95A3A]" /> Registrar abono</DialogTitle></DialogHeader>
           {abonoCli && (
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-md p-3 flex items-center justify-between">
@@ -184,7 +184,7 @@ export default function CuentasPorCobrar() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setAbonoCli(null)}>Cancelar</Button>
-            <Button onClick={guardarAbono} disabled={saving} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="abono-guardar">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
+            <Button onClick={guardarAbono} disabled={saving} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="abono-guardar">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -193,7 +193,7 @@ export default function CuentasPorCobrar() {
       <Dialog open={!!detCli} onOpenChange={(o) => !o && setDetCli(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="detalle-dialog">
           <DialogHeader><DialogTitle className="font-display">Estado de cuenta · {detCli?.nombre}</DialogTitle></DialogHeader>
-          {!detalle ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#0055A4]" /></div> : (
+          {!detalle ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div> : (
             <div className="space-y-5">
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Saldo</div><div className="font-display font-bold text-red-600">{money(detalle.cliente.saldo)}</div></div>
@@ -255,7 +255,7 @@ export default function CuentasPorCobrar() {
           )}
           <DialogFooter>
             {detCli && puedeCobrar && detalle && detalle.cliente.saldo > 0 &&
-              <Button className="bg-[#FF5A00] hover:bg-[#E04F00]" onClick={() => { setDetCli(null); openAbono(detCli); }} data-testid="detalle-abonar"><HandCoins className="w-4 h-4 mr-1" /> Registrar abono</Button>}
+              <Button className="bg-[#B95A3A] hover:bg-[#8B3A2A]" onClick={() => { setDetCli(null); openAbono(detCli); }} data-testid="detalle-abonar"><HandCoins className="w-4 h-4 mr-1" /> Registrar abono</Button>}
             <Button variant="outline" onClick={() => setDetCli(null)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>

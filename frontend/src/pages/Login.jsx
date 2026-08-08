@@ -31,11 +31,11 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex">
-      <div className="hidden lg:flex flex-col justify-between w-1/2 bg-[#0F172A] p-12 relative overflow-hidden">
+      <div className="hidden lg:flex flex-col justify-between w-1/2 bg-[#4B4E53] p-12 relative overflow-hidden">
         <div className="absolute inset-0 opacity-20"
           style={{ backgroundImage: "url('https://images.unsplash.com/photo-1710141530542-f792450e736e?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200')", backgroundSize: "cover", backgroundPosition: "center" }} />
         <div className="relative z-10 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-[#FF5A00] flex items-center justify-center">
+          <div className="w-10 h-10 rounded-md bg-[#B95A3A] flex items-center justify-center">
             <Boxes className="w-6 h-6 text-white" />
           </div>
           <span className="font-display font-extrabold text-white text-2xl">Grupo RYSA</span>
@@ -54,7 +54,7 @@ export default function Login() {
       <div className="flex-1 flex items-center justify-center p-6 bg-[#F8F9FA]">
         <form onSubmit={submit} className="w-full max-w-sm animate-fade-up" data-testid="login-form">
           <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-9 h-9 rounded-md bg-[#FF5A00] flex items-center justify-center">
+            <div className="w-9 h-9 rounded-md bg-[#B95A3A] flex items-center justify-center">
               <Boxes className="w-5 h-5 text-white" />
             </div>
             <span className="font-display font-extrabold text-2xl">Grupo RYSA</span>
@@ -76,10 +76,10 @@ export default function Login() {
           </div>
 
           <Button type="submit" disabled={loading} data-testid="login-submit"
-            className="w-full h-11 mt-6 bg-[#0055A4] hover:bg-[#004385] text-white font-semibold">
+            className="w-full h-11 mt-6 bg-[#B95A3A] hover:bg-[#8B3A2A] text-white font-semibold">
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Lock className="w-4 h-4 mr-2" /> Entrar</>}
           </Button>
-          <Link to="/" className="block text-center text-sm text-slate-500 hover:text-[#0055A4] mt-4">
+          <Link to="/" className="block text-center text-sm text-slate-500 hover:text-[#B95A3A] mt-4">
             ← Volver al inicio
           </Link>
         </form>

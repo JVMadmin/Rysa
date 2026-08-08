@@ -17,7 +17,7 @@ export default function Auditoria() {
             <th className="p-3">Fecha</th><th className="p-3">Usuario</th><th className="p-3">Acción</th><th className="p-3">Entidad</th><th className="p-3">Detalle</th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={5} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
+            {loading && <tr><td colSpan={5} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
             {!loading && rows.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400"><ScrollText className="w-8 h-8 mx-auto mb-2" />Sin registros.</td></tr>}
             {!loading && rows.map((a) => (
               <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">

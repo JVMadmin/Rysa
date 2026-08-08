@@ -42,7 +42,7 @@ body {
 
 .font-display { font-family: 'Outfit', sans-serif; }
 
-::selection { background: #FF5A00; color: #fff; }
+::selection { background: #B95A3A; color: #fff; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 9px; height: 9px; }

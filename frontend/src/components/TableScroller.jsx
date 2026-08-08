@@ -51,13 +51,13 @@ export function TableScroller({ children, testid = "table-scroller" }) {
           <button
             type="button" onClick={() => scrollBy(-320)} aria-label="Desplazar a la izquierda"
             data-testid={`${testid}-left`}
-            className={`hidden sm:flex items-center justify-center absolute left-1 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full bg-white/95 shadow-lg border border-slate-200 text-[#0055A4] transition-opacity hover:bg-[#0055A4] hover:text-white ${state.canL ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+            className={`hidden sm:flex items-center justify-center absolute left-1 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full bg-white/95 shadow-lg border border-slate-200 text-[#B95A3A] transition-opacity hover:bg-[#B95A3A] hover:text-white ${state.canL ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
             <ChevronLeft className="w-5 h-5" />
           </button>
           <button
             type="button" onClick={() => scrollBy(320)} aria-label="Desplazar a la derecha"
             data-testid={`${testid}-right`}
-            className={`hidden sm:flex items-center justify-center absolute right-1 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full bg-white/95 shadow-lg border border-slate-200 text-[#0055A4] transition-opacity hover:bg-[#0055A4] hover:text-white ${state.canR ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+            className={`hidden sm:flex items-center justify-center absolute right-1 top-1/2 -translate-y-1/2 z-20 w-9 h-9 rounded-full bg-white/95 shadow-lg border border-slate-200 text-[#B95A3A] transition-opacity hover:bg-[#B95A3A] hover:text-white ${state.canR ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
             <ChevronRight className="w-5 h-5" />
           </button>
 

@@ -37,7 +37,7 @@ export default function Configuracion() {
     finally { setSaving(false); }
   };
 
-  if (!s) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#0055A4]" /></div>;
+  if (!s) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div>;
 
   const I = (label, k, type = "text") => (
     <div><Label className="text-xs uppercase tracking-wider text-slate-500">{label}</Label>
@@ -48,7 +48,7 @@ export default function Configuracion() {
     <div className="space-y-5" data-testid="configuracion-page">
       <div className="flex items-center justify-between">
         <div><h1 className="font-display text-2xl font-black tracking-tight">Configuración</h1><p className="text-slate-500 text-sm">Datos de la empresa, precios, sucursales y usuarios</p></div>
-        <Button onClick={save} disabled={saving} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="cfg-save"><Save className="w-4 h-4 mr-1" /> {saving ? "Guardando..." : "Guardar"}</Button>
+        <Button onClick={save} disabled={saving} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="cfg-save"><Save className="w-4 h-4 mr-1" /> {saving ? "Guardando..." : "Guardar"}</Button>
       </div>
 
       <Tabs defaultValue="empresa">
@@ -62,12 +62,12 @@ export default function Configuracion() {
 
         <TabsContent value="empresa" className="pt-4">
           <div className="bg-white border border-slate-200 rounded-md p-5 grid grid-cols-2 gap-4 max-w-3xl">
-            <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold"><Building2 className="w-4 h-4 text-[#0055A4]" /> Datos generales</div>
+            <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold"><Building2 className="w-4 h-4 text-[#B95A3A]" /> Datos generales</div>
             {I("Nombre de la empresa", "empresa_nombre")}
             {I("RFC", "rfc")}
             {I("Teléfono", "telefono")}
             {I("Correo", "correo")}
-            <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold mt-2"><MapPin className="w-4 h-4 text-[#0055A4]" /> Ubicación</div>
+            <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold mt-2"><MapPin className="w-4 h-4 text-[#B95A3A]" /> Ubicación</div>
             <div className="col-span-2">{I("Dirección", "direccion")}</div>
             {I("Ciudad", "ciudad")}
             {I("Estado", "estado")}
@@ -120,7 +120,7 @@ export default function Configuracion() {
         <TabsContent value="ticket" className="pt-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="bg-white border border-slate-200 rounded-md p-5 space-y-4">
-              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#0055A4]" /> Diseño de ticket</div>
+              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#B95A3A]" /> Diseño de ticket</div>
               <div>
                 <Label className="text-xs uppercase tracking-wider text-slate-500 mb-1 block">Logo del negocio</Label>
                 <ImageUpload value={s.logo_url} onChange={(v) => set("logo_url", v)} testid="cfg-logo-upload" heightClass="h-28" />
@@ -130,7 +130,7 @@ export default function Configuracion() {
                 <div className="flex gap-2 mt-1">
                   {[["80mm", "Ticket 80mm"], ["carta", "Carta"]].map(([v, l]) => (
                     <button key={v} type="button" onClick={() => setTc("tamano", v)} data-testid={`cfg-ticket-size-${v}`}
-                      className={`flex-1 py-2 rounded-md border text-sm font-medium ${(s.ticket_config?.tamano || "80mm") === v ? "border-[#0055A4] bg-[#0055A4]/5 text-[#0055A4]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+                      className={`flex-1 py-2 rounded-md border text-sm font-medium ${(s.ticket_config?.tamano || "80mm") === v ? "border-[#B95A3A] bg-[#B95A3A]/5 text-[#B95A3A]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
                   ))}
                 </div>
               </div>

@@ -27,13 +27,13 @@ export default function Dashboard() {
 
   useEffect(() => { api.get("/dashboard").then((r) => setD(r.data)); }, []);
 
-  if (!d) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#0055A4]" /></div>;
+  if (!d) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div>;
 
   const MODULES = [
-    { to: "/app/pos", label: "Punto de Venta", desc: "Cobrar rápido", icon: ShoppingCart, color: "#FF5A00", perm: "venta.crear" },
-    { to: "/app/productos", label: "Productos", desc: "Inventario", icon: Package, color: "#0055A4" },
+    { to: "/app/pos", label: "Punto de Venta", desc: "Cobrar rápido", icon: ShoppingCart, color: "#B95A3A", perm: "venta.crear" },
+    { to: "/app/productos", label: "Productos", desc: "Inventario", icon: Package, color: "#B95A3A" },
     { to: "/app/clientes", label: "Clientes", desc: "Directorio", icon: Users, color: "#22C55E" },
-    { to: "/app/caja", label: "Caja", desc: "Cortes y movimientos", icon: Wallet, color: "#0F172A", perm: "caja.abrir" },
+    { to: "/app/caja", label: "Caja", desc: "Cortes y movimientos", icon: Wallet, color: "#4B4E53", perm: "caja.abrir" },
     { to: "/app/ventas", label: "Ventas", desc: "Historial", icon: Receipt, color: "#8B5CF6" },
     { to: "/app/configuracion", label: "Configuración", desc: "Empresa y precios", icon: Settings, color: "#64748B", perm: "config" },
   ].filter((m) => !m.perm || can(m.perm));
@@ -48,7 +48,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {MODULES.map((m) => (
           <Link key={m.to} to={m.to} data-testid={`quick-${m.to.split("/").pop()}`}
-            className="group bg-white border border-slate-200 rounded-md p-4 hover:border-[#0055A4] hover:shadow-sm transition-all">
+            className="group bg-white border border-slate-200 rounded-md p-4 hover:border-[#B95A3A] hover:shadow-sm transition-all">
             <div className="w-10 h-10 rounded-md flex items-center justify-center mb-3" style={{ background: m.color + "1a" }}>
               <m.icon className="w-5 h-5" style={{ color: m.color }} strokeWidth={2} />
             </div>
@@ -59,14 +59,14 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi icon={TrendingUp} label="Ventas del día" value={money(d.ventas_hoy)} color="#0055A4" testid="kpi-ventas-hoy" />
+        <Kpi icon={TrendingUp} label="Ventas del día" value={money(d.ventas_hoy)} color="#B95A3A" testid="kpi-ventas-hoy" />
         <Kpi icon={TrendingUp} label="Ventas del mes" value={money(d.ventas_mes)} color="#22C55E" testid="kpi-ventas-mes" />
-        <Kpi icon={ShoppingCart} label="N° ventas hoy" value={d.num_ventas_hoy} color="#FF5A00" testid="kpi-num-ventas" />
-        <Kpi icon={Wallet} label="Total en caja" value={money(d.total_caja)} color="#0F172A" testid="kpi-caja" />
+        <Kpi icon={ShoppingCart} label="N° ventas hoy" value={d.num_ventas_hoy} color="#B95A3A" testid="kpi-num-ventas" />
+        <Kpi icon={Wallet} label="Total en caja" value={money(d.total_caja)} color="#4B4E53" testid="kpi-caja" />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi icon={Package} label="Productos activos" value={d.productos} color="#0055A4" testid="kpi-productos" />
+        <Kpi icon={Package} label="Productos activos" value={d.productos} color="#B95A3A" testid="kpi-productos" />
         <Kpi icon={AlertTriangle} label="Stock bajo" value={d.bajo_stock} color="#F59E0B" testid="kpi-stock-bajo" />
         <Kpi icon={PackageX} label="Sin existencia" value={d.sin_existencia} color="#EF4444" testid="kpi-sin-existencia" />
         <Kpi icon={Users} label="Clientes" value={d.clientes} color="#22C55E" testid="kpi-clientes" />
@@ -79,15 +79,15 @@ export default function Dashboard() {
             <AreaChart data={d.serie_ventas}>
               <defs>
                 <linearGradient id="c" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#0055A4" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#0055A4" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#B95A3A" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#B95A3A" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
               <XAxis dataKey="dia" tick={{ fontSize: 12, fill: "#64748b" }} />
               <YAxis tick={{ fontSize: 12, fill: "#64748b" }} />
               <Tooltip formatter={(v) => money(v)} />
-              <Area type="monotone" dataKey="total" stroke="#0055A4" strokeWidth={2} fill="url(#c)" />
+              <Area type="monotone" dataKey="total" stroke="#B95A3A" strokeWidth={2} fill="url(#c)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -125,7 +125,7 @@ export default function Dashboard() {
             <tbody>
               {d.ventas_recientes.map((v) => (
                 <tr key={v.folio} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="py-2 pr-4 font-medium text-[#0055A4]">{v.folio}</td>
+                  <td className="py-2 pr-4 font-medium text-[#B95A3A]">{v.folio}</td>
                   <td className="py-2 pr-4">{v.cliente}</td>
                   <td className="py-2 pr-4 text-slate-500">{v.fecha?.slice(0, 10)}</td>
                   <td className="py-2 pr-4">

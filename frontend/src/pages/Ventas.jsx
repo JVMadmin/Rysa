@@ -90,16 +90,16 @@ export default function Ventas() {
         <div><h1 className="font-display text-2xl font-black tracking-tight">Ventas</h1><p className="text-slate-500 text-sm">{rows.length} registros</p></div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => nav("/app/reportes")} data-testid="ir-reportes"><BarChart3 className="w-4 h-4 mr-1" /> Reportes</Button>
-          <Button onClick={() => nav("/app/pos")} className="bg-[#FF5A00] hover:bg-[#E04F00]" data-testid="nueva-venta-btn"><Plus className="w-4 h-4 mr-1" /> Nueva venta</Button>
+          <Button onClick={() => nav("/app/pos")} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="nueva-venta-btn"><Plus className="w-4 h-4 mr-1" /> Nueva venta</Button>
         </div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-md p-3 space-y-3">
         <div className="flex flex-wrap gap-2">
           {QUICK.map(([k, l]) => (
-            <Button key={k} size="sm" variant={rango === k ? "default" : "outline"} className={rango === k ? "bg-[#0055A4] hover:bg-[#004385]" : ""} onClick={() => setRango(k)} data-testid={`quick-${k}`}>{l}</Button>
+            <Button key={k} size="sm" variant={rango === k ? "default" : "outline"} className={rango === k ? "bg-[#B95A3A] hover:bg-[#8B3A2A]" : ""} onClick={() => setRango(k)} data-testid={`quick-${k}`}>{l}</Button>
           ))}
-          <Button size="sm" variant={rango === "rango" ? "default" : "outline"} className={rango === "rango" ? "bg-[#0055A4] hover:bg-[#004385]" : ""} onClick={() => setRango("rango")} data-testid="quick-rango">Fecha a fecha</Button>
+          <Button size="sm" variant={rango === "rango" ? "default" : "outline"} className={rango === "rango" ? "bg-[#B95A3A] hover:bg-[#8B3A2A]" : ""} onClick={() => setRango("rango")} data-testid="quick-rango">Fecha a fecha</Button>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           {rango === "rango" && (
@@ -131,12 +131,12 @@ export default function Ventas() {
             <th className="p-3 text-right">Total</th><th className="p-3">Cond.</th><th className="p-3 text-center">Factura</th><th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={9} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#0055A4]" /></td></tr>}
+            {loading && <tr><td colSpan={9} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
             {!loading && rows.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-slate-400"><Receipt className="w-8 h-8 mx-auto mb-2" />Sin ventas.</td></tr>}
             {!loading && rows.map((s) => (
               <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`venta-row-${s.folio}`}>
                 <td className="p-3"><Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge></td>
-                <td className="p-3 font-medium text-[#0055A4]">{s.folio}</td>
+                <td className="p-3 font-medium text-[#B95A3A]">{s.folio}</td>
                 <td className="p-3 text-slate-500">{s.fecha?.slice(0, 10)} {s.hora}</td>
                 <td className="p-3">{s.cliente_nombre}</td>
                 <td className="p-3 text-slate-500" data-testid={`venta-vendedor-${s.folio}`}>{s.vendedor_nombre || s.usuario_nombre}</td>
@@ -221,7 +221,7 @@ export default function Ventas() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFacturarSale(null)}>Cancelar</Button>
-            <Button onClick={facturar} disabled={busy === "fact"} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="facturar-confirm">{busy === "fact" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Emitir CFDI"}</Button>
+            <Button onClick={facturar} disabled={busy === "fact"} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="facturar-confirm">{busy === "fact" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Emitir CFDI"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

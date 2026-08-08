@@ -50,7 +50,7 @@ export default function Caja() {
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#0055A4]" /></div>;
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div>;
 
   const caja = data?.caja;
   const res = data?.resumen;
@@ -61,12 +61,12 @@ export default function Caja() {
 
       {!caja ? (
         <div className="bg-white border border-slate-200 rounded-md p-8 max-w-md">
-          <div className="w-12 h-12 rounded-md bg-[#0055A4]/10 flex items-center justify-center mb-4"><Wallet className="w-6 h-6 text-[#0055A4]" /></div>
+          <div className="w-12 h-12 rounded-md bg-[#B95A3A]/10 flex items-center justify-center mb-4"><Wallet className="w-6 h-6 text-[#B95A3A]" /></div>
           <h2 className="font-display text-lg font-bold">No hay caja abierta</h2>
           <p className="text-slate-500 text-sm mb-4">Ingresa el fondo inicial para comenzar a operar.</p>
           <Label className="text-xs uppercase tracking-wider text-slate-500">Fondo inicial</Label>
           <Input type="number" value={fondo} onChange={(e) => setFondo(e.target.value)} className="mt-1 mb-4" data-testid="fondo-inicial" placeholder="0.00" />
-          <Button onClick={abrir} className="w-full bg-[#0055A4] hover:bg-[#004385]" data-testid="abrir-caja-btn"><Unlock className="w-4 h-4 mr-2" /> Abrir caja</Button>
+          <Button onClick={abrir} className="w-full bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="abrir-caja-btn"><Unlock className="w-4 h-4 mr-2" /> Abrir caja</Button>
         </div>
       ) : (
         <>
@@ -74,13 +74,13 @@ export default function Caja() {
             <Badge className="bg-green-100 text-green-700 text-sm px-3 py-1">Caja abierta · {caja.usuario_nombre}</Badge>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setMovOpen(true)} data-testid="mov-caja-btn"><ArrowDownCircle className="w-4 h-4 mr-1" /> Movimiento</Button>
-              <Button onClick={() => setCloseOpen(true)} className="bg-[#FF5A00] hover:bg-[#E04F00]" data-testid="cerrar-caja-btn"><Lock className="w-4 h-4 mr-1" /> Cerrar caja</Button>
+              <Button onClick={() => setCloseOpen(true)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="cerrar-caja-btn"><Lock className="w-4 h-4 mr-1" /> Cerrar caja</Button>
             </div>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[["Fondo inicial", res.fondo_inicial], ["Ventas efectivo", res.ventas_efectivo], ["Entradas", res.entradas], ["Retiros", res.retiros], ["Devoluciones", res.devoluciones], ["Efectivo esperado", res.efectivo_esperado]].map(([l, v], i) => (
-              <div key={i} className={`bg-white border rounded-md p-4 ${i === 5 ? "border-[#0055A4] ring-1 ring-[#0055A4]" : "border-slate-200"}`}>
+              <div key={i} className={`bg-white border rounded-md p-4 ${i === 5 ? "border-[#B95A3A] ring-1 ring-[#B95A3A]" : "border-slate-200"}`}>
                 <div className="text-xs uppercase tracking-wider text-slate-500">{l}</div>
                 <div className="font-display text-lg font-black mt-1">{money(v)}</div>
               </div>
@@ -122,7 +122,7 @@ export default function Caja() {
       {/* Historial de aperturas y cortes de caja */}
       <div className="bg-white border border-slate-200 rounded-md p-4 space-y-3" data-testid="caja-historial">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-display font-bold flex items-center gap-2"><History className="w-5 h-5 text-[#0055A4]" /> Historial de cortes y aperturas</h3>
+          <h3 className="font-display font-bold flex items-center gap-2"><History className="w-5 h-5 text-[#B95A3A]" /> Historial de cortes y aperturas</h3>
           <div className="flex flex-wrap items-center gap-2">
             <Input type="date" value={histDesde} onChange={(e) => setHistDesde(e.target.value)} className="w-40 h-9" data-testid="hist-desde" />
             <span className="text-slate-400 text-sm">a</span>
@@ -198,7 +198,7 @@ export default function Caja() {
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Monto</Label><Input type="number" value={mov.monto} onChange={(e) => setMov((s) => ({ ...s, monto: e.target.value }))} className="mt-1" data-testid="mov-monto" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Referencia</Label><Input value={mov.referencia} onChange={(e) => setMov((s) => ({ ...s, referencia: e.target.value }))} className="mt-1" /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setMovOpen(false)}>Cancelar</Button><Button onClick={registrarMov} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="mov-save">Registrar</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setMovOpen(false)}>Cancelar</Button><Button onClick={registrarMov} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="mov-save">Registrar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -207,7 +207,7 @@ export default function Caja() {
           <DialogHeader><DialogTitle className="font-display">Cerrar caja</DialogTitle></DialogHeader>
           <p className="text-sm text-slate-500">Efectivo esperado: <b>{money(res?.efectivo_esperado)}</b></p>
           <div><Label className="text-xs uppercase tracking-wider text-slate-500">Efectivo contado</Label><Input type="number" value={contado} onChange={(e) => setContado(e.target.value)} className="mt-1" data-testid="efectivo-contado" /></div>
-          <DialogFooter><Button variant="outline" onClick={() => setCloseOpen(false)}>Cancelar</Button><Button onClick={cerrar} className="bg-[#FF5A00] hover:bg-[#E04F00]" data-testid="confirm-cierre"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setCloseOpen(false)}>Cancelar</Button><Button onClick={cerrar} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="confirm-cierre"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -37,13 +37,13 @@ export default function ErpLayout() {
   }, []);
 
   return (
-    <div className="min-h-screen flex bg-[#F1F5F9]">
+    <div className="min-h-screen flex bg-[#F4F0EA]">
       <aside
         data-testid="sidebar"
-        className={`${collapsed ? "w-[68px]" : "w-64"} shrink-0 bg-[#0F172A] text-slate-300 flex flex-col transition-[width] duration-200 sticky top-0 h-screen`}
+        className={`${collapsed ? "w-[68px]" : "w-64"} shrink-0 bg-[#4B4E53] text-slate-300 flex flex-col transition-[width] duration-200 sticky top-0 h-screen`}
       >
         <div className="h-16 flex items-center gap-2 px-4 border-b border-white/10">
-          <div className="w-9 h-9 rounded-md bg-[#FF5A00] flex items-center justify-center shrink-0">
+          <div className="w-9 h-9 rounded-md bg-[#B95A3A] flex items-center justify-center shrink-0">
             <Boxes className="w-5 h-5 text-white" />
           </div>
           {!collapsed && (
@@ -61,7 +61,7 @@ export default function ErpLayout() {
               data-testid={`nav-${n.to.split("/").pop()}`}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
-                  isActive ? "bg-[#0055A4] text-white" : "hover:bg-white/10 hover:text-white"
+                  isActive ? "bg-[#B95A3A] text-white" : "hover:bg-white/10 hover:text-white"
                 }`
               }
             >
@@ -79,7 +79,7 @@ export default function ErpLayout() {
         </button>
       </aside>
 
-      <div className="flex-1 flex flex-col min-w-0 bg-gradient-to-br from-[#8B3A1A]/25 via-[#A64621]/12 to-[#F1F5F9]">
+      <div className="flex-1 flex flex-col min-w-0 bg-[#F4F0EA]">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
           <div className="font-display font-bold text-slate-800 text-lg">Grupo RYSA</div>
           <div className="flex items-center gap-4">
@@ -91,9 +91,9 @@ export default function ErpLayout() {
             )}
             <div className="text-right leading-tight">
               <div className="text-sm font-semibold text-slate-800" data-testid="user-name">{user?.name}</div>
-              <div className="text-xs uppercase tracking-wider text-[#FF5A00] font-medium">{user?.role}</div>
+              <div className="text-xs uppercase tracking-wider text-[#B95A3A] font-medium">{user?.role}</div>
             </div>
-            <div className="w-9 h-9 rounded-full bg-[#0055A4] text-white flex items-center justify-center font-semibold">
+            <div className="w-9 h-9 rounded-full bg-[#B95A3A] text-white flex items-center justify-center font-semibold">
               {user?.name?.[0]?.toUpperCase()}
             </div>
             <button onClick={doLogout} data-testid="logout-btn"

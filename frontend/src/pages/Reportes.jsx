@@ -33,27 +33,27 @@ export default function Reportes() {
   return (
     <div className="space-y-5" data-testid="reportes-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><BarChart3 className="w-6 h-6 text-[#0055A4]" /> Reportes de Ventas y Utilidad</h1></div>
+        <div><h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><BarChart3 className="w-6 h-6 text-[#B95A3A]" /> Reportes de Ventas y Utilidad</h1></div>
         <div className="flex flex-wrap items-center gap-2">
           <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-40" data-testid="rep-desde" />
           <span className="text-slate-400">a</span>
           <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-40" data-testid="rep-hasta" />
           <div className="flex rounded-md overflow-hidden border border-slate-200">
-            <button onClick={() => setGroup("dia")} className={`px-3 py-2 text-sm ${group === "dia" ? "bg-[#0055A4] text-white" : "bg-white"}`} data-testid="rep-group-dia">Por día</button>
-            <button onClick={() => setGroup("mes")} className={`px-3 py-2 text-sm ${group === "mes" ? "bg-[#0055A4] text-white" : "bg-white"}`} data-testid="rep-group-mes">Por mes</button>
+            <button onClick={() => setGroup("dia")} className={`px-3 py-2 text-sm ${group === "dia" ? "bg-[#B95A3A] text-white" : "bg-white"}`} data-testid="rep-group-dia">Por día</button>
+            <button onClick={() => setGroup("mes")} className={`px-3 py-2 text-sm ${group === "mes" ? "bg-[#B95A3A] text-white" : "bg-white"}`} data-testid="rep-group-mes">Por mes</button>
           </div>
-          <Button onClick={load} className="bg-[#0055A4] hover:bg-[#004385]" data-testid="rep-aplicar">Aplicar</Button>
+          <Button onClick={load} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="rep-aplicar">Aplicar</Button>
         </div>
       </div>
 
-      {loading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-[#0055A4]" /></div> : (
+      {loading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-[#B95A3A]" /></div> : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <Card label="Ventas" value={money(t.ventas || 0)} icon={DollarSign} cls="text-slate-800" testid="rep-ventas" />
             <Card label="Ingreso neto" value={money(t.ingreso_neto || 0)} icon={TrendingUp} cls="text-blue-700" testid="rep-ingreso" />
             <Card label="Costo" value={money(t.costo || 0)} icon={Package} cls="text-amber-700" testid="rep-costo" />
             <Card label="Utilidad" value={money(t.utilidad || 0)} icon={TrendingUp} cls="text-emerald-700" testid="rep-utilidad" />
-            <Card label="Margen" value={`${t.margen || 0}%`} icon={Percent} cls="text-[#FF5A00]" testid="rep-margen" />
+            <Card label="Margen" value={`${t.margen || 0}%`} icon={Percent} cls="text-[#B95A3A]" testid="rep-margen" />
           </div>
 
           <div className="bg-white border border-slate-200 rounded-md p-4">
@@ -64,7 +64,7 @@ export default function Reportes() {
                 <XAxis dataKey="periodo" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip formatter={(v) => money(v)} />
-                <Line type="monotone" dataKey="total" stroke="#0055A4" strokeWidth={2} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="total" stroke="#B95A3A" strokeWidth={2} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -77,7 +77,7 @@ export default function Reportes() {
                   <XAxis type="number" tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="codigo" width={70} tick={{ fontSize: 10 }} />
                   <Tooltip />
-                  <Bar dataKey="cantidad" fill="#0055A4" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="cantidad" fill="#B95A3A" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -105,7 +105,7 @@ export default function Reportes() {
                 {data.productos.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">Sin ventas en el rango.</td></tr>}
                 {data.productos.slice(0, 200).map((p, i) => (
                   <tr key={i} className="border-t border-slate-100" data-testid={`rep-prod-${p.codigo}`}>
-                    <td className="p-3 font-medium text-[#0055A4]">{p.codigo}</td>
+                    <td className="p-3 font-medium text-[#B95A3A]">{p.codigo}</td>
                     <td className="p-3 max-w-[280px] truncate">{p.descripcion}</td>
                     <td className="p-3 text-right">{p.cantidad}</td>
                     <td className="p-3 text-right">{money(p.ingreso)}</td>
