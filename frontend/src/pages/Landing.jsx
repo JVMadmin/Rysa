@@ -1,177 +1,204 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
-  Boxes, ShoppingBag, Package, Recycle, Truck, ArrowRight, Phone,
-  MessageCircle, MapPin, Mail, CheckCircle2, Warehouse,
+  ArrowRight, Boxes, Check, ChevronRight, Mail, MapPin, Menu, MessageCircle,
+  Package, Phone, Recycle, ShoppingBag, Truck, Warehouse, X,
 } from "lucide-react";
 
-const CATS = [
-  { name: "Bolsas de Papel", desc: "Estraza, revolución y kraft en todas las medidas.", icon: ShoppingBag,
-    img: "https://images.unsplash.com/photo-1616429368325-d5d7542b0ec3?crop=entropy&cs=srgb&fm=jpg&q=85&w=800", span: "md:col-span-7" },
-  { name: "Vasos y Desechables", desc: "Vasos de plástico, cubiertos y productos desechables.", icon: Recycle,
-    img: "https://images.unsplash.com/photo-1541698321721-c083f55816da?crop=entropy&cs=srgb&fm=jpg&q=85&w=800", span: "md:col-span-5" },
-  { name: "Empaque y Cajas", desc: "Emplayer, cajas de cartón y materiales para empaque.", icon: Package,
-    img: "https://images.unsplash.com/photo-1769355104335-acef3aa4c9b6?crop=entropy&cs=srgb&fm=jpg&q=85&w=800", span: "md:col-span-5" },
-  { name: "Plásticos Industriales", desc: "Bolsas negras, plástico por rollo, tambos y cubetas.", icon: Boxes,
-    img: "https://images.unsplash.com/photo-1710141530542-f792450e736e?crop=entropy&cs=srgb&fm=jpg&q=85&w=800", span: "md:col-span-7" },
+const CATEGORIES = [
+  {
+    name: "Plásticos y contenedores",
+    description: "Tambos, cubetas, contenedores y soluciones para uso industrial y comercial.",
+    icon: Boxes,
+    image: "https://images.unsplash.com/photo-1710141530542-f792450e736e?auto=format&fit=crop&w=1200&q=85",
+  },
+  {
+    name: "Empaques y bolsas",
+    description: "Bolsas, papel, emplaye y materiales para proteger y presentar tus productos.",
+    icon: ShoppingBag,
+    image: "https://images.unsplash.com/photo-1616429368325-d5d7542b0ec3?auto=format&fit=crop&w=1000&q=85",
+  },
+  {
+    name: "Desechables",
+    description: "Vasos, cubiertos y artículos prácticos para negocios, eventos y servicio de alimentos.",
+    icon: Recycle,
+    image: "https://images.unsplash.com/photo-1541698321721-c083f55816da?auto=format&fit=crop&w=1000&q=85",
+  },
 ];
 
-const DESTACADOS = ["Bolsas de papel", "Vasos de plástico", "Papel estraza", "Papel revolución",
-  "Bolsas para silo", "Tambos de 200 L", "Cubetas de 20 L", "Emplayer", "Hilo vinil", "Bolsas negras", "Plástico por rollo"];
+const PRODUCT_LINES = [
+  "Tambos y cubetas", "Bolsas y papel", "Vasos y desechables", "Contenedores",
+  "Bolsas para silo", "Emplaye y rollos", "Suministros comerciales",
+];
+
+const NAVIGATION = [
+  ["Inicio", "#inicio"],
+  ["Nosotros", "#nosotros"],
+  ["Productos", "#productos"],
+  ["Contacto", "#contacto"],
+];
+
+function Brand({ compact = false }) {
+  return (
+    <div className="flex items-center shrink-0">
+      <img
+        src={compact ? "/brand/ISOTIPO-Photoroom.png" : "/brand/logotipo-Photoroom.png"}
+        alt="Grupo RYSA"
+        className={compact ? "h-10 w-14 object-contain" : "h-11 w-[164px] object-contain object-left"}
+      />
+    </div>
+  );
+}
 
 export default function Landing() {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const closeMenu = () => setMenuOpen(false);
+
   return (
-    <div className="bg-[#F8F9FA] text-slate-900">
-      <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/80 border-b border-white/40">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-md bg-[#B95A3A] flex items-center justify-center">
-              <Boxes className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-display font-extrabold text-xl tracking-tight">Grupo RYSA</span>
-          </div>
-          <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-600">
-            <a href="#productos" className="hover:text-[#B95A3A] transition-colors">Productos</a>
-            <a href="#nosotros" className="hover:text-[#B95A3A] transition-colors">Nosotros</a>
-            <a href="#contacto" className="hover:text-[#B95A3A] transition-colors">Contacto</a>
-          </nav>
-          <Link to="/login">
-            <Button data-testid="landing-login-btn" className="rounded-full bg-[#B95A3A] hover:bg-[#8B3A2A] text-white px-5">
-              Iniciar sesión
-            </Button>
-          </Link>
-        </div>
-      </header>
+    <div className="min-h-screen overflow-x-hidden bg-[#f7f7f5] text-[#17191d] selection:bg-red-700 selection:text-white">
+      <header className="sticky top-0 z-50 border-b border-black/10 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-5 sm:px-8">
+          <a href="#inicio" aria-label="Grupo RYSA, inicio" className="hidden sm:flex"><Brand /></a>
+          <a href="#inicio" aria-label="Grupo RYSA, inicio" className="sm:hidden"><Brand compact /></a>
 
-      {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 z-0">
-          <img src="https://images.unsplash.com/photo-1710141530542-f792450e736e?crop=entropy&cs=srgb&fm=jpg&q=85&w=1600"
-            alt="Almacén" className="w-full h-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#4B4E53] via-[#4B4E53]/90 to-[#4B4E53]/40" />
-        </div>
-        <div className="relative z-10 max-w-7xl mx-auto px-6 py-28 lg:py-40">
-          <div className="max-w-2xl animate-fade-up">
-            <span className="inline-flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-[#B95A3A] font-semibold mb-6">
-              <span className="w-8 h-[2px] bg-[#B95A3A]" /> Mayoreo y Menudeo
-            </span>
-            <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-black tracking-tighter text-white leading-[1.05]">
-              Plásticos y desechables para tu negocio
-            </h1>
-            <p className="text-slate-300 text-lg mt-6 max-w-xl">
-              Somos Grupo RYSA. Comercializamos bolsas, vasos, papel, empaque y productos plásticos con la mejor calidad y precio, al mayoreo y menudeo.
-            </p>
-            <div className="flex flex-wrap gap-4 mt-8">
-              <a href="#productos">
-                <Button className="rounded-full h-12 px-7 bg-[#B95A3A] hover:bg-[#8B3A2A] text-white font-semibold text-base">
-                  Ver productos <ArrowRight className="w-4 h-4 ml-2" />
-                </Button>
+          <nav className="hidden items-center gap-7 lg:flex" aria-label="Navegación principal">
+            {NAVIGATION.map(([label, href]) => (
+              <a key={href} href={href} className="text-xs font-bold uppercase tracking-[0.13em] text-[#2b2e34] transition-colors hover:text-red-700">
+                {label}
               </a>
-              <a href="#contacto">
-                <Button variant="outline" className="rounded-full h-12 px-7 bg-white/10 border-white/30 text-white hover:bg-white/20 hover:text-white text-base">
-                  <MessageCircle className="w-4 h-4 mr-2" /> Contáctanos
-                </Button>
-              </a>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Franja stats */}
-      <section id="nosotros" className="border-b border-slate-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 divide-x divide-slate-200">
-          {[["+500", "Productos"], ["Mayoreo", "y Menudeo"], ["Entrega", "Rápida"], ["Precios", "Competitivos"]].map(([a, b], i) => (
-            <div key={i} className="py-8 px-4 text-center">
-              <div className="font-display text-2xl md:text-3xl font-black text-[#B95A3A]">{a}</div>
-              <div className="text-sm text-slate-500 mt-1">{b}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Categorías bento */}
-      <section id="productos" className="max-w-7xl mx-auto px-6 py-20">
-        <div className="max-w-2xl">
-          <h2 className="font-display text-2xl sm:text-3xl lg:text-4xl font-black tracking-tight">Nuestras categorías</h2>
-          <p className="text-slate-500 mt-3">Todo lo que tu negocio necesita en materiales plásticos, papel y empaque.</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 mt-10">
-          {CATS.map((c) => (
-            <div key={c.name} className={`${c.span} group relative rounded-xl overflow-hidden h-64 border border-slate-200`}>
-              <img src={c.img} alt={c.name} className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-              <div className="absolute bottom-0 p-6 text-white">
-                <c.icon className="w-7 h-7 mb-2 text-[#B95A3A]" />
-                <h3 className="font-display text-xl font-bold">{c.name}</h3>
-                <p className="text-slate-200 text-sm mt-1">{c.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Destacados */}
-      <section className="bg-white border-y border-slate-200 py-16">
-        <div className="max-w-7xl mx-auto px-6">
-          <h2 className="font-display text-2xl sm:text-3xl font-black tracking-tight mb-8">Productos destacados</h2>
-          <div className="flex flex-wrap gap-3">
-            {DESTACADOS.map((p) => (
-              <span key={p} className="inline-flex items-center gap-2 bg-[#F4F0EA] border border-slate-200 rounded-full px-4 py-2 text-sm text-slate-700">
-                <CheckCircle2 className="w-4 h-4 text-[#B95A3A]" /> {p}
-              </span>
             ))}
-          </div>
-          <div className="grid md:grid-cols-2 gap-6 mt-12">
-            <div className="rounded-xl border border-slate-200 p-8 bg-[#F8F9FA]">
-              <Warehouse className="w-8 h-8 text-[#B95A3A]" />
-              <h3 className="font-display text-xl font-bold mt-4">Ventas al Mayoreo</h3>
-              <p className="text-slate-500 mt-2 text-sm">Precios especiales por volumen para distribuidores, restaurantes, tiendas y empresas.</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 p-8 bg-[#F8F9FA]">
-              <Truck className="w-8 h-8 text-[#B95A3A]" />
-              <h3 className="font-display text-xl font-bold mt-4">Ventas al Menudeo</h3>
-              <p className="text-slate-500 mt-2 text-sm">Compra la cantidad que necesites, con atención personalizada y entrega rápida.</p>
-            </div>
-          </div>
-        </div>
-      </section>
+          </nav>
 
-      {/* Contacto */}
-      <section id="contacto" className="max-w-7xl mx-auto px-6 py-20">
-        <div className="rounded-2xl bg-[#4B4E53] p-10 md:p-14 grid md:grid-cols-2 gap-10 items-center">
-          <div>
-            <h2 className="font-display text-2xl sm:text-3xl font-black tracking-tight text-white">Contáctanos</h2>
-            <p className="text-slate-300 mt-3 max-w-md">Solicita tu cotización o visita nuestra tienda. Con gusto te atendemos al mayoreo y menudeo.</p>
-            <div className="mt-8 space-y-4 text-slate-200">
-              <div className="flex items-center gap-3"><Phone className="w-5 h-5 text-[#B95A3A]" /> (000) 000 0000</div>
-              <div className="flex items-center gap-3"><MessageCircle className="w-5 h-5 text-[#B95A3A]" /> WhatsApp disponible</div>
-              <div className="flex items-center gap-3"><Mail className="w-5 h-5 text-[#B95A3A]" /> contacto@gruporysa.com</div>
-              <div className="flex items-center gap-3"><MapPin className="w-5 h-5 text-[#B95A3A]" /> México</div>
-            </div>
-          </div>
-          <div className="bg-white rounded-xl p-8">
-            <h3 className="font-display text-lg font-bold">¿Eres del equipo RYSA?</h3>
-            <p className="text-slate-500 text-sm mt-2">Accede al sistema ERP para gestionar inventario, ventas y caja.</p>
+          <div className="hidden items-center gap-4 sm:flex">
+            <a href="#contacto" className="hidden items-center gap-2 text-sm font-medium text-[#363941] transition-colors hover:text-red-700 xl:flex">
+              <Phone className="h-4 w-4 text-red-700" /> Atención personalizada
+            </a>
             <Link to="/login">
-              <Button data-testid="landing-cta-login" className="w-full h-12 mt-6 rounded-full bg-[#B95A3A] hover:bg-[#8B3A2A] text-white font-semibold">
-                Iniciar sesión en el ERP <ArrowRight className="w-4 h-4 ml-2" />
+              <Button data-testid="landing-login-btn" className="h-10 rounded-none bg-red-700 px-5 text-xs font-bold uppercase tracking-[0.1em] hover:bg-red-800">
+                Acceso ERP
               </Button>
             </Link>
           </div>
-        </div>
-      </section>
 
-      <footer className="bg-[#4B4E53] text-slate-400 py-10">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-md bg-[#B95A3A] flex items-center justify-center">
-              <Boxes className="w-4 h-4 text-white" />
-            </div>
-            <span className="font-display font-bold text-white">Grupo RYSA</span>
-          </div>
-          <p className="text-sm">© {new Date().getFullYear()} Grupo RYSA. Plásticos y desechables. Todos los derechos reservados.</p>
+          <button type="button" aria-label={menuOpen ? "Cerrar menú" : "Abrir menú"} onClick={() => setMenuOpen((open) => !open)} className="inline-flex h-10 w-10 items-center justify-center border border-black/15 text-[#1d2025] lg:hidden">
+            {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
         </div>
-      </footer>
+
+        {menuOpen && (
+          <div className="border-t border-black/10 bg-white px-5 py-5 lg:hidden">
+            <nav className="mx-auto flex max-w-7xl flex-col gap-1" aria-label="Navegación móvil">
+              {NAVIGATION.map(([label, href]) => (
+                <a key={href} href={href} onClick={closeMenu} className="border-b border-black/10 py-3 text-sm font-bold uppercase tracking-[0.1em] text-[#202329] hover:text-red-700">
+                  {label}
+                </a>
+              ))}
+              <Link to="/login" onClick={closeMenu} className="mt-4">
+                <Button className="h-11 w-full rounded-none bg-red-700 text-xs font-bold uppercase tracking-[0.1em] hover:bg-red-800">Acceso ERP</Button>
+              </Link>
+            </nav>
+          </div>
+        )}
+      </header>
+
+      <main>
+        <section id="inicio" className="relative isolate min-h-[660px] overflow-hidden bg-[#16181c]">
+          <img
+            src="https://images.unsplash.com/photo-1710141530542-f792450e736e?auto=format&fit=crop&w=2200&q=90"
+            alt="Materiales y suministros para operación comercial"
+            className="absolute inset-0 -z-20 h-full w-full object-cover object-center"
+          />
+          <div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#101216]/95 via-[#15171c]/82 to-[#15171c]/20" />
+          <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#101216]/70 to-transparent" />
+          <div className="mx-auto flex min-h-[660px] max-w-7xl items-center px-5 py-20 sm:px-8 lg:py-28">
+            <div className="max-w-3xl animate-fade-up">
+              <div className="mb-7 flex items-center gap-3 text-xs font-bold uppercase tracking-[0.22em] text-white/80">
+                <span className="h-[2px] w-11 bg-red-600" /> Plásticos · Empaques · Desechables
+              </div>
+              <h1 className="max-w-3xl font-display text-5xl font-black leading-[0.96] tracking-[-0.05em] text-white sm:text-6xl lg:text-7xl">
+                Suministros que mantienen tu negocio en movimiento.
+              </h1>
+              <p className="mt-7 max-w-xl text-base leading-7 text-white/75 sm:text-lg">
+                Grupo RYSA reúne soluciones en plásticos, empaques, desechables y suministros para las necesidades diarias de tu operación.
+              </p>
+              <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+                <a href="#productos">
+                  <Button className="h-12 w-full rounded-none bg-red-700 px-6 text-xs font-bold uppercase tracking-[0.1em] hover:bg-red-800 sm:w-auto">
+                    Explorar productos <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </a>
+                <a href="#contacto">
+                  <Button variant="outline" className="h-12 w-full rounded-none border-white/40 bg-transparent px-6 text-xs font-bold uppercase tracking-[0.1em] text-white hover:border-white hover:bg-white hover:text-[#17191d] sm:w-auto">
+                    Solicitar atención
+                  </Button>
+                </a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="border-b border-black/10 bg-white">
+          <div className="mx-auto grid max-w-7xl grid-cols-1 divide-y divide-black/10 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            {[["Mayoreo", "Atención para negocios y distribuidores"], ["Menudeo", "Compra justo lo que necesitas"], ["Soluciones", "Para empaque, servicio y operación"]].map(([title, text]) => (
+              <div key={title} className="flex items-center gap-4 px-6 py-6 sm:px-8">
+                <span className="h-9 w-1 bg-red-700" />
+                <div><strong className="block font-display text-lg font-extrabold tracking-tight">{title}</strong><span className="text-sm text-[#666b73]">{text}</span></div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section id="nosotros" className="mx-auto grid max-w-7xl gap-12 px-5 py-24 sm:px-8 lg:grid-cols-2 lg:items-center lg:gap-24 lg:py-32">
+          <div className="order-2 lg:order-1">
+            <p className="flex items-center gap-3 text-xs font-bold uppercase tracking-[0.2em] text-red-700"><span className="h-[2px] w-9 bg-red-700" /> Nosotros</p>
+            <h2 className="mt-5 max-w-lg font-display text-4xl font-black leading-tight tracking-[-0.035em] text-[#191b20] sm:text-5xl">Una respuesta confiable para cada necesidad de suministro.</h2>
+            <p className="mt-6 max-w-xl text-base leading-7 text-[#5f646d]">
+              Grupo RYSA comercializa plásticos, empaques, desechables y suministros. Nuestra oferta está pensada para facilitar la compra de materiales esenciales en un mismo lugar.
+            </p>
+            <a href="#productos" className="mt-8 inline-flex items-center gap-2 border-b-2 border-red-700 pb-2 text-xs font-bold uppercase tracking-[0.12em] text-[#1d2025] transition-colors hover:text-red-700">
+              Conoce nuestras líneas <ChevronRight className="h-4 w-4" />
+            </a>
+          </div>
+          <div className="relative order-1 lg:order-2">
+            <div className="absolute -left-3 -top-3 h-24 w-24 border-l-2 border-t-2 border-red-700 sm:-left-5 sm:-top-5" />
+            <img src="https://images.unsplash.com/photo-1616429368325-d5d7542b0ec3?auto=format&fit=crop&w=1200&q=85" alt="Materiales para empaque" className="relative aspect-[4/3] w-full object-cover grayscale-[15%]" />
+            <div className="absolute bottom-0 left-0 bg-[#191b20] px-6 py-5 text-white sm:left-8 sm:bottom-8"><span className="block text-xs font-bold uppercase tracking-[0.16em] text-red-500">Grupo RYSA</span><span className="mt-1 block font-display text-xl font-extrabold">Soluciones para tu operación</span></div>
+          </div>
+        </section>
+
+        <section id="productos" className="bg-[#1a1c21] py-24 text-white lg:py-32">
+          <div className="mx-auto max-w-7xl px-5 sm:px-8">
+            <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
+              <div><p className="flex items-center gap-3 text-xs font-bold uppercase tracking-[0.2em] text-red-500"><span className="h-[2px] w-9 bg-red-600" /> Productos</p><h2 className="mt-5 font-display text-4xl font-black tracking-[-0.035em] sm:text-5xl">Líneas para cada negocio.</h2></div>
+              <p className="max-w-md text-sm leading-6 text-white/65">Explora una selección de las líneas que forman parte de nuestra oferta comercial.</p>
+            </div>
+            <div className="mt-12 grid gap-5 md:grid-cols-3">
+              {CATEGORIES.map((category) => {
+                const Icon = category.icon;
+                return <article key={category.name} className="group relative min-h-[390px] overflow-hidden border border-white/15 bg-[#25282f]">
+                  <img src={category.image} alt={category.name} className="absolute inset-0 h-full w-full object-cover opacity-65 transition duration-700 group-hover:scale-105 group-hover:opacity-80" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#101216] via-[#101216]/35 to-transparent" />
+                  <div className="absolute inset-x-0 bottom-0 p-7"><div className="mb-5 flex h-11 w-11 items-center justify-center border border-red-500 bg-[#17191d]/80"><Icon className="h-5 w-5 text-red-500" /></div><h3 className="font-display text-2xl font-extrabold">{category.name}</h3><p className="mt-3 text-sm leading-6 text-white/75">{category.description}</p></div>
+                </article>;
+              })}
+            </div>
+            <div className="mt-10 flex flex-wrap gap-2.5 border-t border-white/15 pt-8">
+              {PRODUCT_LINES.map((line) => <span key={line} className="inline-flex items-center gap-2 border border-white/20 px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-white/80"><Check className="h-3.5 w-3.5 text-red-500" />{line}</span>)}
+            </div>
+          </div>
+        </section>
+
+        <section id="contacto" className="mx-auto max-w-7xl px-5 py-24 sm:px-8 lg:py-32">
+          <div className="grid overflow-hidden border border-black/10 lg:grid-cols-[1.15fr_.85fr]">
+            <div className="bg-white p-8 sm:p-12 lg:p-16"><p className="flex items-center gap-3 text-xs font-bold uppercase tracking-[0.2em] text-red-700"><span className="h-[2px] w-9 bg-red-700" /> Contacto</p><h2 className="mt-5 max-w-lg font-display text-4xl font-black leading-tight tracking-[-0.035em] sm:text-5xl">Hablemos de lo que tu negocio necesita.</h2><p className="mt-6 max-w-lg leading-7 text-[#626770]">Conoce nuestra oferta de productos y recibe atención para encontrar la solución más adecuada para tu operación.</p><div className="mt-10 flex flex-col gap-4 sm:flex-row"><a href="mailto:contacto@gruporysa.com"><Button className="h-12 rounded-none bg-red-700 px-6 text-xs font-bold uppercase tracking-[0.1em] hover:bg-red-800"><Mail className="mr-2 h-4 w-4" /> Escribirnos</Button></a><Link to="/login"><Button variant="outline" className="h-12 rounded-none border-[#1b1d22] px-6 text-xs font-bold uppercase tracking-[0.1em] hover:bg-[#1b1d22] hover:text-white">Acceso al ERP <ArrowRight className="ml-2 h-4 w-4" /></Button></Link></div></div>
+            <div className="bg-[#25282f] p-8 text-white sm:p-12 lg:p-16"><div className="inline-flex bg-white px-3 py-2"><Brand /></div><div className="mt-12 space-y-6 text-sm text-white/75"><div className="flex gap-4"><Mail className="h-5 w-5 shrink-0 text-red-500" /><span>contacto@gruporysa.com</span></div><div className="flex gap-4"><MessageCircle className="h-5 w-5 shrink-0 text-red-500" /><span>Atención por WhatsApp disponible</span></div><div className="flex gap-4"><MapPin className="h-5 w-5 shrink-0 text-red-500" /><span>México</span></div></div><div className="mt-12 border-t border-white/15 pt-6 text-xs uppercase tracking-[0.12em] text-white/45">Plásticos · Empaques · Desechables · Suministros</div></div>
+          </div>
+        </section>
+      </main>
+
+      <footer className="bg-[#111317] py-10 text-white/55"><div className="mx-auto flex max-w-7xl flex-col gap-7 px-5 sm:px-8 md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-4"><span className="bg-white px-1"><Brand compact /></span><span className="text-xs uppercase tracking-[0.14em]">Grupo RYSA</span></div><nav className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold uppercase tracking-[0.1em]">{NAVIGATION.map(([label, href]) => <a key={href} href={href} className="transition-colors hover:text-red-500">{label}</a>)}</nav><p className="text-xs">© {new Date().getFullYear()} Grupo RYSA. Todos los derechos reservados.</p></div></footer>
     </div>
   );
 }

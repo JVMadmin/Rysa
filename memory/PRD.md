@@ -106,7 +106,7 @@ ERP/POS web full-stack para Grupo RYSA (comercio de plásticos y desechables, ma
 - Verificado con curl (entrada +10, merma -3, ajuste -2 → existencia 7→12; filtro global tipo=merma; kardex con costo/motivo/usuario) y capturas (diálogo global y kardex por producto).
 
 ## Implementado (2026-06 — Fase 2 Bloque G: WhatsApp, imágenes, código de barras, editor de ticket, scroll flotante)
-- Object storage (Emergent) integrado en `backend/storage.py` (init/put/get) + `EMERGENT_LLM_KEY` en `.env`. Endpoints: `POST /uploads/image` (multipart, valida tipo/≤8MB, guarda en `db.files`), `GET /files/{path}` (PÚBLICO, sirve desde storage), `POST /sales/{id}/ticket-pdf` (genera PDF con reportlab 80mm/Carta y lo sube). Helper front `fileUrl()`.
+- Object storage (local) integrado en `backend/storage.py` (init/put/get) — guarda en disco bajo `UPLOAD_DIR`, sin dependencia de plataforma externa. Endpoints: `POST /uploads/image` (multipart, valida tipo real/≤8MB, guarda en `db.files`), `GET /files/{path}` (PÚBLICO, sirve desde storage local), `POST /sales/{id}/ticket-pdf` (genera PDF con reportlab 80mm/Carta y lo sube). Helper front `fileUrl()`.
 - WhatsApp en ticket (POS): tras cobrar, caja WhatsApp con teléfono (prefill del cliente) + botón "Enviar PDF" → genera PDF y abre `wa.me` con mensaje + enlace público del PDF.
 - Subir imágenes desde el dispositivo (o URL) para Productos (pestaña Multimedia) y Categorías vía componente reutilizable `ImageUpload.jsx`.
 - Código de barras editable por producto (varios, ver/escribir/sobreescribir) en pestaña "Códigos de barras"; búsqueda backend incluye `codigos_barras`; en POS al escanear/escribir un código y Enter (`onSearchKey`) agrega el producto al carrito.

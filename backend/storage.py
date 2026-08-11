@@ -1,61 +1,83 @@
-"""Emergent object storage helpers + generación de PDF de ticket."""
+"""Almacenamiento de archivos local y generación de PDF de ticket."""
 import os
 import io
-import requests
+import mimetypes
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
-STORAGE_BASE = (os.environ.get("INTEGRATION_PROXY_URL") or "").strip() or "https://integrations.emergentagent.com"
-STORAGE_URL = STORAGE_BASE.rstrip("/") + "/objstore/api/v1/storage"
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
-APP_NAME = "grupo-rysa"
+# Directorio base para subidas local (configurable por variable de entorno)
+# En producción en el VPS se puede establecer UPLOAD_DIR=/var/www/rysa/uploads
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
 
 MIME_TYPES = {
     "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
     "gif": "image/gif", "webp": "image/webp", "pdf": "application/pdf",
 }
 
-_storage_key = None
-
+def get_safe_local_path(storage_path: str) -> str:
+    """Resuelve la ruta y previene vulnerabilidades de Path Traversal."""
+    base = os.path.abspath(UPLOAD_DIR)
+    # Evitamos que usen rutas absolutas o de retroceso que apunten fuera de UPLOAD_DIR
+    target = os.path.abspath(os.path.join(base, storage_path))
+    if not target.startswith(base):
+        raise ValueError("Acceso no autorizado: Intento de Path Traversal detectado.")
+    return target
 
 def init_storage():
-    global _storage_key
-    if _storage_key:
-        return _storage_key
-    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-    resp.raise_for_status()
-    _storage_key = resp.json()["storage_key"]
-    return _storage_key
+    """Garantiza la existencia del directorio de almacenamiento."""
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    return UPLOAD_DIR
 
+def detect_mime_type(data: bytes) -> str:
+    """Inspecciona los primeros bytes (firmas mágicas) para validar el tipo MIME real."""
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+        return "image/png"
+    elif data.startswith(b'\xff\xd8'):
+        return "image/jpeg"
+    elif data.startswith(b'GIF87a') or data.startswith(b'GIF89a'):
+        return "image/gif"
+    elif data.startswith(b'RIFF') and len(data) > 12 and data[8:12] == b'WEBP':
+        return "image/webp"
+    elif data.startswith(b'%PDF-'):
+        return "application/pdf"
+    return "application/octet-stream"
 
 def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data, timeout=120,
-    )
-    resp.raise_for_status()
-    return resp.json()
-
+    """Guarda un archivo de forma local en el disco del servidor."""
+    init_storage()
+    target_path = get_safe_local_path(path)
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    
+    with open(target_path, "wb") as f:
+        f.write(data)
+        
+    return {
+        "path": path,
+        "size": len(data)
+    }
 
 def get_object(path: str):
-    key = init_storage()
-    resp = requests.get(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key}, timeout=60,
-    )
-    resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
-
+    """Obtiene un archivo almacenado localmente."""
+    target_path = get_safe_local_path(path)
+    if not os.path.exists(target_path) or os.path.isdir(target_path):
+        raise FileNotFoundError(f"Archivo no encontrado: {path}")
+        
+    # Adivinar tipo MIME basado en la extensión o por defecto
+    ctype, _ = mimetypes.guess_type(target_path)
+    if not ctype:
+        ctype = "application/octet-stream"
+        
+    with open(target_path, "rb") as f:
+        data = f.read()
+        
+    return data, ctype
 
 def _money(v):
     try:
         return f"${float(v or 0):,.2f}"
     except Exception:
         return "$0.00"
-
 
 def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
     """Genera un PDF del ticket según la configuración (80mm o carta)."""

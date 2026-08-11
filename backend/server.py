@@ -1,15 +1,25 @@
 """Grupo RYSA ERP - API principal (FastAPI + MongoDB)."""
+import os
 from dotenv import load_dotenv
 from pathlib import Path
-load_dotenv(Path(__file__).parent / '.env')
 
-import os
+_ENV_BASE = Path(__file__).parent
+# ENVIRONMENT definido por el entorno del sistema (p. ej. systemd en el VPS).
+_env_active_os = os.environ.get("ENVIRONMENT", "").lower()
+# Cargar siempre `.env` (base/local). Las variables del SO tienen prioridad.
+load_dotenv(_ENV_BASE / '.env', override=False)
+# Si el proceso indica el entorno explícitamente, cargar también `.env.<entorno>`.
+if _env_active_os in ("development", "production"):
+    _env_file = _ENV_BASE / f".env.{_env_active_os}"
+    if _env_file.exists():
+        load_dotenv(_env_file, override=True)
+
 import io
 import uuid
 import re
 import logging
 from typing import List, Optional
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
@@ -25,7 +35,8 @@ from deps import (
 )
 import storage
 
-logging.basicConfig(level=logging.INFO)
+_APP_ENV = os.environ.get("ENVIRONMENT", "development").lower()
+logging.basicConfig(level=logging.DEBUG if _APP_ENV == "development" else logging.INFO)
 logger = logging.getLogger("rysa")
 
 app = FastAPI(title="Grupo RYSA ERP")
@@ -428,8 +439,32 @@ def public_user(u: dict) -> dict:
     u.pop("_id", None)
     return u
 
+# In-memory rate limiting para login (prevención de fuerza bruta)
+LOGIN_LIMITS = {}  # IP -> list of timestamps
+
+def check_login_rate_limit(ip: str):
+    env = os.environ.get("ENVIRONMENT", "development").lower()
+    # Permitir ilimitados en desarrollo para agilizar pruebas unitarias
+    if env != "production":
+        return
+    now = datetime.now()
+    window = timedelta(minutes=1)
+    cutoff = now - window
+    # Filtrar intentos en el último minuto
+    attempts = [t for t in LOGIN_LIMITS.get(ip, []) if t > cutoff]
+    if len(attempts) >= 5:  # máximo 5 intentos por minuto en producción
+        raise HTTPException(
+            status_code=429, 
+            detail="Demasiados intentos de inicio de sesión. Por favor, intenta de nuevo en un minuto."
+        )
+    attempts.append(now)
+    LOGIN_LIMITS[ip] = attempts
+
 @api.post("/auth/login")
-async def login(data: LoginInput, response: Response):
+async def login(data: LoginInput, response: Response, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    check_login_rate_limit(ip)
+    
     email = data.email.strip().lower()
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(data.password, user["password_hash"]):
@@ -437,8 +472,14 @@ async def login(data: LoginInput, response: Response):
     if not user.get("active", True):
         raise HTTPException(status_code=403, detail="Usuario desactivado")
     token = create_access_token(user["id"], user["email"])
-    response.set_cookie("access_token", token, httponly=True, secure=True,
-                        samesite="none", max_age=604800, path="/")
+    
+    env = os.environ.get("ENVIRONMENT", "development").lower()
+    is_prod = env == "production"
+    cookie_secure = True if is_prod else False
+    cookie_samesite = "lax"
+
+    response.set_cookie("access_token", token, httponly=True, secure=cookie_secure,
+                        samesite=cookie_samesite, max_age=604800, path="/")
     return {"token": token, "user": public_user(user)}
 
 @api.post("/auth/logout")
@@ -459,7 +500,7 @@ async def list_users(user: dict = Depends(require_permission("usuarios.ver"))):
     return users
 
 @api.post("/users")
-async def create_user(data: UserCreate, user: dict = Depends(require_permission("usuarios.ver"))):
+async def create_user(data: UserCreate, user: dict = Depends(require_permission("usuarios.crear"))):
     email = data.email.strip().lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
@@ -470,7 +511,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_permission(
     return public_user(doc)
 
 @api.put("/users/{user_id}")
-async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(require_permission("usuarios.ver"))):
+async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(require_permission("usuarios.editar"))):
     upd = {k: v for k, v in data.model_dump().items() if v is not None}
     if "password" in upd:
         upd["password_hash"] = hash_password(upd.pop("password"))
@@ -1206,7 +1247,7 @@ async def list_suspended(user: dict = Depends(get_current_user)):
     return await db.suspended_sales.find({"usuario_id": user["id"]}, {"_id": 0}).sort("fecha", -1).to_list(100)
 
 @api.delete("/sales-suspended/{sid}")
-async def delete_suspended(sid: str, user: dict = Depends(get_current_user)):
+async def delete_suspended(sid: str, user: dict = Depends(require_permission("venta.crear"))):
     await db.suspended_sales.delete_one({"id": sid})
     return {"ok": True}
 
@@ -1709,19 +1750,31 @@ async def update_settings(data: SettingsInput, user: dict = Depends(require_perm
 # =========================================================================
 @api.post("/uploads/image")
 async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
-    ext = (file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "png")
-    if ext not in storage.MIME_TYPES:
-        raise HTTPException(400, "Formato no permitido. Usa JPG, PNG, WEBP o GIF.")
     data = await file.read()
     if len(data) > 8 * 1024 * 1024:
         raise HTTPException(400, "La imagen no debe superar 8 MB.")
-    path = f"{storage.APP_NAME}/uploads/{uid()}.{ext}"
-    ctype = file.content_type or storage.MIME_TYPES.get(ext, "application/octet-stream")
+    
+    # Validar tipo MIME real por firma de bytes
+    real_mime = storage.detect_mime_type(data)
+    if real_mime not in ["image/jpeg", "image/png", "image/gif", "image/webp"]:
+        raise HTTPException(400, "Formato real no permitido. Usa JPG, PNG, WEBP o GIF.")
+        
+    mime_to_ext = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/gif": "gif",
+        "image/webp": "webp"
+    }
+    safe_ext = mime_to_ext.get(real_mime, "png")
+    
+    # Para evitar vulnerabilidades de path traversal y sobrescritura, usamos un UUID aleatorio
+    path = f"uploads/{uid()}.{safe_ext}"
+    ctype = real_mime
     try:
         result = storage.put_object(path, data, ctype)
     except Exception as e:
         logger.error("Upload imagen falló: %s", str(e)[:160])
-        raise HTTPException(502, "No se pudo subir la imagen al almacenamiento.")
+        raise HTTPException(502, "No se pudo subir la imagen al almacenamiento local.")
     stored = result.get("path", path)
     await db.files.insert_one({
         "id": uid(), "storage_path": stored, "original_filename": file.filename,
@@ -1737,7 +1790,8 @@ async def serve_file(path: str):
         raise HTTPException(404, "Archivo no encontrado")
     try:
         data, ctype = storage.get_object(path)
-    except Exception:
+    except Exception as e:
+        logger.error("Error al obtener archivo local %s: %s", path, str(e)[:120])
         raise HTTPException(404, "Archivo no disponible")
     return Response(content=data, media_type=record.get("content_type", ctype))
 
@@ -1749,7 +1803,9 @@ async def sale_ticket_pdf(sale_id: str, user: dict = Depends(get_current_user)):
     settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
     try:
         pdf_bytes = storage.build_ticket_pdf(sale, settings)
-        path = f"{storage.APP_NAME}/tickets/{sale.get('folio', sale_id)}-{uid()[:8]}.pdf"
+        # Nombre de archivo basado en folio seguro + UUID
+        folio_clean = "".join(c for c in sale.get('folio', 'sale') if c.isalnum())
+        path = f"tickets/{folio_clean}-{uid()[:8]}.pdf"
         result = storage.put_object(path, pdf_bytes, "application/pdf")
     except Exception as e:
         logger.error("Ticket PDF falló: %s", str(e)[:160])
@@ -1776,13 +1832,14 @@ async def sales_next_folio(user: dict = Depends(get_current_user)):
     return {"venta": f"V{str(vn).zfill(6)}", "cotizacion": f"COT{str(cn).zfill(6)}"}
 
 # =========================================================================
-# FACTURACIÓN CFDI 4.0 (PAC-agnóstico; Facturama primero)
+# FACTURACIÓN CFDI 4.0 (PAC: Facty.mx)
 # =========================================================================
 class PacConfigInput(BaseModel):
-    provider: str = "facturama"
+    provider: str = "facty"
     environment: str = "sandbox"        # sandbox | produccion
-    api_user: Optional[str] = ""
-    api_password: Optional[str] = ""     # si viene vacío en PUT, se conserva la existente
+    api_key: Optional[str] = ""          # API Key / Token de Facty.mx (Bearer)
+    api_user: Optional[str] = ""         # reservado por compatibilidad (no usado por Facty.mx)
+    api_password: Optional[str] = ""     # reservado por compatibilidad (no usado por Facty.mx)
     rfc: Optional[str] = ""
     razon_social: Optional[str] = ""
     regimen_fiscal: Optional[str] = "601"
@@ -1791,21 +1848,27 @@ class PacConfigInput(BaseModel):
     lugar_expedicion: Optional[str] = ""  # CP
     timbres_alerta: Optional[int] = 20    # avisar cuando queden menos
 
-FACTURAMA_URLS = {"sandbox": "https://apisandbox.facturama.mx", "produccion": "https://api.facturama.mx"}
+# NOTA: URLs estimadas de la API de Facty.mx (https://facty.mx). AJUSTAR cuando se tenga
+# la documentación oficial y las credenciales reales del proveedor.
+FACTY_URLS = {"sandbox": "https://sandbox.facty.mx/api", "produccion": "https://api.facty.mx/api"}
 
 async def get_pac_config():
     return await db.pac_config.find_one({"_id": "pac"}, {"_id": 0})
 
 def pac_configurado(cfg):
-    return bool(cfg and cfg.get("api_user") and cfg.get("api_password") and cfg.get("rfc"))
+    return bool(cfg and cfg.get("api_key") and cfg.get("rfc"))
 
-def facturama_request(cfg, method, path, **kwargs):
-    base = FACTURAMA_URLS.get(cfg.get("environment", "sandbox"), FACTURAMA_URLS["sandbox"])
-    with httpx.Client(base_url=base, auth=(cfg["api_user"], cfg["api_password"]), timeout=30.0) as c:
+def facty_request(cfg, method, path, **kwargs):
+    """Cliente HTTP para la API de Facty.mx. Autenticación Bearer Token (API Key).
+    AJUSTAR endpoints/headers exactos al integrar con la documentación oficial de Facty.mx."""
+    base = FACTY_URLS.get(cfg.get("environment", "sandbox"), FACTY_URLS["sandbox"])
+    headers = {"Authorization": f"Bearer {cfg.get('api_key', '')}", **kwargs.pop("headers", {})}
+    with httpx.Client(base_url=base, headers=headers, timeout=30.0) as c:
         r = c.request(method, path, **kwargs)
         if r.status_code >= 400:
-            raise HTTPException(r.status_code, f"PAC: {r.text[:500]}")
+            raise HTTPException(r.status_code, f"PAC (Facty.mx): {r.text[:500]}")
         return r.json()
+
 
 def _money(x):
     return f"{round(float(x) + 1e-9, 2):.2f}"
@@ -1870,10 +1933,12 @@ async def timbres(user: dict = Depends(get_current_user)):
     if not pac_configurado(cfg):
         return {"configurado": False, "disponibles": None, "plan": None}
     try:
-        data = facturama_request(cfg, "GET", "/SuscriptionPlan")
-        disp = int(data.get("CurrentFolios") or 0)
-        res = {"configurado": True, "disponibles": disp, "plan": data.get("Plan"),
-               "expira": data.get("ExpirationDate"), "actualizado": iso_now(),
+        # NOTA: endpoint estimado de consulta de créditos/timbres disponibles de Facty.mx.
+        # AJUSTAR nombre de endpoint y campos de respuesta según documentación oficial.
+        data = facty_request(cfg, "GET", "/account/credits")
+        disp = int(data.get("credits") or data.get("CurrentFolios") or 0)
+        res = {"configurado": True, "disponibles": disp, "plan": data.get("plan") or data.get("Plan"),
+               "expira": data.get("expires_at") or data.get("ExpirationDate"), "actualizado": iso_now(),
                "alerta": disp <= int(cfg.get("timbres_alerta", 20))}
         await db.pac_config.update_one({"_id": "pac"}, {"$set": {"timbres_cache": res}})
         return res
@@ -1882,6 +1947,7 @@ async def timbres(user: dict = Depends(get_current_user)):
         cached["configurado"] = True
         cached["error"] = str(e.detail)[:200]
         return cached
+
 
 @api.get("/facturacion")
 async def list_cfdi(user: dict = Depends(get_current_user)):
@@ -1906,19 +1972,23 @@ async def emitir_cfdi(sale_id: str, user: dict = Depends(require_permission("ven
         raise HTTPException(400, "Esta venta ya fue facturada")
     cliente = await db.clients.find_one({"id": sale.get("cliente_id")}, {"_id": 0}) if sale.get("cliente_id") else None
     payload = sale_to_cfdi_payload(sale, cliente, cfg)
-    result = facturama_request(cfg, "POST", "/3/cfdis", json=payload)
-    fid = result.get("Id")
-    uuid_ = ((result.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid")
+    # NOTA: endpoint estimado de timbrado de Facty.mx. AJUSTAR ruta y payload según su
+    # documentación oficial (probablemente requiera un formato distinto al de Facturama).
+    result = facty_request(cfg, "POST", "/cfdi", json=payload)
+    fid = result.get("id") or result.get("Id")
+    uuid_ = result.get("uuid") or ((result.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid")
     doc = {"id": uid(), "sale_id": sale_id, "folio_venta": sale.get("folio"),
-           "facturama_id": fid, "uuid": uuid_, "serie": result.get("Serie"), "folio": result.get("Folio"),
-           "status": "vigente", "total": result.get("Total", sale.get("total")),
+           "pac_id": fid, "uuid": uuid_, "serie": result.get("serie") or result.get("Serie"),
+           "folio": result.get("folio") or result.get("Folio"),
+           "status": "vigente", "total": result.get("total", sale.get("total")),
            "cliente_nombre": (cliente.get("nombre") if cliente else "PUBLICO EN GENERAL"),
            "rfc": payload["Receiver"]["Rfc"], "fecha": iso_now(), "provider": cfg.get("provider"),
            "response": result}
     await db.cfdi_documents.insert_one(doc)
     await db.sales.update_one({"id": sale_id}, {"$set": {"facturado": True, "cfdi_uuid": uuid_, "cfdi_id": fid}})
     await log_audit(user, "facturar", "venta", sale_id, f"CFDI {uuid_}")
-    return {"ok": True, "facturama_id": fid, "uuid": uuid_, "folio": result.get("Folio")}
+    return {"ok": True, "pac_id": fid, "uuid": uuid_, "folio": doc["folio"]}
+
 
 @api.get("/facturacion/{cfdi_id}/{fmt}")
 async def descargar_cfdi(cfdi_id: str, fmt: str, user: dict = Depends(get_current_user)):
@@ -1928,8 +1998,10 @@ async def descargar_cfdi(cfdi_id: str, fmt: str, user: dict = Depends(get_curren
     doc = await db.cfdi_documents.find_one({"id": cfdi_id}, {"_id": 0})
     if not doc or not pac_configurado(cfg):
         raise HTTPException(404, "CFDI o PAC no disponible")
-    data = facturama_request(cfg, "GET", f"/cfdi/{fmt}/issued/{doc['facturama_id']}")
-    raw = base64.b64decode(data["Content"])
+    pac_id = doc.get("pac_id") or doc.get("facturama_id")
+    # NOTA: endpoint estimado de descarga de Facty.mx. AJUSTAR según documentación oficial.
+    data = facty_request(cfg, "GET", f"/cfdi/{pac_id}/{fmt}")
+    raw = base64.b64decode(data.get("content") or data.get("Content"))
     media = "application/xml" if fmt == "xml" else "application/pdf"
     return StreamingResponse(io.BytesIO(raw), media_type=media,
         headers={"Content-Disposition": f"attachment; filename={doc.get('folio_venta','cfdi')}.{fmt}"})
@@ -1945,15 +2017,18 @@ async def cancelar_cfdi(cfdi_id: str, motivo: str = "02", uuid_reemplazo: Option
         raise HTTPException(422, "Motivo de cancelación inválido")
     if motivo == "01" and not uuid_reemplazo:
         raise HTTPException(422, "El motivo 01 requiere UUID de reemplazo")
-    params = {"type": "issued", "motive": motivo}
+    pac_id = doc.get("pac_id") or doc.get("facturama_id")
+    params = {"motive": motivo}
     if uuid_reemplazo:
         params["uuidReplacement"] = uuid_reemplazo
-    result = facturama_request(cfg, "DELETE", f"/cfdi/{doc['facturama_id']}", params=params)
+    # NOTA: endpoint estimado de cancelación de Facty.mx. AJUSTAR según documentación oficial.
+    result = facty_request(cfg, "DELETE", f"/cfdi/{pac_id}", params=params)
     await db.cfdi_documents.update_one({"id": cfdi_id}, {"$set": {"status": "cancelado", "cancelacion": result}})
     if doc.get("sale_id"):
         await db.sales.update_one({"id": doc["sale_id"]}, {"$set": {"facturado": False}})
     await log_audit(user, "cancelar", "facturacion", cfdi_id, f"motivo {motivo}")
     return {"ok": True, "result": result}
+
 
 # =========================================================================
 # REPORTES DE VENTAS Y UTILIDAD
@@ -2018,7 +2093,7 @@ async def reporte_ventas(desde: Optional[str] = None, hasta: Optional[str] = Non
 async def startup():
     try:
         storage.init_storage()
-        logger.info("Object storage inicializado")
+        logger.info("Almacenamiento local inicializado en: %s", storage.UPLOAD_DIR)
     except Exception as e:
         logger.error("Storage init falló: %s", str(e)[:160])
     await db.users.create_index("email", unique=True)
@@ -2031,18 +2106,39 @@ async def startup():
         await db.clients.create_index("codigo", unique=True)
     except Exception as e:
         logger.warning("Índice único clients.codigo: %s", str(e)[:120])
-    # Seed admin
-    admin_email = os.environ["ADMIN_EMAIL"].strip().lower()
-    admin_pw = os.environ["ADMIN_PASSWORD"]
-    existing = await db.users.find_one({"email": admin_email})
-    if not existing:
-        await db.users.insert_one({
-            "id": uid(), "email": admin_email, "name": os.environ.get("ADMIN_NAME", "Admin"),
-            "role": "admin", "password_hash": hash_password(admin_pw),
-            "active": True, "created_at": iso_now()})
-        logger.info("Admin seed creado: %s", admin_email)
-    elif not verify_password(admin_pw, existing["password_hash"]):
-        await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_pw)}})
+        
+    # Seed admin (condicionado a ENVIRONMENT)
+    env = os.environ.get("ENVIRONMENT", "development").lower()
+    admin_email = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+    admin_pw = os.environ.get("ADMIN_PASSWORD", "")
+
+    if env == "production":
+        # En producción el seed del administrador NO se ejecuta automáticamente:
+        # el primer usuario admin debe crearse manualmente (p. ej. corriendo una
+        # sola vez con ENVIRONMENT=development, o insertando el registro en Mongo).
+        if not await db.users.find_one({"role": "admin"}):
+            logger.warning(
+                "Seed de admin desactivado en producción. Crea el usuario administrador "
+                "manualmente (ENVIRONMENT=development una sola vez) antes de abrir el sistema."
+            )
+    else:
+        # En desarrollo, usar valores por defecto si no se especifican
+        if not admin_email:
+            admin_email = "REDACTED"
+        if not admin_pw:
+            admin_pw = "REDACTED"
+
+        existing = await db.users.find_one({"email": admin_email})
+        if not existing:
+            await db.users.insert_one({
+                "id": uid(), "email": admin_email, "name": os.environ.get("ADMIN_NAME", "Admin"),
+                "role": "admin", "password_hash": hash_password(admin_pw),
+                "active": True, "created_at": iso_now()})
+            logger.info("Admin seed creado: %s", admin_email)
+        elif not verify_password(admin_pw, existing["password_hash"]):
+            await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_pw)}})
+            logger.info("Admin password actualizado.")
+        
     # Cliente Público General por defecto
     if not await db.clients.find_one({"codigo": "PUBLICO"}):
         await db.clients.insert_one({
@@ -2051,6 +2147,7 @@ async def startup():
             "correo": "", "direccion": "", "ciudad": "", "estado_geo": "", "cp": "",
             "tipo": "publico", "lista_precios": 1, "condicion_pago": "contado",
             "limite_credito": 0, "saldo": 0, "estado": "activo", "created_at": iso_now()})
+            
     # Configuración por defecto
     if not await db.settings.find_one({"_id": "app"}):
         await db.settings.insert_one({
@@ -2065,10 +2162,33 @@ async def startup():
 async def shutdown():
     client.close()
 
+# Middleware para inyección de Headers de Seguridad Básicos
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
 app.include_router(api)
+
+# Configuración dinámica de CORS
+env = os.environ.get("ENVIRONMENT", "development").lower()
+cors_origins_env = os.environ.get("CORS_ORIGINS", "")
+if cors_origins_env:
+    origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+else:
+    if env == "production":
+        origins = ["https://gruporysa.com"]
+    else:
+        # En desarrollo permitimos localhost comunes
+        origins = ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

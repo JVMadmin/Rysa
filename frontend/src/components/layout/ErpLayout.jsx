@@ -80,26 +80,58 @@ export default function ErpLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 bg-[#F4F0EA]">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-20">
-          <div className="font-display font-bold text-slate-800 text-lg">Grupo RYSA</div>
-          <div className="flex items-center gap-4">
+        <header className="rysa-header sticky top-0 z-20 h-14 sm:h-16 2xl:h-18 flex items-center justify-between px-3 sm:px-5 lg:px-6 2xl:px-8 transition-all duration-200">
+          {/* Lado izquierdo: Título / Identificador de marca */}
+          <div className="flex items-center gap-2">
+            <div className="font-display font-extrabold text-base sm:text-lg 2xl:text-xl tracking-tight rysa-header-title flex items-center gap-2">
+              <span>Grupo RYSA</span>
+              <span className="hidden md:inline-block w-1.5 h-1.5 rounded-full bg-[#B95A3A]/40" />
+              <span className="hidden md:inline-block text-xs font-normal text-slate-400 tracking-normal font-sans">Sistema ERP</span>
+            </div>
+          </div>
+
+          {/* Lado derecho: Timbres, Perfil de Usuario y Logout */}
+          <div className="flex items-center gap-2 sm:gap-4">
             {timbres && timbres.configurado && (
-              <div title="Timbres CFDI disponibles" data-testid="timbres-badge"
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${timbres.alerta ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>
-                <Stamp className="w-3.5 h-3.5" /> {timbres.disponibles ?? "—"} timbres
+              <div
+                title="Timbres CFDI disponibles"
+                data-testid="timbres-badge"
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tracking-wide transition-all ${
+                  timbres.alerta ? "rysa-header-badge-alert" : "rysa-header-badge-success"
+                }`}
+              >
+                <Stamp className="w-3.5 h-3.5 shrink-0" strokeWidth={2.2} />
+                <span>{timbres.disponibles ?? "—"}</span>
+                <span className="hidden sm:inline">timbres</span>
               </div>
             )}
-            <div className="text-right leading-tight">
-              <div className="text-sm font-semibold text-slate-800" data-testid="user-name">{user?.name}</div>
-              <div className="text-xs uppercase tracking-wider text-[#B95A3A] font-medium">{user?.role}</div>
+
+            {/* Información del usuario */}
+            <div className="flex items-center gap-2.5 sm:gap-3 pl-1 sm:pl-2 border-l border-slate-200/80">
+              <div className="text-right leading-tight hidden sm:block">
+                <div className="text-xs sm:text-sm font-semibold rysa-header-user-name tracking-tight" data-testid="user-name">
+                  {user?.name}
+                </div>
+                <div className="inline-block px-1.5 py-0.2 rounded text-[10px] uppercase font-bold tracking-wider rysa-header-user-role mt-0.5">
+                  {user?.role}
+                </div>
+              </div>
+
+              {/* Avatar */}
+              <div className="w-8 h-8 sm:w-9 sm:h-9 2xl:w-10 2xl:h-10 rounded-full rysa-header-avatar flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 select-none">
+                {user?.name?.[0]?.toUpperCase() || "U"}
+              </div>
+
+              {/* Botón de Salir */}
+              <button
+                onClick={doLogout}
+                data-testid="logout-btn"
+                title="Cerrar sesión"
+                className="p-1.5 sm:p-2 rysa-header-btn-logout flex items-center justify-center"
+              >
+                <LogOut className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={2} />
+              </button>
             </div>
-            <div className="w-9 h-9 rounded-full bg-[#B95A3A] text-white flex items-center justify-center font-semibold">
-              {user?.name?.[0]?.toUpperCase()}
-            </div>
-            <button onClick={doLogout} data-testid="logout-btn"
-              className="p-2 rounded-md hover:bg-slate-100 text-slate-500 hover:text-red-600 transition-colors">
-              <LogOut className="w-5 h-5" />
-            </button>
           </div>
         </header>
         <main className="flex-1 p-6 overflow-x-hidden">

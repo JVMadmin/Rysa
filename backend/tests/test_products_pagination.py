@@ -7,7 +7,7 @@ import pytest
 import requests
 import pandas as pd
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://erp-inventory-32.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
 API = f"{BASE_URL}/api"
 ADMIN_EMAIL = "REDACTED"
 ADMIN_PASSWORD = "REDACTED"

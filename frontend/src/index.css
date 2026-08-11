@@ -32,7 +32,82 @@ body {
     --input: 214 32% 91%;
     --ring: 209 100% 32%;
     --radius: 0.375rem;
+
+    /* Header Design System - Rojo Óxido & Gris (Linear / Notion Style) */
+    --header-bg: rgba(255, 255, 255, 0.92);
+    --header-border: #E2E8F0;
+    --header-text-primary: #1E293B;
+    --header-text-secondary: #64748B;
+    --header-brand-oxido: #B95A3A;
+    --header-brand-oxido-hover: #9A472C;
+    --header-brand-oxido-light: #FDF4F0;
+    --header-brand-oxido-border: #F7D7CB;
+    --header-grey-dark: #334155;
+    --header-grey-medium: #64748B;
+    --header-grey-light: #F8FAFC;
+    --header-grey-hover: #F1F5F9;
+    --header-radius-sm: 6px;
+    --header-radius-md: 8px;
+    --header-radius-full: 9999px;
+    --header-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
+    --header-badge-success-bg: #ECFDF5;
+    --header-badge-success-text: #047857;
+    --header-badge-success-border: #A7F3D0;
+    --header-badge-alert-bg: #FEF2F2;
+    --header-badge-alert-text: #B91C1C;
+    --header-badge-alert-border: #FECACA;
   }
+}
+
+/* Header Utilities */
+.rysa-header {
+  background-color: var(--header-bg);
+  border-bottom: 1px solid var(--header-border);
+  box-shadow: var(--header-shadow);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.rysa-header-title {
+  color: var(--header-text-primary);
+}
+
+.rysa-header-user-name {
+  color: var(--header-text-primary);
+}
+
+.rysa-header-user-role {
+  color: var(--header-brand-oxido);
+  background-color: var(--header-brand-oxido-light);
+  border: 1px solid var(--header-brand-oxido-border);
+}
+
+.rysa-header-avatar {
+  background: linear-gradient(135deg, var(--header-brand-oxido) 0%, var(--header-brand-oxido-hover) 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 4px rgba(185, 90, 58, 0.2);
+}
+
+.rysa-header-badge-success {
+  background-color: var(--header-badge-success-bg);
+  color: var(--header-badge-success-text);
+  border: 1px solid var(--header-badge-success-border);
+}
+
+.rysa-header-badge-alert {
+  background-color: var(--header-badge-alert-bg);
+  color: var(--header-badge-alert-text);
+  border: 1px solid var(--header-badge-alert-border);
+}
+
+.rysa-header-btn-logout {
+  color: var(--header-grey-medium);
+  border-radius: var(--header-radius-md);
+  transition: all 0.15s ease-in-out;
+}
+.rysa-header-btn-logout:hover {
+  background-color: #FEF2F2;
+  color: #DC2626;
 }
 
 @layer base {
