@@ -1,0 +1,21 @@
+# Backend RYSA - excluye artefactos locales y secretos del build context
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+.env
+.env.development
+.env.production
+.env.test
+.env.*
+!requirements.txt
+*pytest_cache/
+.pytest_cache/
+tests/
+uploads/
+brand/
+*.log
+.git/
+.gitignore
+Dockerfile

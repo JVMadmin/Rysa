@@ -1,0 +1,87 @@
+# Grupo RYSA ERP - Docker Compose (DEV local)
+# Punto de entrada único: Nginx (HTTP). Nada más se publica al host.
+# Copia .env.docker.example -> .env.docker y ajusta los valores antes de levantar.
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: rysa_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rysa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rysa_dev_only_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-rysa}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - rysa_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rysa} -d ${POSTGRES_DB:-rysa}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Sin puertos publicados a proposito: solo accesible dentro de la red interna.
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rysa_backend
+    restart: unless-stopped
+    env_file:
+      - ./.env.docker
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      # Backend se conecta a PostgreSQL por el nombre de servicio Docker.
+      DATABASE_URL: ${BACKEND_DATABASE_URL:-postgresql+asyncpg://rysa:rysa_dev_only_change_me@postgres:5432/rysa_dev}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rysa_net
+    # Sin puertos publicados: solo Nginx lo expone.
+    command: [
+      "sh", "-c",
+      "alembic upgrade head && uvicorn server:app --host 0.0.0.0 --port 8000"
+    ]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Ruta relativa: el frontend habla con su mismo origen (/api -> Nginx -> backend)
+        REACT_APP_BACKEND_URL: ""
+    container_name: rysa_frontend
+    restart: unless-stopped
+    networks:
+      - rysa_net
+
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    container_name: rysa_nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - rysa_net
+
+networks:
+  rysa_net:
+    driver: bridge
+    name: rysa_net
+
+volumes:
+  pgdata:
+    name: rysa_pgdata
+  uploads:
+    name: rysa_uploads

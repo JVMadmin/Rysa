@@ -1,0 +1,9 @@
+# Frontend RYSA - excluye node_modules y build del contexto
+node_modules/
+build/
+.git/
+.gitignore
+*.log
+.env
+.env.*
+Dockerfile
