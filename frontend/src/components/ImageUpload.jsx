@@ -32,7 +32,7 @@ export function ImageUpload({ value, onChange, testid = "image-upload", heightCl
 
   return (
     <div className="space-y-2" data-testid={testid}>
-      <div className={`relative ${heightClass} bg-slate-100 rounded-md border border-slate-200 overflow-hidden flex items-center justify-center`}>
+      <div className={`relative ${heightClass} bg-slate-100 rounded-xl border border-slate-200 overflow-hidden flex items-center justify-center`}>
         {value ? (
           <>
             <img src={fileUrl(value)} alt="preview" className="w-full h-full object-contain" data-testid={`${testid}-preview`} />

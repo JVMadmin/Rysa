@@ -101,3 +101,11 @@ credentials.json
 
 # Emergent platform leftovers (migrado a VPS propio)
 .emergent/
+
+# Artefactos y datos locales que no deben commitearse
+test_reports/
+backend/uploads/
+backend/brand/
+
+# Logs
+*.log

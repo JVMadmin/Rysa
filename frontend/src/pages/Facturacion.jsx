@@ -80,7 +80,7 @@ export default function Facturacion() {
     <div className="space-y-5" data-testid="facturacion-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="font-display text-2xl font-black tracking-tight">Facturación CFDI 4.0</h1>
-          <p className="text-slate-500 text-sm">Timbrado de ventas mediante PAC (Facturama)</p></div>
+          <p className="text-slate-500 text-sm">Timbrado de ventas mediante PAC (Facty)</p></div>
         {timbres && (
           timbres.configurado ? (
             <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${timbres.alerta ? "bg-red-50 border border-red-200" : "bg-emerald-50 border border-emerald-200"}`} data-testid="timbres-panel">
@@ -105,18 +105,18 @@ export default function Facturacion() {
 
         {/* Facturas emitidas */}
         <TabsContent value="emitidas" className="pt-3">
-          <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+          <div className="card-soft overflow-x-auto">
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
                 <th className="p-3">Folio venta</th><th className="p-3">Serie-Folio</th><th className="p-3">UUID</th><th className="p-3">Cliente</th><th className="p-3">RFC</th>
                 <th className="p-3 text-right">Total</th><th className="p-3 text-center">Estado</th><th className="p-3">Fecha</th><th className="p-3"></th>
               </tr></thead>
               <tbody>
-                {loading && <tr><td colSpan={9} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
+                {loading && <tr><td colSpan={9} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
                 {!loading && facturas.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-slate-400"><FileText className="w-8 h-8 mx-auto mb-2" />Sin facturas emitidas.</td></tr>}
                 {!loading && facturas.map((f) => (
                   <tr key={f.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cfdi-row-${f.folio_venta}`}>
-                    <td className="p-3 font-medium text-[#B95A3A]">{f.folio_venta}</td>
+                    <td className="p-3 font-medium text-[#C1401E]">{f.folio_venta}</td>
                     <td className="p-3">{f.serie}{f.folio}</td>
                     <td className="p-3 text-xs text-slate-500 max-w-[180px] truncate" title={f.uuid}>{f.uuid || "—"}</td>
                     <td className="p-3 max-w-[180px] truncate">{f.cliente_nombre}</td>
@@ -141,22 +141,22 @@ export default function Facturacion() {
 
         {/* Por facturar */}
         <TabsContent value="facturar" className="pt-3">
-          <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+          <div className="card-soft overflow-x-auto">
             <table className="w-full text-sm whitespace-nowrap">
               <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
                 <th className="p-3">Folio</th><th className="p-3">Fecha</th><th className="p-3">Cliente</th><th className="p-3 text-right">Total</th><th className="p-3"></th>
               </tr></thead>
               <tbody>
-                {loading && <tr><td colSpan={5} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
+                {loading && <tr><td colSpan={5} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
                 {!loading && facturables.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />No hay ventas pendientes de facturar.</td></tr>}
                 {!loading && facturables.map((s) => (
                   <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`facturable-${s.folio}`}>
-                    <td className="p-3 font-medium text-[#B95A3A]">{s.folio}</td>
+                    <td className="p-3 font-medium text-[#C1401E]">{s.folio}</td>
                     <td className="p-3 text-slate-500">{(s.fecha || "").slice(0, 10)}</td>
                     <td className="p-3">{s.cliente_nombre || "Público General"}</td>
                     <td className="p-3 text-right font-semibold">{money(s.total)}</td>
                     <td className="p-3 text-right">
-                      <Button size="sm" className="bg-[#B95A3A] hover:bg-[#8B3A2A]" disabled={busy === s.id} onClick={() => facturar(s)} data-testid={`facturar-${s.folio}`}>
+                      <Button size="sm" className="bg-[#C1401E] hover:bg-[#A03316]" disabled={busy === s.id} onClick={() => facturar(s)} data-testid={`facturar-${s.folio}`}>
                         {busy === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Stamp className="w-4 h-4 mr-1" /> Facturar</>}
                       </Button>
                     </td>
@@ -170,23 +170,21 @@ export default function Facturacion() {
         {/* Configuración PAC */}
         {puedeConfig && (
           <TabsContent value="config" className="pt-3">
-            {!cfg ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div> : (
-              <div className="bg-white border border-slate-200 rounded-md p-5 max-w-3xl space-y-4">
+            {!cfg ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div> : (
+              <div className="card-soft p-5 max-w-3xl space-y-4">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div><Label className="text-xs uppercase tracking-wider text-slate-500">PAC</Label>
-                    <Select value={cfg.provider || "facturama"} onValueChange={(v) => setCfg({ ...cfg, provider: v })}>
+                    <Select value={cfg.provider || "facty"} onValueChange={(v) => setCfg({ ...cfg, provider: v })}>
                       <SelectTrigger className="mt-1" data-testid="cfg-provider"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="facturama">Facturama</SelectItem></SelectContent>
+                      <SelectContent><SelectItem value="facty">Facty</SelectItem></SelectContent>
                     </Select></div>
                   <div><Label className="text-xs uppercase tracking-wider text-slate-500">Entorno</Label>
                     <Select value={cfg.environment || "sandbox"} onValueChange={(v) => setCfg({ ...cfg, environment: v })}>
                       <SelectTrigger className="mt-1" data-testid="cfg-env"><SelectValue /></SelectTrigger>
                       <SelectContent><SelectItem value="sandbox">Sandbox (pruebas)</SelectItem><SelectItem value="produccion">Producción</SelectItem></SelectContent>
                     </Select></div>
-                  <div><Label className="text-xs uppercase tracking-wider text-slate-500">Usuario API</Label>
-                    <Input value={cfg.api_user || ""} onChange={(e) => setCfg({ ...cfg, api_user: e.target.value })} className="mt-1" data-testid="cfg-user" /></div>
-                  <div><Label className="text-xs uppercase tracking-wider text-slate-500">Contraseña API {cfg.api_password_set && <span className="text-emerald-600">✓ guardada</span>}</Label>
-                    <Input type="password" placeholder={cfg.api_password_set ? "•••••• (sin cambios)" : ""} onChange={(e) => setCfg({ ...cfg, api_password: e.target.value })} className="mt-1" data-testid="cfg-pass" /></div>
+                  <div className="md:col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">API Key de Facty {cfg.api_key_set && <span className="text-emerald-600">✓ guardada</span>}</Label>
+                    <Input type="password" placeholder={cfg.api_key_set ? "•••••• (sin cambios)" : "fk_..."} value={cfg.api_key || ""} onChange={(e) => setCfg({ ...cfg, api_key: e.target.value })} className="mt-1" data-testid="cfg-apikey" /></div>
                   <div><Label className="text-xs uppercase tracking-wider text-slate-500">RFC emisor</Label>
                     <Input value={cfg.rfc || ""} onChange={(e) => setCfg({ ...cfg, rfc: e.target.value.toUpperCase() })} className="mt-1" data-testid="cfg-rfc" /></div>
                   <div><Label className="text-xs uppercase tracking-wider text-slate-500">Razón social</Label>
@@ -206,10 +204,10 @@ export default function Facturacion() {
                     <Input type="number" value={cfg.timbres_alerta ?? 20} onChange={(e) => setCfg({ ...cfg, timbres_alerta: e.target.value })} className="mt-1" data-testid="cfg-alerta" /></div>
                 </div>
                 <div className="text-xs text-slate-400 bg-slate-50 rounded p-3">
-                  Los certificados CSD (.cer/.key) se cargan directamente en tu cuenta de Facturama. Aquí solo se guardan las credenciales de API. La contraseña se almacena de forma segura y no se muestra.
+                  El certificado CSD (.cer/.key) se carga directamente en tu cuenta de Facty (una sola vez). Aquí solo se guarda la API Key de Facty (o define la variable FACTY_API_KEY en el servidor). No se muestra después de guardarla.
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button onClick={guardarConfig} disabled={busy === "cfg"} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="cfg-guardar">{busy === "cfg" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar configuración"}</Button>
+                  <Button onClick={guardarConfig} disabled={busy === "cfg"} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cfg-guardar">{busy === "cfg" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar configuración"}</Button>
                   {cfg.configurado ? <Badge className="bg-green-100 text-green-700"><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> PAC listo</Badge> : <Badge variant="outline" className="text-amber-600 border-amber-300">Faltan credenciales</Badge>}
                 </div>
               </div>

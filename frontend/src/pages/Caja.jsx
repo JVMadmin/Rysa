@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -7,9 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2, History, Search } from "lucide-react";
+import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2, History, Search, Users } from "lucide-react";
 
 export default function Caja() {
+  const { isAdminOrOwner } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fondo, setFondo] = useState("");
@@ -24,6 +26,13 @@ export default function Caja() {
   const [histEstado, setHistEstado] = useState("all");
   const [detCaja, setDetCaja] = useState(null);
 
+  const [operadores, setOperadores] = useState([]);
+  const [loadingOps, setLoadingOps] = useState(isAdminOrOwner);
+  const [openTarget, setOpenTarget] = useState(null);
+  const [openFondo, setOpenFondo] = useState("");
+  const [closeTarget, setCloseTarget] = useState(null);
+  const [closeContado, setCloseContado] = useState("");
+
   const loadHist = async () => {
     const params = {};
     if (histDesde) params.desde = histDesde;
@@ -33,11 +42,26 @@ export default function Caja() {
     setHist(data);
   };
 
+  const loadOperadores = async () => {
+    if (!isAdminOrOwner) return;
+    try {
+      const { data } = await api.get("/caja/operadores");
+      setOperadores(data);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+    } finally {
+      setLoadingOps(false);
+    }
+  };
+
   const load = async () => { setLoading(true); const { data } = await api.get("/caja/actual"); setData(data); setLoading(false); };
-  useEffect(() => { load(); loadHist(); /* eslint-disable-next-line */ }, []);
+
+  useEffect(() => { load(); loadHist(); loadOperadores(); /* eslint-disable-next-line */ }, []);
+
+  const refetch = () => { load(); loadHist(); loadOperadores(); };
 
   const abrir = async () => {
-    try { await api.post("/caja/abrir", { fondo_inicial: Number(fondo || 0) }); toast.success("Caja abierta"); setFondo(""); load(); }
+    try { await api.post("/caja/abrir", { fondo_inicial: Number(fondo || 0) }); toast.success("Caja abierta"); setFondo(""); refetch(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
   const registrarMov = async () => {
@@ -50,7 +74,26 @@ export default function Caja() {
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div>;
+  const abrirPorUsuario = async () => {
+    if (!openTarget) return;
+    try {
+      await api.post("/caja/abrir-por-usuario", { usuario_id: openTarget.usuario_id, fondo_inicial: Number(openFondo || 0) });
+      toast.success(`Caja abierta para ${openTarget.usuario_nombre}`);
+      setOpenTarget(null); setOpenFondo(""); refetch();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const cerrarPorUsuario = async () => {
+    if (!closeTarget) return;
+    try {
+      const { data } = await api.post("/caja/cerrar", { caja_id: closeTarget.caja.id, efectivo_contado: Number(closeContado || 0) });
+      setCierre(data.cierre);
+      toast.success(`Caja ${closeTarget.caja.caja_nombre} de ${closeTarget.usuario_nombre} cerrada`);
+      setCloseTarget(null); setCloseContado(""); refetch();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>;
 
   const caja = data?.caja;
   const res = data?.resumen;
@@ -60,34 +103,34 @@ export default function Caja() {
       <h1 className="font-display text-2xl font-black tracking-tight">Caja</h1>
 
       {!caja ? (
-        <div className="bg-white border border-slate-200 rounded-md p-8 max-w-md">
-          <div className="w-12 h-12 rounded-md bg-[#B95A3A]/10 flex items-center justify-center mb-4"><Wallet className="w-6 h-6 text-[#B95A3A]" /></div>
+        <div className="card-soft p-8 max-w-md">
+          <div className="w-12 h-12 rounded-md bg-[#C1401E]/10 flex items-center justify-center mb-4"><Wallet className="w-6 h-6 text-[#C1401E]" /></div>
           <h2 className="font-display text-lg font-bold">No hay caja abierta</h2>
           <p className="text-slate-500 text-sm mb-4">Ingresa el fondo inicial para comenzar a operar.</p>
           <Label className="text-xs uppercase tracking-wider text-slate-500">Fondo inicial</Label>
           <Input type="number" value={fondo} onChange={(e) => setFondo(e.target.value)} className="mt-1 mb-4" data-testid="fondo-inicial" placeholder="0.00" />
-          <Button onClick={abrir} className="w-full bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="abrir-caja-btn"><Unlock className="w-4 h-4 mr-2" /> Abrir caja</Button>
+          <Button onClick={abrir} className="w-full bg-[#C1401E] hover:bg-[#A03316]" data-testid="abrir-caja-btn"><Unlock className="w-4 h-4 mr-2" /> Abrir caja</Button>
         </div>
       ) : (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <Badge className="bg-green-100 text-green-700 text-sm px-3 py-1">Caja abierta · {caja.usuario_nombre}</Badge>
+            <Badge className="bg-green-100 text-green-700 text-sm px-3 py-1">{caja.caja_nombre} abierta · {caja.usuario_nombre}</Badge>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setMovOpen(true)} data-testid="mov-caja-btn"><ArrowDownCircle className="w-4 h-4 mr-1" /> Movimiento</Button>
-              <Button onClick={() => setCloseOpen(true)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="cerrar-caja-btn"><Lock className="w-4 h-4 mr-1" /> Cerrar caja</Button>
+              <Button onClick={() => setCloseOpen(true)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cerrar-caja-btn"><Lock className="w-4 h-4 mr-1" /> Cerrar caja</Button>
             </div>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[["Fondo inicial", res.fondo_inicial], ["Ventas efectivo", res.ventas_efectivo], ["Entradas", res.entradas], ["Retiros", res.retiros], ["Devoluciones", res.devoluciones], ["Efectivo esperado", res.efectivo_esperado]].map(([l, v], i) => (
-              <div key={i} className={`bg-white border rounded-md p-4 ${i === 5 ? "border-[#B95A3A] ring-1 ring-[#B95A3A]" : "border-slate-200"}`}>
+              <div key={i} className={`card-soft border-slate-200 p-4 ${i === 5 ? "border-[#C1401E] ring-1 ring-[#C1401E]" : "border-slate-200"}`}>
                 <div className="text-xs uppercase tracking-wider text-slate-500">{l}</div>
                 <div className="font-display text-lg font-black mt-1">{money(v)}</div>
               </div>
             ))}
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+          <div className="card-soft overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
                 <th className="p-3">Hora</th><th className="p-3">Tipo</th><th className="p-3">Concepto</th><th className="p-3">Ref</th><th className="p-3 text-right">Monto</th>
@@ -109,7 +152,7 @@ export default function Caja() {
       )}
 
       {cierre && (
-        <div className="bg-white border border-slate-200 rounded-md p-5 max-w-md">
+        <div className="card-soft p-5 max-w-md">
           <h3 className="font-display font-bold mb-3">Último corte</h3>
           <div className="space-y-1 text-sm">
             <div className="flex justify-between"><span>Efectivo esperado</span><span className="font-semibold">{money(cierre.efectivo_esperado)}</span></div>
@@ -119,10 +162,52 @@ export default function Caja() {
         </div>
       )}
 
+      {isAdminOrOwner && (
+        <div className="card-soft p-4 space-y-3" data-testid="caja-global">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="font-display font-bold flex items-center gap-2"><Users className="w-5 h-5 text-[#C1401E]" /> Estado global de cajas</h3>
+          </div>
+
+          {loadingOps ? (
+            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
+                  <th className="p-2">Caja</th><th className="p-2">Operador</th><th className="p-2">Rol</th><th className="p-2">Estado</th>
+                  <th className="p-2">Apertura</th><th className="p-2 text-right">Fondo</th><th className="p-2 text-right">Esperado</th><th className="p-2"></th>
+                </tr></thead>
+                <tbody>
+                  {operadores.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-slate-400">Sin usuarios activos.</td></tr>}
+                  {operadores.map((o) => (
+                    <tr key={o.usuario_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`caja-global-${o.usuario_id}`}>
+                      <td className="p-2 font-semibold text-slate-800">{o.caja ? o.caja.caja_nombre : (o.caja_numero ? `Caja ${o.caja_numero}` : "—")}</td>
+                      <td className="p-2">{o.usuario_nombre}</td>
+                      <td className="p-2 text-slate-500">{o.role}</td>
+                      <td className="p-2"><Badge className={o.estado === "abierta" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}>{o.estado}</Badge></td>
+                      <td className="p-2 text-slate-500">{o.caja ? (o.caja.fecha_apertura || "").slice(0, 16).replace("T", " ") : "—"}</td>
+                      <td className="p-2 text-right">{o.caja ? money(o.caja.fondo_inicial) : "—"}</td>
+                      <td className="p-2 text-right">{o.resumen ? money(o.resumen.efectivo_esperado) : "—"}</td>
+                      <td className="p-2 text-right">
+                        {o.estado === "abierta" ? (
+                          <Button size="sm" variant="outline" onClick={() => setCloseTarget(o)} data-testid={`caja-global-cerrar-${o.usuario_id}`}><Lock className="w-3.5 h-3.5 mr-1" /> Cerrar</Button>
+                        ) : (
+                          <Button size="sm" onClick={() => setOpenTarget(o)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid={`caja-global-abrir-${o.usuario_id}`}><Unlock className="w-3.5 h-3.5 mr-1" /> Abrir</Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Historial de aperturas y cortes de caja */}
-      <div className="bg-white border border-slate-200 rounded-md p-4 space-y-3" data-testid="caja-historial">
+      <div className="card-soft p-4 space-y-3" data-testid="caja-historial">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-display font-bold flex items-center gap-2"><History className="w-5 h-5 text-[#B95A3A]" /> Historial de cortes y aperturas</h3>
+          <h3 className="font-display font-bold flex items-center gap-2"><History className="w-5 h-5 text-[#C1401E]" /> {isAdminOrOwner ? "Historial global de cajas" : "Mi historial de cortes y aperturas"}</h3>
           <div className="flex flex-wrap items-center gap-2">
             <Input type="date" value={histDesde} onChange={(e) => setHistDesde(e.target.value)} className="w-40 h-9" data-testid="hist-desde" />
             <span className="text-slate-400 text-sm">a</span>
@@ -137,13 +222,14 @@ export default function Caja() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-              <th className="p-2">Estado</th><th className="p-2">Cajero</th><th className="p-2">Apertura</th><th className="p-2">Cierre</th>
+              <th className="p-2">Caja</th><th className="p-2">Estado</th><th className="p-2">Cajero</th><th className="p-2">Apertura</th><th className="p-2">Cierre</th>
               <th className="p-2 text-right">Fondo</th><th className="p-2 text-right">Esperado</th><th className="p-2 text-right">Contado</th><th className="p-2 text-right">Diferencia</th><th className="p-2"></th>
             </tr></thead>
             <tbody>
-              {hist.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-slate-400">Sin registros en el rango.</td></tr>}
+              {hist.length === 0 && <tr><td colSpan={10} className="p-6 text-center text-slate-400">Sin registros en el rango.</td></tr>}
               {hist.map((c) => (
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`caja-hist-${c.id}`}>
+                  <td className="p-2 font-semibold text-slate-800">{c.caja_nombre || "Caja"}</td>
                   <td className="p-2"><Badge className={c.estado === "abierta" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}>{c.estado}</Badge></td>
                   <td className="p-2">{c.usuario_nombre}</td>
                   <td className="p-2 text-slate-500">{(c.fecha_apertura || "").slice(0, 16).replace("T", " ")}</td>
@@ -162,7 +248,7 @@ export default function Caja() {
 
       <Dialog open={!!detCaja} onOpenChange={(o) => !o && setDetCaja(null)}>
         <DialogContent data-testid="caja-hist-detalle">
-          <DialogHeader><DialogTitle className="font-display">Corte de caja · {detCaja?.usuario_nombre}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display">Corte de caja · {detCaja?.caja_nombre || "Caja"} · {detCaja?.usuario_nombre}</DialogTitle></DialogHeader>
           {detCaja && (
             <div className="text-sm space-y-1">
               <div className="flex justify-between"><span>Apertura</span><span>{(detCaja.fecha_apertura || "").slice(0, 16).replace("T", " ")}</span></div>
@@ -198,7 +284,7 @@ export default function Caja() {
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Monto</Label><Input type="number" value={mov.monto} onChange={(e) => setMov((s) => ({ ...s, monto: e.target.value }))} className="mt-1" data-testid="mov-monto" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Referencia</Label><Input value={mov.referencia} onChange={(e) => setMov((s) => ({ ...s, referencia: e.target.value }))} className="mt-1" /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setMovOpen(false)}>Cancelar</Button><Button onClick={registrarMov} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="mov-save">Registrar</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setMovOpen(false)}>Cancelar</Button><Button onClick={registrarMov} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="mov-save">Registrar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -207,7 +293,26 @@ export default function Caja() {
           <DialogHeader><DialogTitle className="font-display">Cerrar caja</DialogTitle></DialogHeader>
           <p className="text-sm text-slate-500">Efectivo esperado: <b>{money(res?.efectivo_esperado)}</b></p>
           <div><Label className="text-xs uppercase tracking-wider text-slate-500">Efectivo contado</Label><Input type="number" value={contado} onChange={(e) => setContado(e.target.value)} className="mt-1" data-testid="efectivo-contado" /></div>
-          <DialogFooter><Button variant="outline" onClick={() => setCloseOpen(false)}>Cancelar</Button><Button onClick={cerrar} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="confirm-cierre"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setCloseOpen(false)}>Cancelar</Button><Button onClick={cerrar} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirm-cierre"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!openTarget} onOpenChange={(o) => !o && setOpenTarget(null)}>
+        <DialogContent data-testid="abrir-por-usuario-dialog">
+          <DialogHeader><DialogTitle className="font-display">Abrir caja para {openTarget?.usuario_nombre}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Fondo inicial</Label><Input type="number" value={openFondo} onChange={(e) => setOpenFondo(e.target.value)} className="mt-1" data-testid="abrir-por-usuario-fondo" placeholder="0.00" /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => { setOpenTarget(null); setOpenFondo(""); }}>Cancelar</Button><Button onClick={abrirPorUsuario} className="bg-[#C1401E] hover:bg-[#A03316]"><Unlock className="w-4 h-4 mr-1" /> Abrir caja</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!closeTarget} onOpenChange={(o) => !o && setCloseTarget(null)}>
+        <DialogContent data-testid="cerrar-por-usuario-dialog">
+          <DialogHeader><DialogTitle className="font-display">Cerrar caja {closeTarget?.caja?.caja_nombre} de {closeTarget?.usuario_nombre}</DialogTitle></DialogHeader>
+          <p className="text-sm text-slate-500">Efectivo esperado: <b>{money(closeTarget?.resumen?.efectivo_esperado)}</b></p>
+          <div><Label className="text-xs uppercase tracking-wider text-slate-500">Efectivo contado</Label><Input type="number" value={closeContado} onChange={(e) => setCloseContado(e.target.value)} className="mt-1" data-testid="cerrar-por-usuario-contado" /></div>
+          <DialogFooter><Button variant="outline" onClick={() => { setCloseTarget(null); setCloseContado(""); }}>Cancelar</Button><Button onClick={cerrarPorUsuario} className="bg-[#C1401E] hover:bg-[#A03316]"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

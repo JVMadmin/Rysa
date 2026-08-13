@@ -1,5 +1,6 @@
-"""Grupo RYSA ERP - API principal (FastAPI + MongoDB)."""
+"""Grupo RYSA ERP - API principal (FastAPI + PostgreSQL)."""
 import os
+import json
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -17,23 +18,32 @@ if _env_active_os in ("development", "production"):
 import io
 import uuid
 import re
+import time
 import logging
+import jwt
 from typing import List, Optional
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 import pandas as pd
 from datetime import datetime, date, timedelta
 import httpx
 import base64
+import platform
 
 from deps import (
-    db, client, now_utc, iso_now, hash_password, verify_password, create_access_token,
-    get_current_user, require_permission, has_permission, next_counter, log_audit,
-    ROLE_PERMISSIONS,
+    db, client, now_utc, iso_now, hash_password, verify_password,
+    create_access_token, create_refresh_token, decode_token, hash_token,
+    get_current_user, require_permission, has_permission, effective_permissions,
+    user_has_permission, next_counter, log_audit, revoke_user_sessions, MODULES,
+    ROLE_PERMISSIONS, ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS,
+    ver_todas_ventas, DEFAULT_MODULES_NON_PRIVILEGED,
+    es_rol_privilegiado,
 )
+import pgstore.pos as _pgpos
 import storage
+import pac_provider
 
 _APP_ENV = os.environ.get("ENVIRONMENT", "development").lower()
 logging.basicConfig(level=logging.DEBUG if _APP_ENV == "development" else logging.INFO)
@@ -42,8 +52,48 @@ logger = logging.getLogger("rysa")
 app = FastAPI(title="Grupo RYSA ERP")
 api = APIRouter(prefix="/api")
 
+# Roles que se consideran administración del sistema (admin, propietario, desarrollador)
+ADMIN_SYSTEM_ROLES = {"admin", "admin_propietario", "admin_desarrollador"}
+
+# --- Bitácora en memoria de errores no controlados (para developer admin) ---
+DEV_ERRORS = []
+
+@app.exception_handler(Exception)
+async def unhandled_error_handler(request: Request, exc: Exception):
+    import traceback
+    # El detalle completo solo se registra internamente; el cliente recibe un
+    # mensaje genérico. En producción no se retiene la traza en memoria.
+    if _APP_ENV != "production":
+        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        record = {
+            "id": uid(), "fecha": iso_now(),
+            "ruta": f"{request.method} {request.url.path}",
+            "tipo": type(exc).__name__, "mensaje": str(exc)[:800], "detalle": tb[-2000:],
+        }
+        DEV_ERRORS.append(record)
+        DEV_ERRORS[:] = DEV_ERRORS[-200:]
+    logger.exception("Error no controlado: %s", exc)
+    return JSONResponse(status_code=500, content={"detail": "Error interno del servidor"})
+
+def es_admin_sistema(user: dict) -> bool:
+    """Solo admin/propietario/desarrollador pueden administrar usuarios y módulos."""
+    return user_has_permission(user, "usuarios.admin")
+
 def uid() -> str:
     return uuid.uuid4().hex
+
+SEARCH_MAX_LENGTH = 100
+
+def sanitize_search_term(q) -> str:
+    """Normaliza y escapa un término de búsqueda para $regex.
+    Escapa metacaracteres (búsqueda literal) y limita la longitud para evitar
+    patrones arbitrariamente costosos en la base de datos."""
+    if not q:
+        return ""
+    s = str(q).strip()
+    if len(s) > SEARCH_MAX_LENGTH:
+        s = s[:SEARCH_MAX_LENGTH]
+    return re.escape(s)
 
 # ==========================================================================
 # ESTRUCTURA COMPLETA DE 85 COLUMNAS (nomenclatura DBF/XBase)
@@ -198,12 +248,16 @@ class UserCreate(BaseModel):
     name: str
     password: str
     role: str = "vendedor"
+    modulos: List[str] = Field(default_factory=list)
+    sucursal_id: Optional[str] = None
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
     password: Optional[str] = None
+    modulos: Optional[List[str]] = None
+    sucursal_id: Optional[str] = None
 
 class PrecioItem(BaseModel):
     nombre: str = "Precio 1"
@@ -212,7 +266,11 @@ class PrecioItem(BaseModel):
     precio_con_iva: float = 0.0
 
 class ProductInput(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    # Mass assignment seguro: SOLO se aceptan los campos declarados.
+    # Se declaran los 85 campos legacy DBF (COLS_85) + campos ERP modernos.
+    model_config = ConfigDict(extra="forbid")
+
+    # --- Campos ERP modernos ---
     codigo: Optional[str] = None
     sku: Optional[str] = ""
     descripcion: str
@@ -236,6 +294,89 @@ class ProductInput(BaseModel):
     sinonimos: List[str] = Field(default_factory=list)
     imagen_url: Optional[str] = ""
     codigos_barras: List[str] = Field(default_factory=list)
+
+    # --- Campos legacy DBF (nomenclatura XBase) ---
+    # Los numéricos se aceptan como texto porque el formulario envía "" en
+    # blanco y así se evita romper la validación manteniendo la persistencia.
+    posicion: Optional[str] = ""
+    descrip: Optional[str] = ""
+    descriplrg: Optional[str] = ""
+    clasifica: Optional[str] = ""
+    categoria: Optional[str] = ""
+    categocve: Optional[str] = ""
+    deptocve: Optional[str] = ""
+    unimedida: Optional[str] = ""
+    unimedcve: Optional[str] = ""
+    cveproser: Optional[str] = ""
+    satobjimp: Optional[str] = ""
+    unimedempq: Optional[str] = ""
+    insumo: Optional[bool] = False
+    proveedor: Optional[str] = ""
+    fechaalta: Optional[str] = ""
+    ultfcosto: Optional[str] = ""
+    ultcosto: Optional[str] = ""
+    costodlls: Optional[str] = ""
+    utilminimo: Optional[str] = ""
+    utilpreci1: Optional[str] = ""
+    utilpreci2: Optional[str] = ""
+    utilpreci3: Optional[str] = ""
+    utilpreci4: Optional[str] = ""
+    utilpreci5: Optional[str] = ""
+    exento: Optional[bool] = False
+    impuesto: Optional[str] = ""
+    t_ieps: Optional[str] = ""
+    ieps: Optional[str] = ""
+    ish: Optional[str] = ""
+    ret_isr: Optional[str] = ""
+    ret_iva: Optional[str] = ""
+    preciovta: Optional[str] = ""
+    precvtactr: Optional[str] = ""
+    precvtauso: Optional[str] = ""
+    precio1: Optional[str] = ""
+    precio2: Optional[str] = ""
+    precio3: Optional[str] = ""
+    precio4: Optional[str] = ""
+    precio5: Optional[str] = ""
+    preciomin: Optional[str] = ""
+    ultfdevcom: Optional[str] = ""
+    ultcdevcom: Optional[str] = ""
+    ultfcompra: Optional[str] = ""
+    ultccompra: Optional[str] = ""
+    ultfdevven: Optional[str] = ""
+    ultcdevven: Optional[str] = ""
+    ultfventa: Optional[str] = ""
+    ultcventa: Optional[str] = ""
+    vta_mes: Optional[str] = ""
+    vta_anual: Optional[str] = ""
+    xentregar: Optional[str] = ""
+    xrecibir: Optional[str] = ""
+    stockmin: Optional[str] = ""
+    stockmax: Optional[str] = ""
+    porpedir: Optional[bool] = False
+    imagen: Optional[str] = ""
+    foto: Optional[str] = ""
+    fichatec: Optional[str] = ""
+    numseries: Optional[bool] = False
+    factcoment: Optional[bool] = False
+    integrado: Optional[bool] = False
+    valexist: Optional[bool] = False
+    modiprecio: Optional[bool] = False
+    aplidescto: Optional[bool] = False
+    topecosto: Optional[bool] = False
+    inventario: Optional[bool] = False
+    movkardex: Optional[bool] = False
+    ventaweb: Optional[bool] = False
+    lotes: Optional[bool] = False
+    controlado: Optional[bool] = False
+    bascula: Optional[bool] = False
+    asociado: Optional[bool] = False
+    flete: Optional[bool] = False
+    comentario: Optional[str] = ""
+    rotacion: Optional[str] = ""
+    ultprecio: Optional[str] = ""
+    comision: Optional[str] = ""
+    comitipo: Optional[str] = ""
+    status: Optional[str] = ""
 
 class InventoryAdjust(BaseModel):
     tipo: str  # entrada | salida | ajuste | merma | devolucion | correccion
@@ -335,7 +476,12 @@ class AbonoInput(BaseModel):
 
 class CajaOpen(BaseModel):
     fondo_inicial: float = 0.0
-    caja_nombre: Optional[str] = "Caja 1"
+    caja_nombre: Optional[str] = ""
+
+class CajaOpenPorUsuario(BaseModel):
+    usuario_id: str
+    fondo_inicial: float = 0.0
+    caja_nombre: Optional[str] = ""
 
 class CajaMovimiento(BaseModel):
     tipo: str  # entrada | retiro | gasto | ajuste
@@ -345,9 +491,10 @@ class CajaMovimiento(BaseModel):
 
 class CajaClose(BaseModel):
     efectivo_contado: float
+    caja_id: Optional[str] = None
 
 class SaleItem(BaseModel):
-    product_id: str
+    product_id: Optional[str] = None  # None para líneas sin inventario (p. ej. recargas)
     codigo: str
     descripcion: str
     cantidad: float
@@ -369,6 +516,10 @@ class SaleInput(BaseModel):
     lista_precios: int = 1
     tipo_venta: str = "directa"  # directa | cotizacion
     vendedor_id: Optional[str] = None
+    idempotency_key: Optional[str] = None  # evita ventas duplicadas en POS
+    # Override de inventario negativo (solo roles autorizados, con auditoría).
+    allow_negative_inventory: bool = False
+    override_reason: Optional[str] = None
 
 class CancelInput(BaseModel):
     motivo: str
@@ -383,6 +534,7 @@ class RecargaInput(BaseModel):
 
 class SucursalItem(BaseModel):
     nombre: str = ""
+    codigo: Optional[str] = ""
     direccion: Optional[str] = ""
     ciudad: Optional[str] = ""
     estado: Optional[str] = ""
@@ -417,6 +569,9 @@ async def registrar_movimiento(product: dict, tipo: str, entrada: float, salida:
     anterior = round(float(product.get("existencia", 0)), 3)
     nueva_existencia = round(anterior + entrada - salida, 3)
     await db.products.update_one({"id": product["id"]}, {"$set": {"existencia": nueva_existencia, "updated_at": iso_now()}})
+    # Contador de unidades vendidas (para catálogo "más vendidos" en POS)
+    if tipo == "venta" and salida > 0:
+        await db.products.update_one({"id": product["id"]}, {"$inc": {"vendidas": float(salida)}})
     now = now_utc()
     await db.inventory_movements.insert_one({
         "id": uid(), "product_id": product["id"], "codigo": product.get("codigo"),
@@ -439,61 +594,239 @@ def public_user(u: dict) -> dict:
     u.pop("_id", None)
     return u
 
-# In-memory rate limiting para login (prevención de fuerza bruta)
-LOGIN_LIMITS = {}  # IP -> list of timestamps
+ACCESS_COOKIE = "access_token"
+REFRESH_COOKIE = "refresh_token"
 
-def check_login_rate_limit(ip: str):
-    env = os.environ.get("ENVIRONMENT", "development").lower()
-    # Permitir ilimitados en desarrollo para agilizar pruebas unitarias
-    if env != "production":
+# -------------------------------------------------------------------------
+# Rate limiting de login persistente en PostgreSQL (compartido entre workers).
+# Tabla dedicada `login_attempts`, no un diccionario en memoria.
+# -------------------------------------------------------------------------
+LOGIN_IP_WINDOW_SECONDS = 60            # ventana de conteo por IP
+LOGIN_IP_MAX_FAILURES = 8               # máximo de fallos por minuto y por IP
+LOGIN_USER_MAX_FAILURES = 8             # fallos acumulados para bloquear el usuario
+LOGIN_USER_LOCK_MINUTES = 15            # duración del bloqueo temporal
+_CLEANUP_LAST_RUN = [0.0]
+
+
+def _iso_to_dt(value) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _cookie_secure() -> bool:
+    return os.environ.get("ENVIRONMENT", "development").lower() == "production"
+
+
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
+    secure = _cookie_secure()
+    response.set_cookie(ACCESS_COOKIE, access_token, httponly=True, secure=secure,
+                        samesite="lax", max_age=ACCESS_TOKEN_TTL_SECONDS, path="/")
+    response.set_cookie(REFRESH_COOKIE, refresh_token, httponly=True, secure=secure,
+                        samesite="lax", max_age=REFRESH_TOKEN_TTL_SECONDS, path="/")
+
+
+def clear_auth_cookies(response: Response):
+    response.delete_cookie(ACCESS_COOKIE, path="/")
+    response.delete_cookie(REFRESH_COOKIE, path="/")
+
+
+async def store_refresh_token(token: str, user_id: str, token_version: int):
+    payload = decode_token(token)
+    now = now_utc()
+    await db.refresh_tokens.insert_one({
+        "_id": payload["jti"],
+        "user_id": user_id,
+        "token_hash": hash_token(token),
+        "token_version": int(token_version or 0),
+        "created_at": iso_now(),
+        "expires_at": now + timedelta(seconds=REFRESH_TOKEN_TTL_SECONDS),
+        "active": True,
+    })
+
+
+async def _cleanup_login_attempts():
+    now = time.time()
+    if now - _CLEANUP_LAST_RUN[0] < 300:
         return
-    now = datetime.now()
-    window = timedelta(minutes=1)
-    cutoff = now - window
-    # Filtrar intentos en el último minuto
-    attempts = [t for t in LOGIN_LIMITS.get(ip, []) if t > cutoff]
-    if len(attempts) >= 5:  # máximo 5 intentos por minuto en producción
-        raise HTTPException(
-            status_code=429, 
-            detail="Demasiados intentos de inicio de sesión. Por favor, intenta de nuevo en un minuto."
-        )
-    attempts.append(now)
-    LOGIN_LIMITS[ip] = attempts
+    _CLEANUP_LAST_RUN[0] = now
+    try:
+        cutoff_ip = (now_utc() - timedelta(minutes=30)).isoformat()
+        cutoff_user = (now_utc() - timedelta(hours=24)).isoformat()
+        await db.login_attempts.delete_many({"kind": "ip", "last_at": {"$lt": cutoff_ip}})
+        await db.login_attempts.delete_many({"kind": "user", "last_at": {"$lt": cutoff_user}})
+    except Exception:
+        pass
+
+
+async def check_login_rate_limit(ip: str, email: str):
+    if os.environ.get("LOGIN_RATE_LIMIT", "on").lower() == "off":
+        return
+    now = now_utc()
+    doc = await db.login_attempts.find_one({"_id": "ip:" + ip})
+    if doc:
+        ws = _iso_to_dt(doc.get("window_start"))
+        if (ws and (now - ws) < timedelta(seconds=LOGIN_IP_WINDOW_SECONDS)
+                and int(doc.get("count", 0)) >= LOGIN_IP_MAX_FAILURES):
+            raise HTTPException(status_code=429,
+                                detail="Demasiados intentos. Intenta de nuevo en un minuto.")
+    if email:
+        u = await db.login_attempts.find_one({"_id": "user:" + email.lower()})
+        if u:
+            lu = _iso_to_dt(u.get("locked_until"))
+            if lu and lu > now:
+                raise HTTPException(status_code=429,
+                                    detail="Cuenta temporalmente bloqueada por demasiados intentos. Intenta en unos minutos.")
+
+
+async def record_failed_login(ip: str, email: str):
+    now = now_utc()
+    ip_key = "ip:" + ip
+    doc = await db.login_attempts.find_one({"_id": ip_key})
+    if doc:
+        ws = _iso_to_dt(doc.get("window_start"))
+        if ws and (now - ws) >= timedelta(seconds=LOGIN_IP_WINDOW_SECONDS):
+            await db.login_attempts.update_one({"_id": ip_key},
+                                               {"$set": {"count": 1, "window_start": iso_now(), "last_at": iso_now()}})
+        else:
+            await db.login_attempts.update_one({"_id": ip_key},
+                                               {"$inc": {"count": 1}, "$set": {"last_at": iso_now()}})
+    else:
+        await db.login_attempts.insert_one({"_id": ip_key, "kind": "ip", "count": 1,
+                                            "window_start": iso_now(), "last_at": iso_now()})
+    if email:
+        ukey = "user:" + email.lower()
+        u = await db.login_attempts.find_one({"_id": ukey})
+        fails = int((u or {}).get("fails", 0)) + 1
+        locked_until = None
+        if fails >= LOGIN_USER_MAX_FAILURES:
+            locked_until = (now + timedelta(minutes=LOGIN_USER_LOCK_MINUTES)).isoformat()
+        await db.login_attempts.update_one({"_id": ukey},
+                                           {"$set": {"kind": "user", "fails": fails,
+                                                     "locked_until": locked_until, "last_at": iso_now()}},
+                                           upsert=True)
+
+
+async def reset_login_failures(email: str):
+    if email:
+        await db.login_attempts.delete_one({"_id": "user:" + email.lower()})
+
+
+def _password_ok(password: str) -> bool:
+    return bool(password) and len(password) >= 12
+
 
 @api.post("/auth/login")
 async def login(data: LoginInput, response: Response, request: Request):
     ip = request.client.host if request.client else "unknown"
-    check_login_rate_limit(ip)
-    
+    ua = request.headers.get("user-agent", "")
     email = data.email.strip().lower()
+    await _cleanup_login_attempts()
+    await check_login_rate_limit(ip, email)
+
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(data.password, user["password_hash"]):
+        await record_failed_login(ip, email)
+        await log_audit({"id": None, "name": email or "?"}, "LOGIN_FAILURE", "auth",
+                        detalle=(email or "sin correo"), ip=ip, user_agent=ua)
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
     if not user.get("active", True):
+        await log_audit({"id": user.get("id"), "name": user.get("name")}, "LOGIN_FAILURE", "auth",
+                        registro_id=user.get("id"), detalle=f"Usuario desactivado", ip=ip, user_agent=ua)
         raise HTTPException(status_code=403, detail="Usuario desactivado")
-    token = create_access_token(user["id"], user["email"])
-    
-    env = os.environ.get("ENVIRONMENT", "development").lower()
-    is_prod = env == "production"
-    cookie_secure = True if is_prod else False
-    cookie_samesite = "lax"
 
-    response.set_cookie("access_token", token, httponly=True, secure=cookie_secure,
-                        samesite=cookie_samesite, max_age=604800, path="/")
-    return {"token": token, "user": public_user(user)}
+    await reset_login_failures(email)
+    token_version = int(user.get("token_version", 0))
+    access = create_access_token(user["id"], user["email"], token_version)
+    refresh = create_refresh_token(user["id"], token_version)
+    await store_refresh_token(refresh, user["id"], token_version)
+    set_auth_cookies(response, access, refresh)
+    await log_audit(user, "LOGIN_SUCCESS", "auth", registro_id=user["id"],
+                    detalle=f"IP {ip}", ip=ip, user_agent=ua)
+    return {"token": access, "user": public_user(user)}
+
+
+@api.post("/auth/refresh")
+async def refresh_session(response: Response, request: Request):
+    rt = request.cookies.get(REFRESH_COOKIE)
+    if not rt:
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Sesión expirada")
+    try:
+        payload = decode_token(rt)
+    except jwt.ExpiredSignatureError:
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Sesión expirada")
+    except Exception:
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Token inválido")
+    if payload.get("type") != "refresh":
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+    jti = payload.get("jti")
+    record = await db.refresh_tokens.find_one({"_id": jti, "active": True})
+    if not record:
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Sesión expirada")
+
+    user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
+    if not user or not user.get("active", True):
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Sesión expirada")
+    token_version = int(user.get("token_version", 0))
+    if token_version != int(payload.get("token_version", 0)):
+        await db.refresh_tokens.update_one({"_id": jti}, {"$set": {"active": False, "revoked_at": iso_now()}})
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail="Sesión invalidada")
+
+    # Rotación: se revoca el refresh actual y se emite uno nuevo (nunca en localStorage).
+    await db.refresh_tokens.update_one({"_id": jti}, {"$set": {"active": False, "rotated_at": iso_now()}})
+    access = create_access_token(user["id"], user["email"], token_version)
+    new_refresh = create_refresh_token(user["id"], token_version)
+    await store_refresh_token(new_refresh, user["id"], token_version)
+    set_auth_cookies(response, access, new_refresh)
+    return {"token": access}
+
 
 @api.post("/auth/logout")
-async def logout(response: Response, user: dict = Depends(get_current_user)):
-    response.delete_cookie("access_token", path="/")
+async def logout(response: Response, request: Request):
+    ip = request.client.host if request.client else "unknown"
+    ua = request.headers.get("user-agent", "")
+    usuario = None
+    rt = request.cookies.get(REFRESH_COOKIE)
+    if rt:
+        try:
+            payload = decode_token(rt)
+            if payload.get("type") == "refresh":
+                await db.refresh_tokens.update_one(
+                    {"_id": payload.get("jti"), "active": True},
+                    {"$set": {"active": False, "revoked_at": iso_now()}})
+                user_doc = await db.users.find_one({"id": payload.get("sub")})
+                if user_doc:
+                    usuario = user_doc
+        except Exception:
+            pass
+    clear_auth_cookies(response)
+    if usuario:
+        await log_audit(usuario, "LOGOUT", "auth", registro_id=usuario["id"], ip=ip, user_agent=ua)
     return {"ok": True}
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
-    return {"user": user, "permissions": sorted(list(ROLE_PERMISSIONS.get(user.get("role", ""), set())))}
+    return {"user": user, "permissions": sorted(effective_permissions(user))}
 
 # =========================================================================
 # USUARIOS
 # =========================================================================
+def _validar_modulos(modulos: List[str]):
+    desconocidos = [m for m in modulos if m not in MODULES]
+    if desconocidos:
+        raise HTTPException(400, f"Módulos desconocidos: {', '.join(desconocidos)}")
+
 @api.get("/users")
 async def list_users(user: dict = Depends(require_permission("usuarios.ver"))):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(500)
@@ -501,28 +834,70 @@ async def list_users(user: dict = Depends(require_permission("usuarios.ver"))):
 
 @api.post("/users")
 async def create_user(data: UserCreate, user: dict = Depends(require_permission("usuarios.crear"))):
+    _validar_modulos(data.modulos)
+    if not _password_ok(data.password):
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 12 caracteres")
+    if data.role in ADMIN_SYSTEM_ROLES or data.modulos:
+        if not es_admin_sistema(user):
+            raise HTTPException(403, "Solo administradores/propietario pueden asignar roles privilegiados o módulos")
     email = data.email.strip().lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="El correo ya está registrado")
+    # Módulos: si el rol no es privilegiado y no se especifican, se otorgan los
+    # módulos por defecto (Productos, Inventario, Clientes, Recargas, Ventas,
+    # Caja, Reportes). Solo un admin/propietario puede especificarlos a mano.
+    modulos = data.modulos
+    if not es_rol_privilegiado(data.role) and not modulos:
+        modulos = DEFAULT_MODULES_NON_PRIVILEGED
+    sucursal_id = data.sucursal_id or await _default_sucursal_id()
     doc = {"id": uid(), "email": email, "name": data.name, "role": data.role,
-           "password_hash": hash_password(data.password), "active": True, "created_at": iso_now()}
+           "modulos": modulos, "password_hash": hash_password(data.password),
+           "sucursal_id": sucursal_id, "active": True, "token_version": 0, "created_at": iso_now()}
     await db.users.insert_one(doc)
-    await log_audit(user, "crear", "usuario", doc["id"], f"Usuario {email}")
+    await log_audit(user, "crear", "usuario", doc["id"],
+                    f"Usuario {email} · rol {data.role} · {'+'.join(modulos) or 'sin módulos'}")
     return public_user(doc)
 
 @api.put("/users/{user_id}")
 async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(require_permission("usuarios.editar"))):
+    target = await db.users.find_one({"id": user_id})
+    if not target:
+        raise HTTPException(404, "Usuario no encontrado")
+    rol_privilegiado = target.get("role") in ADMIN_SYSTEM_ROLES
+    cambia_a_admin = data.role in ADMIN_SYSTEM_ROLES if data.role else False
+    toca_modulos = data.modulos is not None
+    if rol_privilegiado or cambia_a_admin or toca_modulos:
+        if not es_admin_sistema(user):
+            raise HTTPException(403, "Solo administradores/propietario pueden editar administradores o asignar módulos")
     upd = {k: v for k, v in data.model_dump().items() if v is not None}
-    if "password" in upd:
+    if "modulos" in upd:
+        _validar_modulos(upd["modulos"])
+    cambia_password = "password" in upd
+    if cambia_password:
+        if not _password_ok(upd["password"]):
+            raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 12 caracteres")
         upd["password_hash"] = hash_password(upd.pop("password"))
+    cambia_rol = "role" in upd and upd["role"] != target.get("role")
+    desactiva = "active" in upd and upd["active"] is False and target.get("active", True)
     await db.users.update_one({"id": user_id}, {"$set": upd})
-    await log_audit(user, "editar", "usuario", user_id)
-    doc = await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
-    return doc
+    if cambia_password or cambia_rol or desactiva:
+        # Invalidar todas las sesiones anteriores del usuario objetivo.
+        await revoke_user_sessions(user_id)
+        if cambia_password:
+            await log_audit(user, "PASSWORD_CHANGE", "usuario", user_id)
+        if desactiva:
+            await log_audit(user, "ACCOUNT_DISABLED", "usuario", user_id)
+        await log_audit(user, "TOKEN_REVOKED", "usuario", user_id,
+                        "Sesiones invalidadas por cambio de password/rol o desactivación")
+    await log_audit(user, "editar", "usuario", user_id, f"campos: {', '.join(sorted(upd))}")
+    return await db.users.find_one({"id": user_id}, {"_id": 0, "password_hash": 0})
 
 @api.get("/roles")
 async def list_roles(user: dict = Depends(get_current_user)):
-    return {r: sorted(list(p)) for r, p in ROLE_PERMISSIONS.items()}
+    return {
+        "roles": {r: sorted(p) for r, p in ROLE_PERMISSIONS.items()},
+        "modulos": {k: v["label"] for k, v in MODULES.items()},
+    }
 
 # =========================================================================
 # PRODUCTOS
@@ -558,7 +933,7 @@ async def list_products(response: Response, estado: Optional[str] = None, q: Opt
     if categoria:
         query["clasificacion"] = categoria
     if q:
-        rx = {"$regex": q, "$options": "i"}
+        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
         query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
                         {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx},
                         {"codigos_barras": rx}]
@@ -575,6 +950,43 @@ async def list_products(response: Response, estado: Optional[str] = None, q: Opt
         docs = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).skip(skip).limit(limit).to_list(limit)
     response.headers["X-Total-Count"] = str(total)
     return docs
+
+# --- Catálogo POS: más vendidos y favoritos por usuario ---
+@api.get("/products/bestsellers")
+async def list_bestsellers(estado: Optional[str] = None, limit: int = 24,
+                           user: dict = Depends(get_current_user)):
+    limit = max(1, min(int(limit), 100))
+    query = {"vendidas": {"$gt": 0}}
+    if estado:
+        query["estado"] = estado
+    docs = await db.products.find(query, {"_id": 0}).sort("vendidas", -1).limit(limit).to_list(limit)
+    return docs
+
+@api.get("/favorites")
+async def list_favorites(user: dict = Depends(get_current_user)):
+    favs = await db.favorites.find({"user_id": user["id"]}, {"_id": 0, "product_id": 1}).to_list(5000)
+    ids = [f["product_id"] for f in favs]
+    if not ids:
+        return []
+    products = await db.products.find({"id": {"$in": ids}, "estado": "activo"}, {"_id": 0}).to_list(5000)
+    by_id = {p["id"]: p for p in products}
+    return [by_id[i] for i in ids if i in by_id]
+
+@api.post("/favorites/{product_id}")
+async def add_favorite(product_id: str, user: dict = Depends(get_current_user)):
+    p = await db.products.find_one({"id": product_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(404, "Producto no encontrado")
+    exists = await db.favorites.find_one({"user_id": user["id"], "product_id": product_id})
+    if not exists:
+        await db.favorites.insert_one({"id": uid(), "user_id": user["id"], "product_id": product_id,
+                                       "fecha": iso_now()})
+    return {"ok": True}
+
+@api.delete("/favorites/{product_id}")
+async def remove_favorite(product_id: str, user: dict = Depends(get_current_user)):
+    await db.favorites.delete_one({"user_id": user["id"], "product_id": product_id})
+    return {"ok": True}
 
 @api.get("/products/{product_id}")
 async def get_product(product_id: str, user: dict = Depends(get_current_user)):
@@ -663,7 +1075,7 @@ async def inventory_movements(tipo: Optional[str] = None, q: Optional[str] = Non
     if tipo and tipo != "all":
         query["tipo"] = tipo
     if q:
-        rx = {"$regex": q, "$options": "i"}
+        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
         query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"documento": rx}, {"usuario_nombre": rx}]
     if desde or hasta:
         rango: dict = {}
@@ -850,7 +1262,7 @@ async def list_clients(q: Optional[str] = None, estado: Optional[str] = None,
     elif filtro == "sin_ofertas":
         query["ofertas"] = {"$ne": True}
     if q:
-        rx = {"$regex": q, "$options": "i"}
+        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
         query["$and"] = query.get("$and", []) + [{"$or": [
             {"codigo": rx}, {"nombre": rx}, {"razon_social": rx}, {"rfc": rx},
             {"representa": rx}, {"telefono": rx}, {"tel_oficina": rx}, {"celular": rx},
@@ -903,7 +1315,7 @@ async def update_client(client_id: str, data: ClientInput, user: dict = Depends(
     return await db.clients.find_one({"id": client_id}, {"_id": 0})
 
 @api.patch("/clients/{client_id}/estado")
-async def client_estado(client_id: str, estado: str, user: dict = Depends(require_permission("cliente.editar"))):
+async def client_estado(client_id: str, estado: str, user: dict = Depends(require_permission("cliente.baja"))):
     await db.clients.update_one({"id": client_id}, {"$set": {"estado": estado}})
     await log_audit(user, "cambio_estado", "cliente", client_id, f"estado={estado}")
     return await db.clients.find_one({"id": client_id}, {"_id": 0})
@@ -930,8 +1342,48 @@ async def set_credito(client_id: str, data: CreditInput, user: dict = Depends(re
 # =========================================================================
 # CAJA
 # =========================================================================
+async def _default_sucursal_id() -> Optional[str]:
+    """Devuelve la sucursal activa por defecto (la primera). Crea "Matriz" si no hay."""
+    s = await db.sucursales.find_one({"activa": True}, {"_id": 0})
+    if s:
+        return s["id"]
+    # Compatibilidad con la semilla cosmética previa en settings.sucursales.
+    st = await db.settings.find_one({"_id": "app"}, {"_id": 0})
+    nombre = "Matriz"
+    for su in (st or {}).get("sucursales", []):
+        if su.get("activa"):
+            nombre = su.get("nombre", "Matriz")
+            break
+    doc = {"id": uid(), "codigo": "MATRIZ", "nombre": nombre, "activa": True,
+           "direccion": "", "ciudad": "", "estado": "", "cp": "", "telefono": "",
+           "created_at": iso_now()}
+    await db.sucursales.insert_one(doc)
+    return doc["id"]
+
 async def caja_abierta_de(user_id: str):
     return await db.cajas.find_one({"usuario_id": user_id, "estado": "abierta"}, {"_id": 0})
+
+async def asignar_caja_numero(target: dict) -> int:
+    """Asigna una sola vez un número de caja único por usuario (sin repetir).
+    El rol administrador/propietario nunca recibe el número 1."""
+    num = target.get("caja_numero")
+    if not num:
+        used = set()
+        async for u in db.users.find({"active": True, "caja_numero": {"$exists": True}},
+                                     {"id": 1, "caja_numero": 1}):
+            if u["id"] != target.get("id"):
+                used.add(u["caja_numero"])
+        num = 1
+        while True:
+            if num in used:
+                num += 1
+                continue
+            if target.get("role") in ADMIN_SYSTEM_ROLES and num == 1:
+                num += 1
+                continue
+            break
+        await db.users.update_one({"id": target["id"]}, {"$set": {"caja_numero": num}})
+    return int(num)
 
 @api.get("/caja/actual")
 async def caja_actual(user: dict = Depends(get_current_user)):
@@ -955,11 +1407,42 @@ def resumen_caja(caja: dict, movs: List[dict]) -> dict:
 async def abrir_caja(data: CajaOpen, user: dict = Depends(require_permission("caja.abrir"))):
     if await caja_abierta_de(user["id"]):
         raise HTTPException(400, "Ya tienes una caja abierta")
+    caja_numero = user.get("caja_numero")
+    if (data.caja_nombre or "").strip():
+        nombre = data.caja_nombre.strip()
+    else:
+        caja_numero = await asignar_caja_numero(user)
+        nombre = f"Caja {caja_numero}"
     doc = {"id": uid(), "usuario_id": user["id"], "usuario_nombre": user["name"],
-           "caja_nombre": data.caja_nombre, "fondo_inicial": data.fondo_inicial,
+           "caja_nombre": nombre, "caja_numero": caja_numero, "fondo_inicial": data.fondo_inicial,
+           "sucursal_id": user.get("sucursal_id") or await _default_sucursal_id(),
            "estado": "abierta", "fecha_apertura": iso_now(), "fecha_cierre": None}
     await db.cajas.insert_one(doc)
     await log_audit(user, "abrir_caja", "caja", doc["id"], f"fondo {data.fondo_inicial}")
+    return await db.cajas.find_one({"id": doc["id"]}, {"_id": 0})
+
+@api.post("/caja/abrir-por-usuario")
+async def abrir_caja_por_usuario(data: CajaOpenPorUsuario, user: dict = Depends(get_current_user)):
+    if not es_admin_sistema(user):
+        raise HTTPException(403, "Solo administradores/propietario pueden abrir cajas de otros usuarios")
+    target = await db.users.find_one({"id": data.usuario_id})
+    if not target or not target.get("active", True):
+        raise HTTPException(404, "Usuario no encontrado o desactivado")
+    if await caja_abierta_de(data.usuario_id):
+        raise HTTPException(400, f"{target['name']} ya tiene una caja abierta")
+    caja_numero = target.get("caja_numero")
+    if (data.caja_nombre or "").strip():
+        nombre = data.caja_nombre.strip()
+    else:
+        caja_numero = await asignar_caja_numero(target)
+        nombre = f"Caja {caja_numero}"
+    doc = {"id": uid(), "usuario_id": data.usuario_id, "usuario_nombre": target["name"],
+           "caja_nombre": nombre, "caja_numero": caja_numero, "fondo_inicial": data.fondo_inicial,
+           "sucursal_id": target.get("sucursal_id") or await _default_sucursal_id(),
+           "estado": "abierta", "fecha_apertura": iso_now(), "fecha_cierre": None}
+    await db.cajas.insert_one(doc)
+    await log_audit(user, "abrir_caja_por_usuario", "caja", doc["id"],
+                    f"{target['name']} fondo {data.fondo_inicial}")
     return await db.cajas.find_one({"id": doc["id"]}, {"_id": 0})
 
 @api.post("/caja/movimiento")
@@ -976,9 +1459,18 @@ async def caja_movimiento(data: CajaMovimiento, user: dict = Depends(require_per
 
 @api.post("/caja/cerrar")
 async def cerrar_caja(data: CajaClose, user: dict = Depends(require_permission("caja.cerrar"))):
-    caja = await caja_abierta_de(user["id"])
-    if not caja:
-        raise HTTPException(400, "No tienes caja abierta")
+    if data.caja_id:
+        if not es_admin_sistema(user):
+            raise HTTPException(403, "Solo administradores/propietario pueden cerrar cajas de otros usuarios")
+        caja = await db.cajas.find_one({"id": data.caja_id})
+        if not caja:
+            raise HTTPException(404, "Caja no encontrada")
+        if caja.get("estado") != "abierta":
+            raise HTTPException(400, "La caja ya está cerrada")
+    else:
+        caja = await caja_abierta_de(user["id"])
+        if not caja:
+            raise HTTPException(400, "No tienes caja abierta")
     movs = await db.caja_movimientos.find({"caja_id": caja["id"]}, {"_id": 0}).to_list(1000)
     res = resumen_caja(caja, movs)
     diferencia = round(data.efectivo_contado - res["efectivo_esperado"], 2)
@@ -988,10 +1480,40 @@ async def cerrar_caja(data: CajaClose, user: dict = Depends(require_permission("
     await log_audit(user, "cerrar_caja", "caja", caja["id"], f"diferencia {diferencia}")
     return {"cierre": cierre}
 
+@api.get("/caja/operadores")
+async def caja_operadores(user: dict = Depends(require_permission("caja.ver"))):
+    if not es_admin_sistema(user):
+        raise HTTPException(403, "Solo administradores/propietario pueden ver el estado global de cajas")
+    usuarios = await db.users.find({"active": True}, {"_id": 0, "password_hash": 0}).to_list(1000)
+    abiertas_por_usuario = {}
+    cursor = db.cajas.find({"estado": "abierta"}, {"_id": 0})
+    async for c in cursor:
+        abiertas_por_usuario.setdefault(c["usuario_id"], []).append(c)
+    out = []
+    for u in usuarios:
+        abiertas = abiertas_por_usuario.get(u["id"], [])
+        if abiertas:
+            caja = sorted(abiertas, key=lambda c: c.get("fecha_apertura", ""))[0]
+            movs = await db.caja_movimientos.find({"caja_id": caja["id"]}, {"_id": 0}).to_list(1000)
+            out.append({
+                "usuario_id": u["id"], "usuario_nombre": u["name"], "role": u.get("role"),
+                "caja_numero": u.get("caja_numero"),
+                "estado": "abierta", "caja": caja, "resumen": resumen_caja(caja, movs)})
+        else:
+            ultima = await db.cajas.find({"usuario_id": u["id"], "estado": "cerrada"},
+                                         {"_id": 0}).sort("fecha_cierre", -1).to_list(1)
+            out.append({
+                "usuario_id": u["id"], "usuario_nombre": u["name"], "role": u.get("role"),
+                "caja_numero": u.get("caja_numero"),
+                "estado": "cerrada", "caja": ultima[0] if ultima else None, "resumen": None})
+    return out
+
 @api.get("/caja/historial")
 async def caja_historial(desde: Optional[str] = None, hasta: Optional[str] = None,
-                         estado: Optional[str] = None, user: dict = Depends(get_current_user)):
+                         estado: Optional[str] = None, user: dict = Depends(require_permission("caja.ver"))):
     query = {}
+    if not es_admin_sistema(user):
+        query["usuario_id"] = user["id"]
     if estado in ("abierta", "cerrada"):
         query["estado"] = estado
     cajas = await db.cajas.find(query, {"_id": 0}).sort("fecha_apertura", -1).to_list(500)
@@ -1030,13 +1552,18 @@ async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
                      desde: Optional[str] = None, hasta: Optional[str] = None,
                      vendedor_id: Optional[str] = None, q: Optional[str] = None,
                      user: dict = Depends(get_current_user)):
+    if vendedor_id and not ver_todas_ventas(user):
+        raise HTTPException(403, "No tienes permiso para filtrar ventas de otros operadores")
     query = {}
     if estado:
         query["estado"] = estado
-    if vendedor_id:
+    if not ver_todas_ventas(user):
+        # Usuario normal: solo ve SUS ventas (las realiza él mismo).
+        query["vendedor_id"] = user["id"]
+    elif vendedor_id:
         query["vendedor_id"] = vendedor_id
     if q:
-        rx = {"$regex": q, "$options": "i"}
+        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
         query["$or"] = [{"folio": rx}, {"cliente_nombre": rx}]
     sales = await db.sales.find(query, {"_id": 0}).sort("fecha", -1).to_list(3000)
     now = now_utc()
@@ -1064,6 +1591,9 @@ async def get_sale(sale_id: str, user: dict = Depends(get_current_user)):
     s = await db.sales.find_one({"id": sale_id}, {"_id": 0})
     if not s:
         raise HTTPException(404, "Venta no encontrada")
+    # Visibilidad: solo roles autorizados ven ventas ajenas.
+    if not ver_todas_ventas(user) and s.get("vendedor_id") != user["id"]:
+        raise HTTPException(403, "No tienes permiso para ver esta venta")
     return s
 
 @api.put("/sales/{sale_id}/cliente")
@@ -1071,6 +1601,8 @@ async def set_sale_cliente(sale_id: str, payload: dict, user: dict = Depends(req
     s = await db.sales.find_one({"id": sale_id})
     if not s:
         raise HTTPException(404, "Venta no encontrada")
+    if not ver_todas_ventas(user) and s.get("vendedor_id") != user["id"]:
+        raise HTTPException(403, "No tienes permiso para modificar esta venta")
     if s.get("facturado"):
         raise HTTPException(400, "La venta ya fue facturada")
     await db.sales.update_one({"id": sale_id}, {"$set": {
@@ -1085,16 +1617,43 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
     if data.cliente_id:
         cliente = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0})
     cliente_nombre = cliente["nombre"] if cliente else "Público General"
-    # Vendedor: automático = usuario logueado, se puede cambiar
-    vendedor_id = data.vendedor_id or user["id"]
+    # Vendedor: automático = usuario autenticado. Solo roles autorizados con
+    # `venta.cambiar_operador` pueden registrar la venta a nombre de otro operador.
+    # El resto SIEMPRE usa su propio id (imposible suplantar operador).
+    puede_cambiar_operador = user_has_permission(user, "venta.cambiar_operador")
+    vendedor_id = data.vendedor_id if (puede_cambiar_operador and data.vendedor_id) else user["id"]
     vendedor_nombre = user["name"]
-    if data.vendedor_id and data.vendedor_id != user["id"]:
-        v = await db.users.find_one({"id": data.vendedor_id}, {"_id": 0})
+    if vendedor_id != user["id"]:
+        v = await db.users.find_one({"id": vendedor_id}, {"_id": 0})
         if v:
             vendedor_nombre = v["name"]
     items = [it.model_dump() for it in data.items]
     es_cotizacion = data.tipo_venta == "cotizacion"
+    # Override de inventario negativo: solo roles con el permiso dedicado pueden
+    # vender con existencia insuficiente (queda inventario negativo).
+    override_inv = None
+    if data.allow_negative_inventory and not es_cotizacion:
+        if not user_has_permission(user, "inventario.autorizar_negativo"):
+            raise HTTPException(403, "No tienes permiso para vender sin inventario suficiente")
+        override_inv = {
+            "allow_negative_inventory": True,
+            "override_user_id": user["id"],
+            "override_user_nombre": user["name"],
+            "override_reason": (data.override_reason or "").strip(),
+            "override_timestamp": iso_now(),
+        }
+    # Caja obligatoria: ninguna venta (no cotización) puede finalizar sin caja abierta.
+    if not es_cotizacion:
+        caja = await caja_abierta_de(user["id"])
+        if not caja:
+            raise HTTPException(409, "No hay caja abierta. Abre una caja antes de vender.")
+        if caja.get("estado") != "abierta":
+            raise HTTPException(409, "La caja no está abierta")
+    else:
+        caja = None
     for it in items:
+        if not it["product_id"]:
+            continue  # línea sin inventario (p. ej. recarga remitida)
         p = await db.products.find_one({"id": it["product_id"]})
         if not p:
             raise HTTPException(400, f"Producto {it['codigo']} no existe")
@@ -1104,7 +1663,7 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
             controles = p.get("controles", {}) or {}
             controlar = controles.get("controlar_inventario", True)
             permitir_neg = controles.get("permitir_inventario_negativo", False)
-            if controlar and not permitir_neg and float(p.get("existencia", 0)) < it["cantidad"]:
+            if controlar and not permitir_neg and not override_inv and float(p.get("existencia", 0)) < it["cantidad"]:
                 raise HTTPException(400, f"Existencia insuficiente de {p['codigo']} (disp: {p.get('existencia',0)})")
     totales = calcular_venta(items, data.descuento_global)
     total = totales["total"]
@@ -1113,6 +1672,14 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
     cambio = 0.0
     saldo = 0.0
     now = now_utc()
+
+    # Idempotencia POS: un reintento con la misma key devuelve la venta existente
+    # sin generar un folio nuevo ni una segunda venta.
+    if data.idempotency_key:
+        existing = await _pgpos._existing_by_key(data.idempotency_key)
+        if existing:
+            return existing
+
     if es_cotizacion:
         folio = await next_counter("cotizacion", "COT", 6)
         estado = "cotizacion"
@@ -1132,7 +1699,6 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
             saldo = total
         folio = await next_counter("venta", "V", 6)
         estado = "confirmada"
-    caja = await caja_abierta_de(user["id"])
     sale = {
         "id": uid(), "folio": folio, "fecha": iso_now(),
         "hora": now.strftime("%H:%M"), "usuario_id": user["id"], "usuario_nombre": user["name"],
@@ -1141,28 +1707,21 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
         "items": items, **totales, "tipo_venta": data.tipo_venta, "condicion": data.condicion,
         "pagos": pagos, "cambio": cambio, "saldo": saldo, "estado": estado,
         "factura": False, "caja_id": caja["id"] if (caja and not es_cotizacion) else None,
+        "sucursal_id": (caja or {}).get("sucursal_id") or user.get("sucursal_id"),
         "lista_precios": data.lista_precios,
     }
-    await db.sales.insert_one(sale)
-    if not es_cotizacion:
-        # Descontar inventario + kardex
-        for it in items:
-            p = await db.products.find_one({"id": it["product_id"]})
-            await registrar_movimiento(p, "venta", 0, it["cantidad"], user, folio, f"Venta {folio}")
-        # Caja: efectivo entra
-        if caja:
-            efectivo = sum(p["monto"] for p in pagos if p["metodo"] == "efectivo")
-            if data.condicion == "contado" and efectivo > 0:
-                monto_caja = min(efectivo, total)
-                await db.caja_movimientos.insert_one({
-                    "id": uid(), "caja_id": caja["id"], "tipo": "venta", "concepto": f"Venta {folio}",
-                    "monto": round(monto_caja, 2), "referencia": folio,
-                    "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()})
-        # Crédito: aumentar saldo cliente
-        if data.condicion == "credito" and cliente:
-            await db.clients.update_one({"id": cliente["id"]}, {"$inc": {"saldo": total}})
-    await log_audit(user, "crear", "cotizacion" if es_cotizacion else "venta", sale["id"], f"{folio} total {total}")
-    return await db.sales.find_one({"id": sale["id"]}, {"_id": 0})
+    if override_inv:
+        sale["inventario_override"] = override_inv
+
+    # --- Persistencia atómica (PostgreSQL): una sola transacción ---
+    try:
+        return await _pgpos.crear_venta_pg(
+            user=user, sale=sale, items=items, pagos=pagos, total=total,
+            es_cotizacion=es_cotizacion, caja=caja, condicion=data.condicion,
+            cliente=cliente, folio=folio, idempotency_key=data.idempotency_key,
+            override_inv=override_inv)
+    except _pgpos.VentaError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
 
 @api.post("/recargas")
 async def crear_recarga(data: RecargaInput, user: dict = Depends(require_permission("venta.crear"))):
@@ -1176,7 +1735,10 @@ async def crear_recarga(data: RecargaInput, user: dict = Depends(require_permiss
     total = round(float(data.monto), 2)
     items = [{"product_id": None, "codigo": "RECARGA", "descripcion": descripcion, "cantidad": 1,
               "unidad": "SERV", "precio": total, "iva_tasa": 0, "descuento": 0, "importe": total}]
+    # Caja obligatoria para recargas (cobro en mostrador).
     caja = await caja_abierta_de(user["id"])
+    if not caja:
+        raise HTTPException(409, "No hay caja abierta. Abre una caja antes de registrar la recarga.")
     sale = {
         "id": uid(), "folio": folio, "fecha": iso_now(), "hora": now.strftime("%H:%M"),
         "usuario_id": user["id"], "usuario_nombre": user["name"],
@@ -1186,6 +1748,7 @@ async def crear_recarga(data: RecargaInput, user: dict = Depends(require_permiss
         "tipo_venta": "recarga", "condicion": "contado",
         "pagos": [{"metodo": data.metodo, "monto": total}], "cambio": 0.0, "saldo": 0.0,
         "estado": "confirmada", "factura": False, "caja_id": caja["id"] if caja else None,
+        "sucursal_id": caja.get("sucursal_id") or user.get("sucursal_id"),
         "lista_precios": 1, "compania": data.compania, "telefono": data.telefono,
         "referencia_tae": (data.referencia_tae or "").strip(),
         "comision": round(float(data.comision or 0), 2),
@@ -1204,6 +1767,8 @@ async def cancel_sale(sale_id: str, data: CancelInput, user: dict = Depends(requ
     sale = await db.sales.find_one({"id": sale_id})
     if not sale:
         raise HTTPException(404, "Venta no encontrada")
+    if not ver_todas_ventas(user) and sale.get("vendedor_id") != user["id"]:
+        raise HTTPException(403, "No tienes permiso para cancelar esta venta")
     if sale["estado"] == "cancelada":
         raise HTTPException(400, "La venta ya está cancelada")
     es_confirmada = sale["estado"] == "confirmada"
@@ -1282,12 +1847,17 @@ def _bucket(dv):
 
 @api.get("/cxc")
 async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = False,
-                   user: dict = Depends(get_current_user)):
+                   estado: Optional[str] = None, vendedor_id: Optional[str] = None,
+                   facturada: Optional[str] = None,
+                   user: dict = Depends(require_permission("cxc.ver"))):
     hoy = now_utc().date()
     clientes = await db.clients.find({"saldo": {"$gt": 0}}, {"_id": 0}).to_list(20000)
     cmap = {c["id"]: c for c in clientes}
-    sales = await db.sales.find({"condicion": "credito", "estado": "confirmada", "saldo": {"$gt": 0}},
-                                {"_id": 0, "cliente_id": 1, "fecha": 1, "saldo": 1}).to_list(100000)
+    sf = {"condicion": "credito", "estado": "confirmada", "saldo": {"$gt": 0}}
+    if vendedor_id:
+        sf["vendedor_id"] = vendedor_id
+    sales = await db.sales.find(sf, {"_id": 0, "cliente_id": 1, "fecha": 1, "saldo": 1,
+                                     "total": 1, "vendedor_id": 1, "facturado": 1, "folio": 1}).to_list(100000)
     agg = {}
     for s in sales:
         cid = s.get("cliente_id")
@@ -1298,10 +1868,20 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
         a = agg.get(cid)
         if not a:
             a = {k: 0.0 for k in AGING_KEYS}
-            a.update({"vencido": 0.0, "max_dias": 0, "n": 0})
+            a.update({"vencido": 0.0, "max_dias": 0, "n": 0, "monto_original": 0.0, "con_abonos": 0, "sin_abonos": 0, "facturadas": 0, "no_facturadas": 0, "folios": []})
             agg[cid] = a
         a[_bucket(dv)] += s["saldo"]
+        a["monto_original"] += float(s.get("total", 0))
         a["n"] += 1
+        a["folios"].append(s.get("folio", ""))
+        if float(s.get("saldo", 0)) < float(s.get("total", 0)) - 0.01:
+            a["con_abonos"] += 1
+        else:
+            a["sin_abonos"] += 1
+        if s.get("facturado"):
+            a["facturadas"] += 1
+        else:
+            a["no_facturadas"] += 1
         if dv > 0:
             a["vencido"] += s["saldo"]
             a["max_dias"] = max(a["max_dias"], dv)
@@ -1309,18 +1889,40 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
     ql = (q or "").lower().strip()
     for cid, cli in cmap.items():
         a = agg.get(cid)
+        if not a:
+            continue
+        pendiente_total = sum(a[k] for k in AGING_KEYS)
+        abonado_parcial = a["monto_original"] > pendiente_total
+        if a["vencido"] > 0:
+            st = "vencida"
+        elif pendiente_total <= 0:
+            st = "liquidada"
+        elif abonado_parcial:
+            st = "parcialmente_pagada"
+        else:
+            st = "pendiente"
         item = {
             "cliente_id": cid, "codigo": cli.get("codigo"), "nombre": cli.get("nombre"),
             "telefono": cli.get("telefono"), "celular": cli.get("celular"),
             "limite_credito": round(float(cli.get("limite_credito", 0)), 2),
             "dias_credito": cli.get("dias_credito", 0),
             "saldo": round(float(cli.get("saldo", 0)), 2),
-            "vencido": round(a["vencido"], 2) if a else 0.0,
-            "max_dias": a["max_dias"] if a else 0,
-            "ventas_pendientes": a["n"] if a else 0,
-            "aging": {k: round(a[k], 2) for k in AGING_KEYS} if a else {k: 0.0 for k in AGING_KEYS},
+            "monto_original": round(a["monto_original"], 2),
+            "vencido": round(a["vencido"], 2),
+            "max_dias": a["max_dias"],
+            "ventas_pendientes": a["n"],
+            "estado": st,
+            "con_abonos": a["con_abonos"], "sin_abonos": a["sin_abonos"],
+            "facturadas": a["facturadas"], "no_facturadas": a["no_facturadas"],
+            "aging": {k: round(a[k], 2) for k in AGING_KEYS},
         }
         if solo_vencidos and item["vencido"] <= 0:
+            continue
+        if estado and estado != "todos" and st != estado:
+            continue
+        if facturada == "si" and item["facturadas"] == 0:
+            continue
+        if facturada == "no" and item["no_facturadas"] == 0:
             continue
         if ql and ql not in str(cli.get("nombre", "")).lower() and ql not in str(cli.get("codigo", "")).lower():
             continue
@@ -1335,7 +1937,7 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
     return {"totales": tot, "clientes": rows}
 
 @api.get("/cxc/{client_id}")
-async def cxc_detail(client_id: str, user: dict = Depends(get_current_user)):
+async def cxc_detail(client_id: str, user: dict = Depends(require_permission("cxc.ver"))):
     cli = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not cli:
         raise HTTPException(404, "Cliente no encontrado")
@@ -1358,6 +1960,92 @@ async def cxc_detail(client_id: str, user: dict = Depends(get_current_user)):
                     "saldo": round(float(cli.get("saldo", 0)), 2)},
         "ventas": ventas, "abonos": abonos,
     }
+
+@api.get("/cxc/{client_id}/adeudo-pdf")
+async def cxc_adeudo_pdf(client_id: str, user: dict = Depends(require_permission("cxc.ver"))):
+    """PDF detallado de adeudo para imprimir y entregar al cliente."""
+    cli = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    hoy = now_utc().date()
+    sales = await db.sales.find({"cliente_id": client_id, "condicion": "credito", "estado": "confirmada"},
+                                {"_id": 0}).sort("fecha", 1).to_list(20000)
+    abonos = await db.abonos.find({"cliente_id": client_id}, {"_id": 0}).to_list(5000)
+    total_vendido = round(sum(float(s.get("total", 0)) for s in sales), 2)
+    total_abonos = round(sum(float(a.get("monto", 0)) for a in abonos), 2)
+    saldo = round(float(cli.get("saldo", 0)), 2)
+
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib import colors
+    from io import BytesIO
+
+    buf = BytesIO()
+    st = getSampleStyleSheet()
+    doc = SimpleDocTemplate(buf, pagesize=letter)
+    flow = []
+    flow.append(Paragraph(f"<b>ESTADO DE CUENTA / ADEUDO</b>", st['Title']))
+    flow.append(Spacer(1, 4 * mm))
+    flow.append(Paragraph(f"<b>Cliente:</b> {cli.get('nombre')} ({cli.get('codigo')})", st['Normal']))
+    flow.append(Paragraph(f"<b>RFC:</b> {cli.get('rfc') or '—'} &nbsp;&nbsp; <b>Fecha:</b> {hoy.isoformat()}", st['Normal']))
+    flow.append(Spacer(1, 3 * mm))
+    rows = [["Venta", "Fecha", "Producto", "Descripción", "Cant", "Precio", "Total"]]
+    total_items = 0.0
+    for s in sales:
+        for it in s.get("items", []):
+            cant = it.get("cantidad", 0); precio = float(it.get("precio", 0))
+            imp = float(it.get("importe", cant * precio))
+            total_items += imp
+            rows.append([s.get("folio", ""), (s.get("fecha", "") or "")[:10],
+                         str(it.get("codigo", "") or ""), str(it.get("descripcion", ""))[:28],
+                         cant, f"${precio:,.2f}", f"${imp:,.2f}"])
+    t = Table(rows, repeatRows=1)
+    t.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#B95A3A')),
+                           ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                           ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                           ('GRID', (0, 0), (-1, -1), 0.3, colors.grey),
+                           ('FONTSIZE', (0, 0), (-1, -1), 7.5)]))
+    flow.append(t)
+    flow.append(Spacer(1, 3 * mm))
+    flow.append(Paragraph(f"<b>Detalle vendido:</b> ${total_items:,.2f}", st['Normal']))
+    flow.append(Paragraph(f"<b>Abonos:</b> ${total_abonos:,.2f}", st['Normal']))
+    flow.append(Paragraph(f"<b>Saldo pendiente:</b> ${saldo:,.2f}", st['Heading3']))
+    doc.build(flow)
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(buf, media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="{cli.get("codigo")}-adeudo.pdf"'})
+
+@api.post("/cxc/{client_id}/recordatorio")
+async def cxc_recordatorio(client_id: str, user: dict = Depends(require_permission("cxc.ver"))):
+    """Genera el recordatorio de saldo pendiente (WhatsApp/correo) con plantilla."""
+    cli = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    saldo = round(float(cli.get("saldo", 0)), 2)
+    if saldo <= 0:
+        raise HTTPException(400, "El cliente no tiene saldo pendiente")
+    wt = (await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}).get("ticket_config", {}) or {}
+    plantilla = (await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}).get("plantilla_recordatorio") or \
+        "Estimado {cliente}, le recordamos que tiene un saldo pendiente de ${saldo}. Si ya lo cubrió, ignore este mensaje."
+    texto = plantilla.replace("{cliente}", cli.get("nombre", "")).replace("{saldo}", f"{saldo:,.2f}")
+    telefono = (cli.get("whatsapp") or cli.get("celular") or cli.get("telefono") or "").strip()
+    digits = "".join(ch for ch in telefono if ch.isdigit())
+    wa_url = ""
+    if len(digits) >= 10:
+        phone = digits if len(digits) == 12 else ("52" + digits if len(digits) == 10 else digits)
+        wa_url = f"https://wa.me/{phone}?text={__import__('urllib.parse', fromlist=['quote']).quote(texto)}"
+    # Registrar historial de mensaje
+    msg = {"id": uid(), "cliente_id": client_id, "cliente_nombre": cli.get("nombre", ""),
+           "canal": "whatsapp", "tipo": "recordatorio_cxc", "contenido": texto,
+           "destinatario": telefono, "estado": "generado", "usuario_id": user["id"],
+           "usuario_nombre": user["name"], "fecha": iso_now(), "wa_url": wa_url}
+    await db.mensajes.insert_one(msg)
+    await log_audit(user, "recordatorio_cxc", "cliente", client_id,
+                    f"Recordatorio saldo {saldo}")
+    return {"texto": texto, "telefono": telefono, "wa_url": wa_url, "historico_id": msg["id"]}
 
 @api.post("/cxc/{client_id}/abono")
 async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(require_permission("caja.entrada"))):
@@ -1413,40 +2101,127 @@ async def dashboard(user: dict = Depends(get_current_user)):
     now = now_utc()
     hoy = now.date().isoformat()
     mes = now.strftime("%Y-%m")
-    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(5000)
+    # Modo: admin/propietario/dev ven el negocio completo; el resto solo su operación
+    es_global = "*" in effective_permissions(user)
+    mq = {"estado": "confirmada"}
+    if not es_global:
+        mq["usuario_id"] = user["id"]
+    sales = await db.sales.find(mq, {"_id": 0}).to_list(5000)
     ventas_hoy = [s for s in sales if s["fecha"][:10] == hoy]
     ventas_mes = [s for s in sales if s["fecha"][:7] == mes]
     total_hoy = round(sum(s["total"] for s in ventas_hoy), 2)
     total_mes = round(sum(s["total"] for s in ventas_mes), 2)
-    # Caja
+    # Caja: la propia (operador) o el consolidado de todas las cajas abiertas (admin)
     caja = await caja_abierta_de(user["id"])
     total_caja = 0.0
-    if caja:
-        movs = await db.caja_movimientos.find({"caja_id": caja["id"]}, {"_id": 0}).to_list(1000)
-        total_caja = resumen_caja(caja, movs)["efectivo_esperado"]
-    # Productos
+    caja_info = None
+    if es_global:
+        cajas_abiertas = await db.cajas.find({"estado": "abierta"}, {"_id": 0}).to_list(500)
+        for c in cajas_abiertas:
+            movs = await db.caja_movimientos.find({"caja_id": c["id"]}, {"_id": 0}).to_list(1000)
+            total_caja = round(total_caja + resumen_caja(c, movs)["efectivo_esperado"], 2)
+    else:
+        if caja:
+            movs = await db.caja_movimientos.find({"caja_id": caja["id"]}, {"_id": 0}).to_list(1000)
+            res = resumen_caja(caja, movs)
+            total_caja = res["efectivo_esperado"]
+            caja_info = {"id": caja["id"], "caja_nombre": caja.get("caja_nombre") or "Caja 1",
+                         "fondo_inicial": caja.get("fondo_inicial"), "resumen": res}
+        else:
+            # Sin caja abierta: mostrar el último corte cerrado del usuario
+            ultima = await db.cajas.find({"usuario_id": user["id"], "estado": "cerrada"},
+                                         {"_id": 0}).sort("fecha_cierre", -1).to_list(1)
+            if ultima:
+                cierre = ultima[0].get("cierre") or {}
+                total_caja = round(float(cierre.get("efectivo_esperado", 0)), 2)
+                caja_info = {"id": ultima[0]["id"], "caja_nombre": ultima[0].get("caja_nombre") or "Caja 1",
+                             "fondo_inicial": ultima[0].get("fondo_inicial"), "cerrada": True,
+                             "resumen": cierre}
+    # Productos (datos compartidos del negocio)
     products = await db.products.find({"estado": "activo"}, {"_id": 0}).to_list(5000)
     bajo_stock = [p for p in products if 0 < float(p.get("existencia", 0)) <= float(p.get("stock_minimo", 0))]
     sin_existencia = [p for p in products if float(p.get("existencia", 0)) <= 0]
     clientes = await db.clients.count_documents({})
-    # ventas por dia ultimos 7
+    # ventas por dia ultimos 7 (alcance del dashboard)
     serie = []
     for i in range(6, -1, -1):
         d = (now - __import__("datetime").timedelta(days=i)).date().isoformat()
         tot = round(sum(s["total"] for s in sales if s["fecha"][:10] == d), 2)
         serie.append({"dia": d[5:], "total": tot})
     recientes = sorted(sales, key=lambda s: s["fecha"], reverse=True)[:8]
-    return {
+    base = {
         "ventas_hoy": total_hoy, "ventas_mes": total_mes,
         "num_ventas_hoy": len(ventas_hoy), "total_caja": total_caja,
         "bajo_stock": len(bajo_stock), "sin_existencia": len(sin_existencia),
         "clientes": clientes, "productos": len(products),
-        "serie_ventas": serie,
+        "serie_ventas": serie, "mode": "global" if es_global else "propio",
+        "caja_info": caja_info,
         "ventas_recientes": [{"folio": s["folio"], "cliente": s["cliente_nombre"],
                               "total": s["total"], "fecha": s["fecha"], "estado": s["estado"]} for s in recientes],
         "alertas_stock": [{"codigo": p["codigo"], "descripcion": p["descripcion"],
                            "existencia": p.get("existencia", 0), "stock_minimo": p.get("stock_minimo", 0)}
                           for p in (bajo_stock + sin_existencia)[:10]],
+    }
+    if es_global:
+        base.update(await _dashboard_global_breakdown())
+    return base
+
+
+async def _dashboard_global_breakdown() -> dict:
+    """Desglose global: ventas por caja y por usuario (solo admin/propietario)."""
+    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(100000)
+    # Por usuario
+    por_usuario = {}
+    for s in sales:
+        uid_ = s.get("usuario_id") or "?"
+        e = por_usuario.setdefault(uid_, {"usuario_id": uid_, "usuario_nombre": s.get("usuario_nombre") or "—",
+                                          "num_ventas": 0, "total": 0.0})
+        e["num_ventas"] += 1
+        e["total"] = round(e["total"] + float(s.get("total", 0)), 2)
+    # Por caja
+    cajas = await db.cajas.find({}, {"_id": 0}).sort("fecha_apertura", -1).to_list(500)
+    ventas_caja = {}
+    for s in sales:
+        cid = s.get("caja_id")
+        if cid:
+            e = ventas_caja.setdefault(cid, {"num_ventas": 0, "total": 0.0})
+            e["num_ventas"] += 1
+            e["total"] = round(e["total"] + float(s.get("total", 0)), 2)
+    por_caja = []
+    for c in cajas:
+        res = {"efectivo_esperado": 0.0}
+        v = ventas_caja.get(c["id"], {"num_ventas": 0, "total": 0.0})
+        if c["estado"] == "abierta":
+            movs = await db.caja_movimientos.find({"caja_id": c["id"]}, {"_id": 0}).to_list(1000)
+            res = resumen_caja(c, movs)
+        else:
+            cierre = c.get("cierre") or {}
+            res["efectivo_esperado"] = cierre.get("efectivo_esperado", 0.0)
+        por_caja.append({
+            "caja_id": c["id"], "caja_nombre": c.get("caja_nombre") or "Caja 1",
+            "usuario_nombre": c.get("usuario_nombre") or "—", "estado": c["estado"],
+            "fecha_apertura": c.get("fecha_apertura"), "fondo_inicial": c.get("fondo_inicial"),
+            "efectivo_esperado": round(float(res.get("efectivo_esperado", 0)), 2),
+            "ventas_total": round(float(v["total"]), 2), "num_ventas": v["num_ventas"],
+        })
+    sin_caja = {"num_ventas": 0, "total": 0.0}
+    for s in sales:
+        if not s.get("caja_id"):
+            sin_caja["num_ventas"] += 1
+            sin_caja["total"] = round(sin_caja["total"] + float(s.get("total", 0)), 2)
+    if sin_caja["num_ventas"]:
+        por_caja.append({"caja_id": None, "caja_nombre": "Sin caja", "usuario_nombre": "—",
+                         "estado": "—", "fecha_apertura": "", "fondo_inicial": 0.0,
+                         "efectivo_esperado": 0.0, "ventas_total": sin_caja["total"],
+                         "num_ventas": sin_caja["num_ventas"]})
+    return {
+        "por_usuario": sorted(por_usuario.values(), key=lambda r: -r["total"]),
+        "por_caja": por_caja,
+        "totales_globales": {
+            "ventas": round(sum(float(s.get("total", 0)) for s in sales), 2),
+            "num_ventas": len(sales),
+            "cajas_abiertas": sum(1 for c in cajas if c["estado"] == "abierta"),
+        },
     }
 
 # =========================================================================
@@ -1471,7 +2246,7 @@ async def export_products(estado: Optional[str] = None, q: Optional[str] = None,
     if estado:
         query["estado"] = estado
     if q:
-        rx = {"$regex": q, "$options": "i"}
+        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
         query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
                         {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx},
                         {"codigos_barras": rx}]
@@ -1724,11 +2499,168 @@ async def import_clients(payload: dict, user: dict = Depends(require_permission(
     return {"creados": creados, "actualizados": actualizados, "omitidos": omitidos}
 
 # =========================================================================
+# EXPORTACIÓN / IMPORTACIÓN GLOBAL DE DATOS (solo administradores)
+# Formato: ZIP con manifiesto de versión + un JSON por entidad.
+# =========================================================================
+import zipfile
+
+EXPORT_COLLECTIONS = ["sucursales", "users", "products", "clients", "sales",
+                      "cajas", "caja_movimientos", "inventory_movements", "abonos",
+                      "cfdi_documents", "categories", "suspended_sales", "settings",
+                      "mensajes", "plantillas"]
+EXPORT_SKIP_SECRET_KEYS = {"password_hash", "api_key", "api_password", "api_user",
+                           "token", "secret", "csrf", "refresh_token"}
+
+def _sanitize_export(doc: dict) -> dict:
+    out = {}
+    for k, v in (doc or {}).items():
+        if str(k).lower() in EXPORT_SKIP_SECRET_KEYS:
+            continue
+        out[k] = v
+    return out
+
+@api.get("/datos/export")
+async def exportar_datos(user: dict = Depends(require_permission("exportar"))):
+    """Exporta la BD a un ZIP (manifiesto + JSON por entidad). Solo admin."""
+    if not user_has_permission(user, "config"):
+        raise HTTPException(403, "La exportación global requiere rol administrador")
+    buf = io.BytesIO()
+    payload = {"formato": "rysa-datos", "version": 2, "fecha": iso_now(), "colecciones": {}}
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for col in EXPORT_COLLECTIONS:
+            try:
+                docs = await getattr(db, col).find({}, {"_id": 0}).to_list(1000000)
+                payload["colecciones"][col] = len(docs)
+                z.writestr(f"{col}.json", json.dumps([_sanitize_export(d) for d in docs], ensure_ascii=False, default=str))
+            except Exception as e:
+                payload["colecciones"][col] = f"error: {e}"
+        z.writestr("manifest.json", json.dumps(payload, ensure_ascii=False))
+    buf.seek(0)
+    await log_audit(user, "exportar_datos", "sistema", "", "Exportación global de datos (admin)")
+    return StreamingResponse(buf, media_type="application/zip",
+                             headers={"Content-Disposition": 'attachment; filename="rysa_export.zip"'})
+
+@api.post("/datos/import")
+async def importar_datos(file: UploadFile = File(...), user: dict = Depends(require_permission("config"))):
+    """Importa un ZIP de rysa_export: valida versión/integridad y restaura por entidad.
+    NOTA: excluye `users` y `settings` (para evitar escalamiento de privilegios desde un archivo)."""
+    data = await file.read()
+    if len(data) > 100 * 1024 * 1024:
+        raise HTTPException(400, "Archivo demasiado grande")
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Archivo ZIP inválido")
+    if "manifest.json" not in z.namelist():
+        raise HTTPException(400, "Manifiesto no encontrado: no es un respaldo de RYSA")
+    manifest = json.loads(z.read("manifest.json"))
+    if manifest.get("formato") != "rysa-datos":
+        raise HTTPException(400, "Formato de respaldo no válido")
+    if int(manifest.get("version", 1)) < 1:
+        raise HTTPException(400, "Versión de respaldo no soportada")
+    resultados = {}
+    for col in EXPORT_COLLECTIONS:
+        if col in ("users", "settings"):
+            continue  # no se restauran usuarios (escalamiento) ni settings sensibles
+        if f"{col}.json" not in z.namelist():
+            continue
+        docs = json.loads(z.read(f"{col}.json"))
+        n0 = await getattr(db, col).count_documents({})
+        creados = 0
+        for d in docs:
+            if not d.get("id") and not d.get("codigo"):
+                continue
+            try:
+                flt = {"id": d["id"]} if d.get("id") else {"codigo": d["codigo"]}
+                if await getattr(db, col).find_one(flt):
+                    continue
+                await getattr(db, col).insert_one(d)
+                creados += 1
+            except Exception:
+                continue
+        resultados[col] = {"previos": n0, "creados": creados}
+    await log_audit(user, "importar_datos", "sistema", "", "Importación global de datos (admin)")
+    return {"ok": True, "resumen": resultados}
+
+# =========================================================================
 # AUDITORÍA
 # =========================================================================
 @api.get("/audit")
-async def audit(user: dict = Depends(require_permission("reportes.ver"))):
+async def audit(user: dict = Depends(require_permission("auditoria.ver"))):
     return await db.audit_logs.find({}, {"_id": 0}).sort("fecha", -1).to_list(300)
+
+# =========================================================================
+# HERRAMIENTAS DE DESARROLLADOR / MANTENIMIENTO (solo admin_desarrollador)
+# En producción estos endpoints NO existen (404), independientemente del rol.
+# =========================================================================
+def _dev_only(user: dict = Depends(require_permission("dev.errores"))):
+    if _APP_ENV == "production":
+        raise HTTPException(status_code=404, detail="No encontrado")
+    return user
+
+@api.get("/dev/errores")
+async def dev_errores(user: dict = Depends(_dev_only)):
+    return {"errores": list(reversed(DEV_ERRORS))}
+
+@api.delete("/dev/errores")
+async def dev_buscar_errores(user: dict = Depends(_dev_only)):
+    DEV_ERRORS.clear()
+    await log_audit(user, "dev_limpiar", "dev", "errores", "Bitácora de errores limpiada")
+    return {"ok": True}
+
+@api.get("/dev/info")
+async def dev_info(user: dict = Depends(_dev_only)):
+    counts = {}
+    for col in ("users", "products", "clients", "sales", "cajas", "caja_movimientos",
+                "abonos", "audit_logs", "counters"):
+        try:
+            counts[col] = await getattr(db, col).count_documents({})
+        except Exception:
+            counts[col] = 0
+    return {
+        "entorno": _APP_ENV,
+        "python": platform.python_version(),
+        "fecha_servidor": iso_now(),
+        "roles": {r: sorted(p) for r, p in ROLE_PERMISSIONS.items()},
+        "colecciones": counts,
+        "errores_en_memoria": len(DEV_ERRORS),
+        "admin_system_roles": sorted(ADMIN_SYSTEM_ROLES),
+    }
+
+# =========================================================================
+# SUCURSALES
+# =========================================================================
+@api.get("/sucursales")
+async def list_sucursales(user: dict = Depends(get_current_user)):
+    sucs = await db.sucursales.find({}, {"_id": 0}).to_list(500)
+    sucs.sort(key=lambda s: s.get("codigo", ""))
+    return sucs
+
+@api.post("/sucursales")
+async def create_sucursal(data: SucursalItem, user: dict = Depends(require_permission("config"))):
+    nombre = (data.nombre or "").strip()
+    if not nombre:
+        raise HTTPException(400, "La sucursal requiere un nombre")
+    codigo = (data.codigo or nombre).strip().upper()
+    doc = {"id": uid(), "codigo": codigo, "nombre": nombre, "activa": True,
+           "direccion": data.direccion, "ciudad": data.ciudad, "estado": data.estado,
+           "cp": data.cp, "telefono": data.telefono, "created_at": iso_now()}
+    await db.sucursales.insert_one(doc)
+    await log_audit(user, "crear", "sucursal", doc["id"], nombre)
+    return await db.sucursales.find_one({"id": doc["id"]}, {"_id": 0})
+
+@api.put("/sucursales/{sucursal_id}")
+async def update_sucursal(sucursal_id: str, data: SucursalItem,
+                          user: dict = Depends(require_permission("config"))):
+    doc = data.model_dump()
+    await db.sucursales.update_one({"id": sucursal_id}, {"$set": doc})
+    await log_audit(user, "editar", "sucursal", sucursal_id, data.nombre)
+    return await db.sucursales.find_one({"id": sucursal_id}, {"_id": 0})
+
+@api.delete("/sucursales/{sucursal_id}")
+async def delete_sucursal(sucursal_id: str, user: dict = Depends(require_permission("config"))):
+    await db.sucursales.delete_one({"id": sucursal_id})
+    return {"ok": True}
 
 # =========================================================================
 # CONFIGURACIÓN / SETTINGS
@@ -1737,6 +2669,16 @@ async def audit(user: dict = Depends(require_permission("reportes.ver"))):
 async def get_settings(user: dict = Depends(get_current_user)):
     s = await db.settings.find_one({"_id": "app"}, {"_id": 0})
     return s or {}
+
+@api.get("/settings/branding")
+async def get_branding():
+    """Branding público (logo + nombre) para Login/Landing, con fallback."""
+    s = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    return {
+        "empresa_nombre": s.get("empresa_nombre", "Grupo RYSA"),
+        "logo_url": s.get("logo_url") or "",
+    }
+
 
 @api.put("/settings")
 async def update_settings(data: SettingsInput, user: dict = Depends(require_permission("config"))):
@@ -1785,6 +2727,12 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
 
 @api.get("/files/{path:path}")
 async def serve_file(path: str):
+    # Defensa en profundidad: rechazo temprano de path traversal antes de tocar
+    # el storage (storage.get_safe_local_path ya lo bloquea también).
+    if not path or path.startswith("/") or "\\" in path or path.split("/")[0] in ("..", "."):
+        raise HTTPException(404, "Archivo no encontrado")
+    if ".." in path:
+        raise HTTPException(404, "Archivo no encontrado")
     record = await db.files.find_one({"storage_path": path, "is_deleted": False})
     if not record:
         raise HTTPException(404, "Archivo no encontrado")
@@ -1794,6 +2742,29 @@ async def serve_file(path: str):
         logger.error("Error al obtener archivo local %s: %s", path, str(e)[:120])
         raise HTTPException(404, "Archivo no disponible")
     return Response(content=data, media_type=record.get("content_type", ctype))
+
+@api.get("/sales/{sale_id}/qr")
+async def sale_qr_png(sale_id: str, size: int = 240, destino: Optional[str] = None):
+    """Genera un PNG del QR de verificación del ticket."""
+    import qrcode
+    from io import BytesIO
+    from fastapi.responses import Response as FastResponse
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
+    if not sale:
+        raise HTTPException(404, "Ticket no encontrado")
+    if destino:
+        url = destino
+    else:
+        base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+        url = f"{base_url}/verificar/{sale_id}" if base_url else f"/api/sales/{sale_id}/public"
+    qr = qrcode.QRCode(err_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
+    qr.add_data(url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    bio = BytesIO()
+    img.save(bio, format="PNG")
+    return FastResponse(content=bio.getvalue(), media_type="image/png",
+                        headers={"Cache-Control": "no-store"})
 
 @api.post("/sales/{sale_id}/ticket-pdf")
 async def sale_ticket_pdf(sale_id: str, user: dict = Depends(get_current_user)):
@@ -1823,6 +2794,28 @@ async def sale_ticket_pdf(sale_id: str, user: dict = Depends(get_current_user)):
 async def vendedores(user: dict = Depends(get_current_user)):
     return await db.users.find({"active": {"$ne": False}}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(200)
 
+@api.get("/sales/{sale_id}/public")
+async def sale_public_verify(sale_id: str):
+    """Verificación pública del ticket (para el QR). No requiere autenticación."""
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
+    if not sale or sale.get("estado") != "confirmada":
+        raise HTTPException(404, "Ticket no encontrado")
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    return {
+        "ok": True,
+        "folio": sale.get("folio"),
+        "fecha": sale.get("fecha"),
+        "empresa": settings.get("empresa_nombre", "Grupo RYSA"),
+        "rfc": settings.get("rfc", ""),
+        "cliente": sale.get("cliente_nombre", "Público General"),
+        "total": sale.get("total"),
+        "moneda": settings.get("moneda", "MXN"),
+        "condicion": sale.get("condicion"),
+        "items": [{"descripcion": i.get("descripcion"), "cantidad": i.get("cantidad"),
+                   "precio": i.get("precio"), "importe": i.get("importe", i.get("cantidad", 0) * i.get("precio", 0))}
+                  for i in sale.get("items", [])],
+    }
+
 @api.get("/sales-next-folio")
 async def sales_next_folio(user: dict = Depends(get_current_user)):
     v = await db.counters.find_one({"_id": "venta"})
@@ -1848,72 +2841,85 @@ class PacConfigInput(BaseModel):
     lugar_expedicion: Optional[str] = ""  # CP
     timbres_alerta: Optional[int] = 20    # avisar cuando queden menos
 
-# NOTA: URLs estimadas de la API de Facty.mx (https://facty.mx). AJUSTAR cuando se tenga
-# la documentación oficial y las credenciales reales del proveedor.
-FACTY_URLS = {"sandbox": "https://sandbox.facty.mx/api", "produccion": "https://api.facty.mx/api"}
+class ComplementoPagoInput(BaseModel):
+    factura_id: str
+    monto: float
+    metodo: str = "efectivo"      # efectivo | tarjeta | transferencia | spei | deposito | otros
+    fecha: Optional[str] = None   # fecha del pago (YYYY-MM-DD)
+
+# -------------------------------------------------------------------------
+# Toda la comunicación con el PAC (Facty.mx) vive en pac_provider.py.
+# La lógica de negocio del resto de la app (órdenes, POS, cobros, CxC) NO cambia:
+# estos endpoints conservan su contrato. Si se cambia de PAC solo se toca pac_provider.py.
+# -------------------------------------------------------------------------
 
 async def get_pac_config():
-    return await db.pac_config.find_one({"_id": "pac"}, {"_id": 0})
+    return await pac_provider.get_config()
 
 def pac_configurado(cfg):
-    return bool(cfg and cfg.get("api_key") and cfg.get("rfc"))
+    return bool(cfg and pac_provider.api_key(cfg) and cfg.get("rfc"))
 
-def facty_request(cfg, method, path, **kwargs):
-    """Cliente HTTP para la API de Facty.mx. Autenticación Bearer Token (API Key).
-    AJUSTAR endpoints/headers exactos al integrar con la documentación oficial de Facty.mx."""
-    base = FACTY_URLS.get(cfg.get("environment", "sandbox"), FACTY_URLS["sandbox"])
-    headers = {"Authorization": f"Bearer {cfg.get('api_key', '')}", **kwargs.pop("headers", {})}
-    with httpx.Client(base_url=base, headers=headers, timeout=30.0) as c:
-        r = c.request(method, path, **kwargs)
-        if r.status_code >= 400:
-            raise HTTPException(r.status_code, f"PAC (Facty.mx): {r.text[:500]}")
-        return r.json()
-
-
-def _money(x):
-    return f"{round(float(x) + 1e-9, 2):.2f}"
-
-def sale_to_cfdi_payload(sale, cliente, cfg):
-    forma_map = {"efectivo": "01", "tarjeta": "04", "transferencia": "03", "spei": "03", "deposito": "03", "otros": "99"}
-    pago = (sale.get("pagos") or [{}])
-    forma = forma_map.get((pago[0].get("metodo") if pago else "efectivo"), "01")
-    rfc = (cliente.get("rfc") if cliente else "") or "XAXX010101000"
-    generico = rfc == "XAXX010101000"
-    receiver = {
-        "Rfc": rfc.upper(),
-        "Name": ((cliente.get("nombre") if cliente else "") or "PUBLICO EN GENERAL").upper(),
-        "CfdiUse": (cliente.get("uso_cfdi") if cliente else "") or ("S01" if generico else "G03"),
-        "FiscalRegime": (cliente.get("reg_fiscal") if cliente else "") or ("616" if generico else "601"),
-        "TaxZipCode": (cliente.get("cp") if cliente else "") or cfg.get("lugar_expedicion") or "00000",
-    }
-    items = []
-    for it in sale.get("items", []):
-        tasa = float(it.get("iva_tasa", 16)) / 100
-        bruto_unit = float(it["precio"])
-        base_unit = round(bruto_unit / (1 + tasa), 2)
-        base = round(base_unit * it["cantidad"], 2)
-        tax = round(base * tasa, 2)
-        items.append({
-            "Quantity": _money(it["cantidad"]), "ProductCode": it.get("clave_sat") or "01010101",
-            "UnitCode": it.get("clave_unidad") or "H87", "Unit": it.get("unidad") or "Pieza",
-            "Description": it["descripcion"], "IdentificationNumber": it.get("codigo", ""),
-            "UnitPrice": _money(base_unit), "Subtotal": _money(base), "TaxObject": "02",
-            "Taxes": [{"Name": "IVA", "Rate": f"{tasa}", "Total": _money(tax), "Base": _money(base),
-                       "IsRetention": False, "IsFederalTax": True}],
-            "Total": _money(base + tax),
-        })
-    return {
-        "CfdiType": "I", "NameId": "1", "ExpeditionPlace": cfg.get("lugar_expedicion") or "00000",
-        "Serie": cfg.get("serie") or "A", "PaymentForm": forma, "PaymentMethod": "PUE",
-        "Exportation": "01", "Currency": "MXN", "Receiver": receiver, "Items": items,
-    }
+# -------------------------------------------------------------------------
+# REFERENCIA (INACTIVA): implementación previa que construía el payload en el
+# formato de Facturama (POST /3/cfdis). Se conserva comentada por si se necesita.
+# La implementación activa está en pac_provider._payload_factura().
+# -------------------------------------------------------------------------
+# def facty_request(cfg, method, path, **kwargs):
+#     base = FACTY_URLS.get(cfg.get("environment", "sandbox"), FACTY_URLS["sandbox"])
+#     headers = {"Authorization": f"Bearer {cfg.get('api_key', '')}", **kwargs.pop("headers", {})}
+#     with httpx.Client(base_url=base, headers=headers, timeout=30.0) as c:
+#         r = c.request(method, path, **kwargs)
+#         if r.status_code >= 400:
+#             raise HTTPException(r.status_code, f"PAC (Facty.mx): {r.text[:500]}")
+#         return r.json()
+#
+# def _money(x):
+#     return f"{round(float(x) + 1e-9, 2):.2f}"
+#
+# def sale_to_cfdi_payload(sale, cliente, cfg):
+#     forma_map = {"efectivo": "01", "tarjeta": "04", "transferencia": "03",
+#                  "spei": "03", "deposito": "03", "otros": "99"}
+#     pago = (sale.get("pagos") or [{}])
+#     forma = forma_map.get((pago[0].get("metodo") if pago else "efectivo"), "01")
+#     rfc = (cliente.get("rfc") if cliente else "") or "XAXX010101000"
+#     generico = rfc == "XAXX010101000"
+#     receiver = {
+#         "Rfc": rfc.upper(),
+#         "Name": ((cliente.get("nombre") if cliente else "") or "PUBLICO EN GENERAL").upper(),
+#         "CfdiUse": (cliente.get("uso_cfdi") if cliente else "") or ("S01" if generico else "G03"),
+#         "FiscalRegime": (cliente.get("reg_fiscal") if cliente else "") or ("616" if generico else "601"),
+#         "TaxZipCode": (cliente.get("cp") if cliente else "") or cfg.get("lugar_expedicion") or "00000",
+#     }
+#     items = []
+#     for it in sale.get("items", []):
+#         tasa = float(it.get("iva_tasa", 16)) / 100
+#         bruto_unit = float(it["precio"])
+#         base_unit = round(bruto_unit / (1 + tasa), 2)
+#         base = round(base_unit * it["cantidad"], 2)
+#         tax = round(base * tasa, 2)
+#         items.append({
+#             "Quantity": _money(it["cantidad"]), "ProductCode": it.get("clave_sat") or "01010101",
+#             "UnitCode": it.get("clave_unidad") or "H87", "Unit": it.get("unidad") or "Pieza",
+#             "Description": it["descripcion"], "IdentificationNumber": it.get("codigo", ""),
+#             "UnitPrice": _money(base_unit), "Subtotal": _money(base), "TaxObject": "02",
+#             "Taxes": [{"Name": "IVA", "Rate": f"{tasa}", "Total": _money(tax), "Base": _money(base),
+#                        "IsRetention": False, "IsFederalTax": True}],
+#             "Total": _money(base + tax),
+#         })
+#     return {
+#         "CfdiType": "I", "NameId": "1", "ExpeditionPlace": cfg.get("lugar_expedicion") or "00000",
+#         "Serie": cfg.get("serie") or "A", "PaymentForm": forma, "PaymentMethod": "PUE",
+#         "Exportation": "01", "Currency": "MXN", "Receiver": receiver, "Items": items,
+#     }
 
 @api.get("/facturacion/config")
 async def get_pac_config_ep(user: dict = Depends(require_permission("config"))):
     cfg = await get_pac_config() or {}
     cfg = dict(cfg)
+    cfg["api_key_set"] = bool(cfg.get("api_key"))
     cfg["api_password_set"] = bool(cfg.get("api_password"))
     cfg.pop("api_password", None)
+    cfg.pop("api_key", None)
     cfg["configurado"] = pac_configurado(await get_pac_config())
     return cfg
 
@@ -1921,6 +2927,8 @@ async def get_pac_config_ep(user: dict = Depends(require_permission("config"))):
 async def put_pac_config(data: PacConfigInput, user: dict = Depends(require_permission("config"))):
     doc = data.model_dump()
     existing = await get_pac_config() or {}
+    if not doc.get("api_key"):  # conservar API Key si no se reenvía
+        doc["api_key"] = existing.get("api_key", "")
     if not doc.get("api_password"):  # conservar contraseña si no se reenvía
         doc["api_password"] = existing.get("api_password", "")
     await db.pac_config.update_one({"_id": "pac"}, {"$set": doc}, upsert=True)
@@ -1933,12 +2941,10 @@ async def timbres(user: dict = Depends(get_current_user)):
     if not pac_configurado(cfg):
         return {"configurado": False, "disponibles": None, "plan": None}
     try:
-        # NOTA: endpoint estimado de consulta de créditos/timbres disponibles de Facty.mx.
-        # AJUSTAR nombre de endpoint y campos de respuesta según documentación oficial.
-        data = facty_request(cfg, "GET", "/account/credits")
-        disp = int(data.get("credits") or data.get("CurrentFolios") or 0)
-        res = {"configurado": True, "disponibles": disp, "plan": data.get("plan") or data.get("Plan"),
-               "expira": data.get("expires_at") or data.get("ExpirationDate"), "actualizado": iso_now(),
+        data = await pac_provider.listar_timbres(cfg)
+        disp = int(data.get("disponibles") or 0)
+        res = {"configurado": True, "disponibles": disp, "plan": data.get("plan"),
+               "expira": None, "actualizado": iso_now(),
                "alerta": disp <= int(cfg.get("timbres_alerta", 20))}
         await db.pac_config.update_one({"_id": "pac"}, {"$set": {"timbres_cache": res}})
         return res
@@ -1964,30 +2970,93 @@ async def ventas_facturables(user: dict = Depends(get_current_user)):
 async def emitir_cfdi(sale_id: str, user: dict = Depends(require_permission("venta.crear"))):
     cfg = await get_pac_config()
     if not pac_configurado(cfg):
-        raise HTTPException(400, "El PAC no está configurado. Ve a Configuración → Facturación y captura tus credenciales.")
+        raise HTTPException(400, "El PAC no está configurado. Ve a Configuración → Facturación y captura tu API Key de Facty.")
     sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
     if not sale:
         raise HTTPException(404, "Venta no encontrada")
     if sale.get("facturado"):
         raise HTTPException(400, "Esta venta ya fue facturada")
     cliente = await db.clients.find_one({"id": sale.get("cliente_id")}, {"_id": 0}) if sale.get("cliente_id") else None
-    payload = sale_to_cfdi_payload(sale, cliente, cfg)
-    # NOTA: endpoint estimado de timbrado de Facty.mx. AJUSTAR ruta y payload según su
-    # documentación oficial (probablemente requiera un formato distinto al de Facturama).
-    result = facty_request(cfg, "POST", "/cfdi", json=payload)
-    fid = result.get("id") or result.get("Id")
-    uuid_ = result.get("uuid") or ((result.get("Complement") or {}).get("TaxStamp") or {}).get("Uuid")
+    result = await pac_provider.crear_factura(sale, cliente, cfg)
+    fid = result.get("id")
+    uuid_ = result.get("uuid")
     doc = {"id": uid(), "sale_id": sale_id, "folio_venta": sale.get("folio"),
-           "pac_id": fid, "uuid": uuid_, "serie": result.get("serie") or result.get("Serie"),
-           "folio": result.get("folio") or result.get("Folio"),
+           "pac_id": fid, "uuid": uuid_, "serie": result.get("serie"),
+           "folio": result.get("folio"),
            "status": "vigente", "total": result.get("total", sale.get("total")),
            "cliente_nombre": (cliente.get("nombre") if cliente else "PUBLICO EN GENERAL"),
-           "rfc": payload["Receiver"]["Rfc"], "fecha": iso_now(), "provider": cfg.get("provider"),
-           "response": result}
+           "rfc": (cliente.get("rfc") if cliente else "") or "XAXX010101000",
+           "fecha": iso_now(), "provider": cfg.get("provider") or "facty",
+           "response": result.get("raw") or result}
     await db.cfdi_documents.insert_one(doc)
     await db.sales.update_one({"id": sale_id}, {"$set": {"facturado": True, "cfdi_uuid": uuid_, "cfdi_id": fid}})
     await log_audit(user, "facturar", "venta", sale_id, f"CFDI {uuid_}")
     return {"ok": True, "pac_id": fid, "uuid": uuid_, "folio": doc["folio"]}
+
+class MultiFacturaInput(BaseModel):
+    sale_ids: List[str] = Field(...)
+
+@api.post("/facturacion/multi")
+async def emitir_cfdi_multi(data: MultiFacturaInput, user: dict = Depends(require_permission("venta.facturar"))):
+    """Factura varias ventas en UNA sola factura (CFDI).
+
+    Reglas validadas en backend (evitar doble timbrado):
+    - cada venta debe existir, estar `confirmada` y NO facturada;
+    - todas deben pertenecer al MISMO cliente (RFC único);
+    - ninguna puede ser cotización.
+    Los conceptos de todas las ventas se agregan en un solo CFDI.
+    """
+    if not data.sale_ids:
+        raise HTTPException(400, "Selecciona al menos una venta")
+    cfg = await get_pac_config()
+    if not pac_configurado(cfg):
+        raise HTTPException(400, "El PAC no está configurado. Ve a Configuración → Facturación y captura tu API Key de Facty.")
+    sales = []
+    cliente_id = None
+    for sid in data.sale_ids:
+        s = await db.sales.find_one({"id": sid}, {"_id": 0})
+        if not s:
+            raise HTTPException(404, f"Venta {sid} no encontrada")
+        if s.get("tipo_venta") == "cotizacion":
+            raise HTTPException(400, f"La venta {s.get('folio')} es una cotización, no se puede facturar")
+        if s.get("estado") != "confirmada":
+            raise HTTPException(400, f"La venta {s.get('folio')} no está confirmada")
+        if s.get("facturado"):
+            raise HTTPException(400, f"La venta {s.get('folio')} ya fue facturada")  # evita doble timbre
+        cid = s.get("cliente_id")
+        if cid and cliente_id and cid != cliente_id:
+            raise HTTPException(400, "Todas las ventas deben pertenecer al mismo cliente para una sola factura")
+        if cid:
+            cliente_id = cid
+        sales.append(s)
+    cliente = await db.clients.find_one({"id": cliente_id}, {"_id": 0}) if cliente_id else None
+
+    # Doc agregado: una sola factura con los conceptos de todas las ventas.
+    items = []
+    for s in sales:
+        items.extend(s.get("items", []))
+    total = round(sum(float(s.get("total", 0)) for s in sales), 2)
+    subtotal = round(sum(float(s.get("subtotal", 0)) for s in sales), 2)
+    iva = round(sum(float(s.get("iva_total", 0)) for s in sales), 2)
+    ag = {"id": uid(), "folio": "MULTI", "items": items, "total": total,
+          "subtotal": subtotal, "iva_total": iva, "descuento_total": round(sum(float(s.get("descuento_total", 0)) for s in sales), 2),
+          "condicion": "contado", "cliente_id": cliente_id, "cliente_nombre": cliente.get("nombre") if cliente else "PUBLICO EN GENERAL",
+          "facturado": False}
+    result = await pac_provider.crear_factura(ag, cliente, cfg)
+    fid = result.get("id"); uuid_ = result.get("uuid")
+    doc = {"id": uid(), "sale_ids": data.sale_ids, "sale_id": sales[0]["id"],
+           "folio_venta": f"{sales[0].get('folio')}+{len(sales)}",
+           "pac_id": fid, "uuid": uuid_, "serie": result.get("serie"), "folio": result.get("folio"),
+           "status": "vigente", "total": result.get("total", total),
+           "cliente_nombre": (cliente.get("nombre") if cliente else "PUBLICO EN GENERAL"),
+           "rfc": (cliente.get("rfc") if cliente else "") or "XAXX010101000",
+           "fecha": iso_now(), "provider": cfg.get("provider") or "facty",
+           "response": result.get("raw") or result}
+    await db.cfdi_documents.insert_one(doc)
+    for s in sales:
+        await db.sales.update_one({"id": s["id"]}, {"$set": {"facturado": True, "cfdi_uuid": uuid_, "cfdi_id": fid}})
+    await log_audit(user, "facturar", "venta", ",".join(s["id"] for s in sales), f"CFDI multi {uuid_} ({len(sales)} ventas)")
+    return {"ok": True, "pac_id": fid, "uuid": uuid_, "folio": doc["folio"], "ventas": len(sales)}
 
 
 @api.get("/facturacion/{cfdi_id}/{fmt}")
@@ -1998,11 +3067,10 @@ async def descargar_cfdi(cfdi_id: str, fmt: str, user: dict = Depends(get_curren
     doc = await db.cfdi_documents.find_one({"id": cfdi_id}, {"_id": 0})
     if not doc or not pac_configurado(cfg):
         raise HTTPException(404, "CFDI o PAC no disponible")
-    pac_id = doc.get("pac_id") or doc.get("facturama_id")
-    # NOTA: endpoint estimado de descarga de Facty.mx. AJUSTAR según documentación oficial.
-    data = facty_request(cfg, "GET", f"/cfdi/{pac_id}/{fmt}")
-    raw = base64.b64decode(data.get("content") or data.get("Content"))
-    media = "application/xml" if fmt == "xml" else "application/pdf"
+    if fmt == "xml":
+        raw, media = await pac_provider.descargar_xml(doc, cfg)
+    else:
+        raw, media = await pac_provider.descargar_pdf(doc, cfg)
     return StreamingResponse(io.BytesIO(raw), media_type=media,
         headers={"Content-Disposition": f"attachment; filename={doc.get('folio_venta','cfdi')}.{fmt}"})
 
@@ -2017,12 +3085,7 @@ async def cancelar_cfdi(cfdi_id: str, motivo: str = "02", uuid_reemplazo: Option
         raise HTTPException(422, "Motivo de cancelación inválido")
     if motivo == "01" and not uuid_reemplazo:
         raise HTTPException(422, "El motivo 01 requiere UUID de reemplazo")
-    pac_id = doc.get("pac_id") or doc.get("facturama_id")
-    params = {"motive": motivo}
-    if uuid_reemplazo:
-        params["uuidReplacement"] = uuid_reemplazo
-    # NOTA: endpoint estimado de cancelación de Facty.mx. AJUSTAR según documentación oficial.
-    result = facty_request(cfg, "DELETE", f"/cfdi/{pac_id}", params=params)
+    result = await pac_provider.cancelar_factura(doc, motivo, uuid_reemplazo, cfg)
     await db.cfdi_documents.update_one({"id": cfdi_id}, {"$set": {"status": "cancelado", "cancelacion": result}})
     if doc.get("sale_id"):
         await db.sales.update_one({"id": doc["sale_id"]}, {"$set": {"facturado": False}})
@@ -2030,42 +3093,133 @@ async def cancelar_cfdi(cfdi_id: str, motivo: str = "02", uuid_reemplazo: Option
     return {"ok": True, "result": result}
 
 
+@api.post("/facturacion/complemento-pago")
+async def emitir_rep(data: ComplementoPagoInput, user: dict = Depends(require_permission("venta.cancelar"))):
+    """Emite el Complemento de Recepción de Pagos (REP) contra una factura PPD.
+    Uso manual (preparado, no conectado automáticamente a CxC)."""
+    cfg = await get_pac_config()
+    if not pac_configurado(cfg):
+        raise HTTPException(400, "El PAC no está configurado. Configura tu API Key de Facty.")
+    padre = await db.cfdi_documents.find_one({"id": data.factura_id}, {"_id": 0})
+    if not padre:
+        raise HTTPException(404, "Factura padre no encontrada")
+    result = await pac_provider.emitir_complemento_pago(cfg, padre, data.model_dump())
+    await log_audit(user, "facturar", "facturacion", padre.get("id"), f"Complemento de pago sobre {padre.get('uuid')}")
+    return {"ok": True, "result": result}
+
+
 # =========================================================================
 # REPORTES DE VENTAS Y UTILIDAD
 # =========================================================================
-@api.get("/reports/ventas")
-async def reporte_ventas(desde: Optional[str] = None, hasta: Optional[str] = None,
-                         group: str = "dia", user: dict = Depends(get_current_user)):
+def _hi(x):
+    return str(x or "").strip().lower()
+
+async def _build_reporte(desde, hasta, group, vendedor_id=None, q=None,
+                         categoria=None, tipo=None, user=None, query_extra=None) -> dict:
+    """Construye el reporte de ventas/utilidad con filtros opcionales.
+    Filtros: vendedor_id, q (producto/código), categoria (clasificación), tipo (contado|credito).
+    user: si no tiene reportes.global, se limita a sus propias ventas."""
+    from deps import ver_reportes_globales
     now = now_utc()
     d = (desde[:10] if desde else now.strftime("%Y-%m-01"))
     h = (hasta[:10] if hasta else now.date().isoformat())
-    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(50000)
+    query = {"estado": "confirmada"}
+    if vendedor_id:
+        query["vendedor_id"] = vendedor_id
+    if tipo in ("contado", "credito"):
+        query["condicion"] = tipo
+    if user is not None and not ver_reportes_globales(user):
+        # Usuario sin alcance global: solo reporta sus propias ventas.
+        query["vendedor_id"] = user["id"]
+    if query_extra:
+        query.update(query_extra)
+    sales = await db.sales.find(query, {"_id": 0}).to_list(50000)
     sales = [s for s in sales if d <= s.get("fecha", "")[:10] <= h]
-    # costos de productos
-    prods = await db.products.find({}, {"_id": 0, "id": 1, "costo": 1}).to_list(50000)
-    costo_map = {p["id"]: float(p.get("costo") or 0) for p in prods}
+
+    # mapa de productos: id -> {costo, clasificacion, linea}
+    prods = await db.products.find({}, {"_id": 0, "id": 1, "costo": 1, "clasificacion": 1, "linea": 1}).to_list(50000)
+    pmeta = {}
+    for p in prods:
+        pmeta[p["id"]] = {
+            "costo": float(p.get("costo") or 0),
+            "clasificacion": _hi(p.get("clasificacion")),
+            "linea": _hi(p.get("linea")),
+        }
+
+    def linea_cumple(it):
+        if not q and not categoria:
+            return True
+        meta = pmeta.get(it.get("product_id")) or {}
+        if q:
+            ql = _hi(q)
+            hay = (ql in _hi(it.get("codigo")) or ql in _hi(it.get("descripcion")))
+            if not hay:
+                return False
+        if categoria:
+            cl = _hi(categoria)
+            if cl not in (meta.get("clasificacion") or "") and cl not in (meta.get("linea") or ""):
+                return False
+        return True
+
     por_producto = {}
+    por_vendedor = {}
+    por_categoria = {}
     serie = {}
+    tickets_contados = set()
     total_ingreso = total_costo = total_ventas = 0.0
+    unidades = 0.0
     for s in sales:
-        key = s.get("fecha", "")[:7] if group == "mes" else s.get("fecha", "")[:10]
-        serie[key] = serie.get(key, 0) + float(s.get("total", 0))
-        total_ventas += float(s.get("total", 0))
-        for it in s.get("items", []):
+        matching_lines = [it for it in s.get("items", []) if linea_cumple(it)]
+        if not matching_lines:
+            continue
+        sale_total = 0.0
+        for it in matching_lines:
             tasa = float(it.get("iva_tasa", 16)) / 100
-            neto = (it["cantidad"] * it["precio"] - (it.get("descuento", 0) or 0)) / (1 + tasa)
-            costo = costo_map.get(it.get("product_id"), 0) * it["cantidad"]
+            bruto = it["cantidad"] * it["precio"] - (it.get("descuento", 0) or 0)
+            neto = bruto / (1 + tasa)
+            costo_uni = pmeta.get(it.get("product_id"), {}).get("costo", 0.0)
+            costo = costo_uni * it["cantidad"]
             pid = it.get("product_id") or it.get("codigo")
             p = por_producto.get(pid)
             if not p:
+                meta = pmeta.get(it.get("product_id")) or {}
                 p = {"codigo": it.get("codigo"), "descripcion": it.get("descripcion"),
-                     "cantidad": 0, "ingreso": 0.0, "costo": 0.0}
+                     "cantidad": 0, "ingreso": 0.0, "costo": 0.0,
+                     "clasificacion": it.get("clasificacion") or ""}
                 por_producto[pid] = p
             p["cantidad"] += it["cantidad"]
             p["ingreso"] += neto
             p["costo"] += costo
             total_ingreso += neto
             total_costo += costo
+            unidades += it["cantidad"]
+            sale_total += neto
+            # categoria
+            meta = pmeta.get(it.get("product_id")) or {}
+            cat = meta.get("clasificacion") or meta.get("linea") or "Sin categoría"
+            c = por_categoria.get(cat)
+            if not c:
+                c = {"categoria": cat, "cantidad": 0, "ingreso": 0.0, "costo": 0.0}
+                por_categoria[cat] = c
+            c["cantidad"] += it["cantidad"]
+            c["ingreso"] += neto
+            c["costo"] += costo
+        # vendedor
+        vid = s.get("vendedor_id") or "?"
+        v = por_vendedor.get(vid)
+        if not v:
+            v = {"id": vid, "nombre": s.get("vendedor_nombre") or "Sin vendedor",
+                 "tickets": 0, "ventas": 0.0, "utilidad": 0.0}
+            por_vendedor[vid] = v
+        if s["id"] not in tickets_contados:
+            tickets_contados.add(s["id"])
+            v["tickets"] += 1
+        v["ventas"] += float(s.get("total", 0))
+        v["utilidad"] += sale_total
+        key = s.get("fecha", "")[:7] if group == "mes" else s.get("fecha", "")[:10]
+        serie[key] = serie.get(key, 0) + float(s.get("total", 0))
+        total_ventas += float(s.get("total", 0))
+
     productos = []
     for p in por_producto.values():
         util = p["ingreso"] - p["costo"]
@@ -2076,15 +3230,270 @@ async def reporte_ventas(desde: Optional[str] = None, hasta: Optional[str] = Non
     top_utilidad = sorted(productos, key=lambda x: x["utilidad"], reverse=True)[:15]
     series = [{"periodo": k, "total": round(v, 2)} for k, v in sorted(serie.items())]
     util_total = round(total_ingreso - total_costo, 2)
+    vendedores = []
+    for v in por_vendedor.values():
+        v["ventas"] = round(v["ventas"], 2)
+        v["utilidad"] = round(v["utilidad"], 2)
+        v["ticket_promedio"] = round(v["ventas"] / v["tickets"], 2) if v["tickets"] else 0
+        vendedores.append(v)
+    vendedores.sort(key=lambda x: x["ventas"], reverse=True)
+    ql = _hi(q)
+    if ql:
+        productos = [p for p in productos if ql in _hi(p["codigo"]) or ql in _hi(p["descripcion"])]
+    categorias = []
+    for c in por_categoria.values():
+        util = c["ingreso"] - c["costo"]
+        categorias.append({**c, "ingreso": round(c["ingreso"], 2), "costo": round(c["costo"], 2),
+                           "utilidad": round(util, 2),
+                           "margen": round(util / c["ingreso"] * 100, 2) if c["ingreso"] else 0})
+    categorias.sort(key=lambda x: x["utilidad"], reverse=True)
     return {
-        "desde": d, "hasta": h, "group": group,
+        "desde": d, "hasta": h, "group": group, "filtros": {"vendedor": vendedor_id, "q": q, "categoria": categoria, "tipo": tipo},
         "totales": {"ventas": round(total_ventas, 2), "ingreso_neto": round(total_ingreso, 2),
                     "costo": round(total_costo, 2), "utilidad": util_total,
                     "margen": round(util_total / total_ingreso * 100, 2) if total_ingreso else 0,
-                    "tickets": len(sales)},
+                    "tickets": len(tickets_contados), "unidades": round(unidades, 2)},
         "series": series, "top_vendidos": top_vendidos, "top_utilidad": top_utilidad,
         "productos": sorted(productos, key=lambda x: x["utilidad"], reverse=True),
+        "vendedores": vendedores,
+        "categorias": categorias,
     }
+
+@api.get("/reports/ventas")
+async def reporte_ventas(desde: Optional[str] = None, hasta: Optional[str] = None,
+                         group: str = "dia", vendedor_id: Optional[str] = None,
+                         q: Optional[str] = None, categoria: Optional[str] = None,
+                         tipo: Optional[str] = None, cliente_id: Optional[str] = None,
+                         sucursal_id: Optional[str] = None, condicion: Optional[str] = None,
+                         user: dict = Depends(require_permission("reportes.ver"))):
+    query_extra = {}
+    if cliente_id:
+        query_extra["cliente_id"] = cliente_id
+    if sucursal_id:
+        query_extra["sucursal_id"] = sucursal_id
+    if condicion in ("contado", "credito"):
+        query_extra["condicion"] = condicion
+    return await _build_reporte(desde, hasta, group, vendedor_id, q, categoria, tipo, user, query_extra=query_extra)
+
+# --- Exportación de reportes: Excel y PDF ---
+def _reporte_excel_bytes(rep: dict) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    wb = Workbook()
+    hf = Font(bold=True, color="FFFFFF"); fill = PatternFill("solid", fgColor="B95A3A")
+    def estilar(ws):
+        for c in ws[1]:
+            c.font = hf; c.fill = fill
+        for col in ws.columns:
+            width = max(len(str(c.value)) for c in col if c.value is not None)
+            ws.column_dimensions[col[0].column_letter].width = min(width + 2, 30)
+    ws = wb.active; ws.title = "Resumen"
+    t = rep["totales"]
+    ws.append(["Métrica", "Valor"])
+    for k in ["ventas", "ingreso_neto", "costo", "utilidad", "margen", "tickets", "unidades"]:
+        ws.append([k, t.get(k)])
+    estilar(ws)
+    ws_c = wb.create_sheet("Categorías")
+    ws_c.append(["Categoría", "Cantidad", "Ingreso", "Costo", "Utilidad", "Margen %"])
+    for c in rep.get("categorias", []):
+        ws_c.append([c["categoria"], c["cantidad"], c["ingreso"], c["costo"], c["utilidad"], c["margen"]])
+    estilar(ws_c)
+    ws2 = wb.create_sheet("Productos")
+    ws2.append(["Código", "Producto", "Cantidad", "Ingreso", "Costo", "Utilidad", "Margen %"])
+    for p in rep["productos"]:
+        ws2.append([p["codigo"], p["descripcion"], p["cantidad"], p["ingreso"], p["costo"], p["utilidad"], p["margen"]])
+    estilar(ws2)
+    ws3 = wb.create_sheet("Vendedores")
+    ws3.append(["Vendedor", "Tickets", "Ventas", "Ticket promedio", "Utilidad"])
+    for v in rep.get("vendedores", []):
+        ws3.append([v["nombre"], v["tickets"], v["ventas"], v["ticket_promedio"], v["utilidad"]])
+    estilar(ws3)
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return buf.read()
+
+def _reporte_pdf_bytes(rep: dict) -> bytes:
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch, mm
+    from reportlab.lib.enums import TA_RIGHT, TA_LEFT, TA_CENTER
+    buf = io.BytesIO()
+    margins = 18 * mm
+    doc = SimpleDocTemplate(buf, pagesize=landscape(letter), leftMargin=margins,
+                            rightMargin=margins, topMargin=margins, bottomMargin=margins,
+                            title="Reporte de Ventas y Utilidad - Grupo RYSA",
+                            author="Grupo RYSA")
+    st = getSampleStyleSheet()
+    st["Title"].fontName = "Helvetica-Bold"; st["Title"].fontSize = 16; st["Title"].textColor = colors.HexColor("#8B3A2A")
+    st["Title"].alignment = TA_LEFT; st["Title"].spaceAfter = 2
+    subt = ParagraphStyle("subt", parent=st["Normal"], fontSize=9, textColor=colors.HexColor("#666666"), spaceAfter=3)
+    tiny = ParagraphStyle("tiny", parent=st["Normal"], fontSize=8, textColor=colors.HexColor("#888888"))
+    h2 = ParagraphStyle("h2b", parent=st["Normal"], fontName="Helvetica-Bold", fontSize=11,
+                        textColor=colors.HexColor("#8B3A2A"), spaceBefore=6, spaceAfter=4)
+
+    logo_path = None
+    for cand in (os.path.join(os.path.dirname(__file__), "brand", "logotipo.png"),
+                 os.getenv("UPLOAD_DIR", "")):
+        if cand and os.path.exists(cand):
+            logo_path = cand
+            break
+
+    # --- Encabezado con logotipo ---
+    enc_data = [[None, None]]
+    if logo_path:
+        try:
+            enc_data = [[Image(logo_path, width=120, height=120 * (545 / 1157)), ""]]
+        except Exception:
+            enc_data = [[None, None]]
+    enc = Table(enc_data, colWidths=[170, None])
+    enc.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    elems = [enc]
+
+    # Título y datos
+    f = rep["filtros"] or {}
+    titulo = Paragraph("Reporte de Ventas y Utilidad", st["Title"])
+    meta = Paragraph(
+        f"Periodo: {rep['desde']} a {rep['hasta']} &nbsp;&nbsp;|&nbsp;&nbsp; Generado: "
+        f"{now_utc().strftime('%d/%m/%Y %H:%M')} &nbsp;&nbsp;|&nbsp;&nbsp; Agrupado por {rep['group']}",
+        subt)
+    filtros_txt = []
+    if f.get("vendedor"):
+        filtros_txt.append("vendedor seleccionado")
+    if f.get("q"):
+        filtros_txt.append(f"producto: {f['q']}")
+    if f.get("categoria"):
+        filtros_txt.append(f"categoría: {f['categoria']}")
+    if f.get("tipo"):
+        filtros_txt.append(f"tipo: {f['tipo']}")
+    meta2 = Paragraph(("Filtros: " + ", ".join(filtros_txt)) if filtros_txt else "Sin filtros adicionales", tiny)
+    head_block = Table([[Paragraph("<b>Grupo RYSA</b>", ParagraphStyle("emp", parent=st["Normal"], fontName="Helvetica-Bold", fontSize=13, textColor=colors.HexColor("#1f2937")))],
+                        [titulo], [meta], [meta2]],
+                       colWidths=[None])
+    head_block.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    header = Table([[enc, head_block]], colWidths=[170, None])
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("LEFTPADDING", (0, 0), (0, 0), 0),
+        ("RIGHTPADDING", (1, 0), (1, 0), 4),
+    ]))
+    elems.append(header)
+    # línea divisoria
+    rule = Table([[""]], colWidths=[None])
+    rule.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 1.2, colors.HexColor("#B95A3A")),
+                              ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)]))
+    elems.append(rule)
+
+    # Resumen de totales
+    t = rep["totales"]
+    tot_style = ParagraphStyle("tot", parent=st["Normal"], fontName="Helvetica-Bold", fontSize=9, alignment=TA_CENTER)
+    tot_rows = [["VENTAS", "INGRESO NETO", "COSTO", "UTILIDAD", "MARGEN", "TICKETS"],
+                [f"$ {t['ventas']:,.2f}", f"$ {t['ingreso_neto']:,.2f}", f"$ {t['costo']:,.2f}",
+                 f"$ {t['utilidad']:,.2f}", f"{t['margen']}%", str(t['tickets'])]]
+    tot = Table(tot_rows, colWidths=[None] * 6)
+    tot.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2b2b2b")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 8),
+        ("FONTSIZE", (0, 1), (-1, 1), 10),
+        ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#f4ece6")),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, colors.HexColor("#2b2b2b")),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#c9c9c9")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#d9d9d9")),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elems.append(Spacer(1, 8))
+    elems.append(tot)
+
+    def seccion_tabla(title, data, colwidths, numero_cols):
+        tab = Table(data, colWidths=colwidths, repeatRows=1)
+        tab.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#B95A3A")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 8),
+            ("ALIGN", (0, 1), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 1), (0, -1), "LEFT"),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#e0d8d2")),
+            ("FONTSIZE", (0, 1), (-1, -1), 7.5),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#faf5f1")]),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        return tab
+
+    # Categorías
+    elems.append(Paragraph("Reporte por categoría", h2))
+    cat_data = [["Categoría", "Cantidad", "Ingreso", "Costo", "Utilidad", "Margen %"]]
+    for c in rep["categorias"]:
+        cat_data.append([c["categoria"], c["cantidad"], f"$ {c['ingreso']:,.2f}", f"$ {c['costo']:,.2f}",
+                         f"$ {c['utilidad']:,.2f}", f"{c['margen']}%"])
+    if len(cat_data) == 1:
+        cat_data.append(["Sin ventas", "-", "-", "-", "-", "-"])
+    elems.append(seccion_tabla("Categorías", cat_data, [None] * 6, 6))
+    elems.append(Spacer(1, 6))
+
+    # Productos
+    elems.append(Paragraph("Utilidad por producto", h2))
+    data = [["Código", "Producto", "Cantidad", "Ingreso", "Costo", "Utilidad", "Margen %"]]
+    for p in rep["productos"][:120]:
+        data.append([p["codigo"], p["descripcion"], p["cantidad"], f"$ {p['ingreso']:,.2f}",
+                     f"$ {p['costo']:,.2f}", f"$ {p['utilidad']:,.2f}", f"{p['margen']}%"])
+    if len(data) == 1:
+        data.append(["-", "Sin ventas", "-", "-", "-", "-", "-"])
+    elems.append(seccion_tabla("Productos", data, [72, None, 60, 78, 78, 78, 60], 7))
+
+    def _pie(canvas, docu):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7.5)
+        canvas.setFillColor(colors.HexColor("#777777"))
+        canvas.drawString(margins, 10 * mm, "Grupo RYSA - Reporte generado automáticamente")
+        canvas.drawRightString(docu.pagesize[0] - margins, 10 * mm, f"Página {docu.page}")
+        canvas.restoreState()
+    doc.build(elems, onFirstPage=_pie, onLaterPages=_pie)
+    buf.seek(0)
+    return buf.read()
+
+@api.get("/reports/ventas/export")
+async def reporte_ventas_export(desde: Optional[str] = None, hasta: Optional[str] = None,
+                                group: str = "dia", vendedor_id: Optional[str] = None,
+                                q: Optional[str] = None, categoria: Optional[str] = None,
+                                tipo: Optional[str] = None, fmt: str = "excel",
+                                cliente_id: Optional[str] = None, sucursal_id: Optional[str] = None,
+                                condicion: Optional[str] = None,
+                                user: dict = Depends(require_permission("exportar"))):
+    query_extra = {}
+    if cliente_id:
+        query_extra["cliente_id"] = cliente_id
+    if sucursal_id:
+        query_extra["sucursal_id"] = sucursal_id
+    if condicion in ("contado", "credito"):
+        query_extra["condicion"] = condicion
+    rep = await _build_reporte(desde, hasta, group, vendedor_id, q, categoria, tipo, user, query_extra=query_extra)
+    suffix = "xlsx" if fmt == "excel" else "pdf"
+    media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if fmt == "excel" else "application/pdf"
+    if fmt == "excel":
+        raw = _reporte_excel_bytes(rep)
+    else:
+        raw = _reporte_pdf_bytes(rep)
+    fname = f"reporte_ventas_{rep['desde']}_{rep['hasta']}.{suffix}"
+    return StreamingResponse(io.BytesIO(raw), media_type=media,
+        headers={"Content-Disposition": f"attachment; filename={fname}"})
 
 # =========================================================================
 # STARTUP
@@ -2107,37 +3516,41 @@ async def startup():
     except Exception as e:
         logger.warning("Índice único clients.codigo: %s", str(e)[:120])
         
-    # Seed admin (condicionado a ENVIRONMENT)
+    # Seed admin SOLO en desarrollo y SOLO con credenciales de variables de
+    # entorno (jamás hardcodeadas). Sin ADMIN_EMAIL/ADMIN_PASSWORD o con una
+    # contraseña < 12 caracteres simplemente se omite el seed.
     env = os.environ.get("ENVIRONMENT", "development").lower()
     admin_email = os.environ.get("ADMIN_EMAIL", "").strip().lower()
     admin_pw = os.environ.get("ADMIN_PASSWORD", "")
 
     if env == "production":
         # En producción el seed del administrador NO se ejecuta automáticamente:
-        # el primer usuario admin debe crearse manualmente (p. ej. corriendo una
-        # sola vez con ENVIRONMENT=development, o insertando el registro en Mongo).
+        # el primer usuario admin debe crearse manualmente.
         if not await db.users.find_one({"role": "admin"}):
             logger.warning(
                 "Seed de admin desactivado en producción. Crea el usuario administrador "
-                "manualmente (ENVIRONMENT=development una sola vez) antes de abrir el sistema."
+                "manualmente antes de abrir el sistema."
             )
     else:
-        # En desarrollo, usar valores por defecto si no se especifican
-        if not admin_email:
-            admin_email = "REDACTED"
-        if not admin_pw:
-            admin_pw = "REDACTED"
-
-        existing = await db.users.find_one({"email": admin_email})
-        if not existing:
-            await db.users.insert_one({
-                "id": uid(), "email": admin_email, "name": os.environ.get("ADMIN_NAME", "Admin"),
-                "role": "admin", "password_hash": hash_password(admin_pw),
-                "active": True, "created_at": iso_now()})
-            logger.info("Admin seed creado: %s", admin_email)
-        elif not verify_password(admin_pw, existing["password_hash"]):
-            await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_pw)}})
-            logger.info("Admin password actualizado.")
+        if not admin_email or not admin_pw:
+            logger.warning(
+                "Seed de admin omitido: define ADMIN_EMAIL y ADMIN_PASSWORD "
+                "(≥ 12 caracteres, nunca hardcodeados) para desarrollo."
+            )
+        elif not _password_ok(admin_pw):
+            logger.warning("Seed de admin omitido: ADMIN_PASSWORD debe tener al menos 12 caracteres.")
+        else:
+            existing = await db.users.find_one({"email": admin_email})
+            if not existing:
+                await db.users.insert_one({
+                    "id": uid(), "email": admin_email, "name": os.environ.get("ADMIN_NAME", "Admin"),
+                    "role": "admin", "password_hash": hash_password(admin_pw),
+                    "active": True, "token_version": 0, "created_at": iso_now()})
+                logger.info("Admin seed creado: %s", admin_email)
+            elif not verify_password(admin_pw, existing["password_hash"]):
+                await db.users.update_one({"email": admin_email},
+                                          {"$set": {"password_hash": hash_password(admin_pw)}})
+                logger.info("Admin password actualizado (solo desarrollo).")
         
     # Cliente Público General por defecto
     if not await db.clients.find_one({"codigo": "PUBLICO"}):

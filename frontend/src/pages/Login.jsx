@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { api, formatApiError } from "@/lib/api";
+import { useBranding } from "@/hooks/useBranding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +12,7 @@ import { toast } from "sonner";
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
+  const { logo, empresa_nombre } = useBranding();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,14 +33,12 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex">
-      <div className="hidden lg:flex flex-col justify-between w-1/2 bg-[#4B4E53] p-12 relative overflow-hidden">
+      <div className="hidden lg:flex flex-col justify-between w-1/2 bg-ink p-12 relative overflow-hidden">
         <div className="absolute inset-0 opacity-20"
           style={{ backgroundImage: "url('https://images.unsplash.com/photo-1710141530542-f792450e736e?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200')", backgroundSize: "cover", backgroundPosition: "center" }} />
         <div className="relative z-10 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-[#B95A3A] flex items-center justify-center">
-            <Boxes className="w-6 h-6 text-white" />
-          </div>
-          <span className="font-display font-extrabold text-white text-2xl">Grupo RYSA</span>
+          <img src={logo} alt="logo" className="w-10 h-10 rounded-lg object-contain bg-white/10" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <span className="font-display font-extrabold text-white text-2xl">{empresa_nombre}</span>
         </div>
         <div className="relative z-10">
           <h2 className="font-display text-4xl font-black text-white tracking-tighter leading-tight">
@@ -51,13 +51,11 @@ export default function Login() {
         <div className="relative z-10 text-slate-400 text-sm">© {new Date().getFullYear()} Grupo RYSA</div>
       </div>
 
-      <div className="flex-1 flex items-center justify-center p-6 bg-[#F8F9FA]">
+      <div className="flex-1 flex items-center justify-center p-6 bg-canvas">
         <form onSubmit={submit} className="w-full max-w-sm animate-fade-up" data-testid="login-form">
           <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-9 h-9 rounded-md bg-[#B95A3A] flex items-center justify-center">
-              <Boxes className="w-5 h-5 text-white" />
-            </div>
-            <span className="font-display font-extrabold text-2xl">Grupo RYSA</span>
+            <img src={logo} alt="logo" className="w-9 h-9 rounded-lg object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            <span className="font-display font-extrabold text-2xl">{empresa_nombre}</span>
           </div>
           <h1 className="font-display text-3xl font-black tracking-tighter text-slate-900">Iniciar sesión</h1>
           <p className="text-slate-500 mt-1 mb-8 text-sm">Ingresa tus credenciales para acceder al sistema.</p>
@@ -76,10 +74,10 @@ export default function Login() {
           </div>
 
           <Button type="submit" disabled={loading} data-testid="login-submit"
-            className="w-full h-11 mt-6 bg-[#B95A3A] hover:bg-[#8B3A2A] text-white font-semibold">
+            className="w-full h-11 mt-6 bg-[#C1401E] hover:bg-[#A03316] text-white font-semibold">
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Lock className="w-4 h-4 mr-2" /> Entrar</>}
           </Button>
-          <Link to="/" className="block text-center text-sm text-slate-500 hover:text-[#B95A3A] mt-4">
+          <Link to="/" className="block text-center text-sm text-slate-500 hover:text-[#C1401E] mt-4">
             ← Volver al inicio
           </Link>
         </form>

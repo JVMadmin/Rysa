@@ -39,20 +39,20 @@ export default function Categorias() {
       <div><h1 className="font-display text-2xl font-black tracking-tight">Categorías</h1>
         <p className="text-slate-500 text-sm">{rows.length} categorías · edítalas con imagen, información y ficha técnica</p></div>
 
-      {loading ? <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div> : (
+      {loading ? <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div> : (
         rows.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-md p-12 text-center text-slate-400">
+          <div className="card-soft p-12 text-center text-slate-400">
             <Tags className="w-10 h-10 mx-auto mb-3" />No hay categorías. Importa productos con la columna CATEGORIA o edítalas aquí.
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {rows.map((c) => (
-              <div key={c.nombre} className="group bg-white border border-slate-200 rounded-md overflow-hidden hover:shadow-md transition-all" data-testid={`cat-card-${c.nombre}`}>
+              <div key={c.nombre} className="group card-soft overflow-hidden hover:shadow-md transition-all" data-testid={`cat-card-${c.nombre}`}>
                 <div className="h-32 bg-slate-100 relative overflow-hidden">
                   {c.imagen_url
                     ? <img src={fileUrl(c.imagen_url)} alt={c.nombre} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
-                    : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#B95A3A]/10 to-[#B95A3A]/10"><ImageIcon className="w-8 h-8 text-slate-300" /></div>}
-                  <Badge className="absolute top-2 right-2 bg-[#B95A3A] text-white">{c.count}</Badge>
+                    : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#C1401E]/10 to-[#C1401E]/10"><ImageIcon className="w-8 h-8 text-slate-300" /></div>}
+                  <Badge className="absolute top-2 right-2 bg-[#C1401E] text-white">{c.count}</Badge>
                 </div>
                 <div className="p-4">
                   <div className="font-display font-bold text-slate-800 truncate">{c.nombre}</div>
@@ -62,7 +62,7 @@ export default function Categorias() {
                     <Button size="sm" variant="outline" className="flex-1" onClick={() => nav("/app/productos", { state: { categoria: c.nombre } })} data-testid={`cat-ver-${c.nombre}`}>
                       <PackageSearch className="w-4 h-4 mr-1" /> Ver ({c.count})
                     </Button>
-                    {editable && <Button size="sm" className="bg-[#B95A3A] hover:bg-[#8B3A2A]" onClick={() => openEdit(c)} data-testid={`cat-edit-${c.nombre}`}><Pencil className="w-4 h-4" /></Button>}
+                    {editable && <Button size="sm" className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => openEdit(c)} data-testid={`cat-edit-${c.nombre}`}><Pencil className="w-4 h-4" /></Button>}
                   </div>
                 </div>
               </div>
@@ -85,7 +85,7 @@ export default function Categorias() {
               <Textarea value={f.ficha_tecnica} onChange={(e) => setF((s) => ({ ...s, ficha_tecnica: e.target.value }))} className="mt-1" data-testid="cat-ficha" placeholder="Material, medidas, presentación..." /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setEdit(null)}>Cancelar</Button>
-            <Button onClick={save} disabled={saving} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="cat-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button></DialogFooter>
+            <Button onClick={save} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cat-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

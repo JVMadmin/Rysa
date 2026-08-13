@@ -211,7 +211,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
                 </div>
               ) : s.customBarras ? (
                 <div className="space-y-3 max-w-xl" data-testid="prod-barras-section">
-                  <div className="flex items-center gap-2 text-slate-700 font-semibold text-sm"><Barcode className="w-4 h-4 text-[#B95A3A]" /> Códigos de barras del producto</div>
+                  <div className="flex items-center gap-2 text-slate-700 font-semibold text-sm"><Barcode className="w-4 h-4 text-[#C1401E]" /> Códigos de barras del producto</div>
                   <p className="text-xs text-slate-400">Escanea con el lector o escribe el código y presiona Enter / Agregar. Puedes registrar varios códigos y sobreescribirlos.</p>
                   <div className="flex gap-2">
                     <Input
@@ -220,7 +220,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
                       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBarcode(); } }}
                       placeholder="Escanea o escribe un código de barras"
                       data-testid="prod-barcode-input" />
-                    <Button type="button" onClick={() => addBarcode()} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="prod-barcode-add"><Plus className="w-4 h-4 mr-1" /> Agregar</Button>
+                    <Button type="button" onClick={() => addBarcode()} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="prod-barcode-add"><Plus className="w-4 h-4 mr-1" /> Agregar</Button>
                   </div>
                   <div className="flex flex-wrap gap-2" data-testid="prod-barcode-list">
                     {(f.codigos_barras || []).length === 0 && <span className="text-xs text-slate-400">Sin códigos de barras.</span>}
@@ -253,7 +253,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
         </Tabs>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={save} disabled={saving} data-testid="prod-save" className="bg-[#B95A3A] hover:bg-[#8B3A2A]">
+          <Button onClick={save} disabled={saving} data-testid="prod-save" className="bg-[#C1401E] hover:bg-[#A03316]">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}
           </Button>
         </DialogFooter>

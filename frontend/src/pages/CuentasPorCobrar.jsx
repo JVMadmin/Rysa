@@ -10,12 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock, MessageCircle, FileText } from "lucide-react";
 
 const METODOS = [["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferencia", "Transferencia"], ["deposito", "Depósito"], ["otros", "Otros"]];
 
 const Card = ({ label, value, icon: Ic, iconCls = "text-slate-500", valueCls = "text-slate-700", testid }) => (
-  <div className="bg-white border border-slate-200 rounded-md p-4" data-testid={testid}>
+  <div className="card-soft p-4" data-testid={testid}>
     <div className="flex items-center justify-between">
       <span className="text-xs uppercase tracking-wider text-slate-400">{label}</span>
       <Ic className={`w-4 h-4 ${iconCls}`} />
@@ -30,6 +30,8 @@ export default function CuentasPorCobrar() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [soloVencidos, setSoloVencidos] = useState(false);
+  const [estado, setEstado] = useState("todos");
+  const [facturada, setFacturada] = useState("todas");
   const puedeCobrar = can("caja.entrada");
 
   // Abono
@@ -45,10 +47,12 @@ export default function CuentasPorCobrar() {
     const params = {};
     if (q) params.q = q;
     if (soloVencidos) params.solo_vencidos = true;
+    if (estado && estado !== "todos") params.estado = estado;
+    if (facturada && facturada !== "todas") params.facturada = facturada;
     const { data } = await api.get("/cxc", { params });
     setData(data); setLoading(false);
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [soloVencidos]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [soloVencidos, estado, facturada]);
 
   const openAbono = (c) => { setAbonoCli(c); setAbono({ monto: "", metodo: "efectivo", referencia: "", nota: "" }); };
   const guardarAbono = async () => {
@@ -70,6 +74,22 @@ export default function CuentasPorCobrar() {
     setDetalle(data);
   };
 
+  const generarPdf = async () => {
+    try {
+      const root = `${process.env.REACT_APP_BACKEND_URL || ""}`;
+      const url = `${root}/api/cxc/${detCli.cliente_id}/adeudo-pdf`;
+      window.open(url, "_blank");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+  const recordarWhatsApp = async () => {
+    try {
+      const { data } = await api.post(`/cxc/${detCli.cliente_id}/recordatorio`);
+      toast.success("Recordatorio generado");
+      if (data.wa_url) window.open(data.wa_url, "_blank");
+      else toast.warning("Cliente sin teléfono válido; el recordatorio quedó registrado");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   const t = data.totales || {};
 
   return (
@@ -87,7 +107,7 @@ export default function CuentasPorCobrar() {
       </div>
 
       {/* Antigüedad global */}
-      <div className="bg-white border border-slate-200 rounded-md p-4">
+      <div className="card-soft p-4">
         <div className="text-xs uppercase tracking-wider text-slate-400 mb-3">Antigüedad de saldos</div>
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
           {[["corriente", "Corriente", "text-green-700"], ["b1_30", "1-30 días", "text-amber-600"],
@@ -101,7 +121,7 @@ export default function CuentasPorCobrar() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 bg-white border border-slate-200 rounded-md p-3">
+      <div className="flex flex-wrap gap-2 card-soft p-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <Input placeholder="Buscar por nombre o clave de cliente..." value={q}
@@ -111,10 +131,28 @@ export default function CuentasPorCobrar() {
           <span className="text-sm text-slate-600">Solo vencidos</span>
           <Switch checked={soloVencidos} onCheckedChange={setSoloVencidos} data-testid="cxc-solo-vencidos" />
         </div>
+        <Select value={estado} onValueChange={setEstado}>
+          <SelectTrigger className="w-40" data-testid="cxc-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos los estados</SelectItem>
+            <SelectItem value="pendiente">Pendiente</SelectItem>
+            <SelectItem value="parcialmente_pagada">Parcialmente pagada</SelectItem>
+            <SelectItem value="vencida">Vencida</SelectItem>
+            <SelectItem value="liquidada">Liquidada</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={facturada} onValueChange={setFacturada}>
+          <SelectTrigger className="w-40" data-testid="cxc-facturada"><SelectValue placeholder="Facturación" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todas">Todas</SelectItem>
+            <SelectItem value="si">Solo facturadas</SelectItem>
+            <SelectItem value="no">Solo no facturadas</SelectItem>
+          </SelectContent>
+        </Select>
         <Button variant="outline" onClick={load} data-testid="cxc-refrescar"><Search className="w-4 h-4" /></Button>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+      <div className="card-soft overflow-x-auto">
         <table className="w-full text-sm whitespace-nowrap">
           <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
             <th className="p-3">Cliente</th><th className="p-3">Contacto</th>
@@ -124,11 +162,11 @@ export default function CuentasPorCobrar() {
             <th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
+            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
             {!loading && data.clientes.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin cuentas por cobrar. ¡Todo al día!</td></tr>}
             {!loading && data.clientes.map((c) => (
               <tr key={c.cliente_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cxc-row-${c.codigo}`}>
-                <td className="p-3"><div className="font-medium text-[#B95A3A]">{c.codigo}</div><div className="text-slate-700 max-w-[200px] truncate" title={c.nombre}>{c.nombre}</div></td>
+                <td className="p-3"><div className="font-medium text-[#C1401E]">{c.codigo}</div><div className="text-slate-700 max-w-[200px] truncate" title={c.nombre}>{c.nombre}</div></td>
                 <td className="p-3 text-slate-500 text-xs">{c.telefono || c.celular || "—"}</td>
                 <td className="p-3 text-right font-semibold">{money(c.saldo)}</td>
                 <td className={`p-3 text-right font-semibold ${c.vencido > 0 ? "text-red-600" : "text-slate-300"}`}>{money(c.vencido)}</td>
@@ -141,7 +179,7 @@ export default function CuentasPorCobrar() {
                 <td className="p-3">
                   <div className="flex gap-1 justify-end">
                     <Button size="sm" variant="outline" onClick={() => openDetalle(c)} data-testid={`cxc-detalle-${c.codigo}`}><Receipt className="w-4 h-4 mr-1" /> Ver</Button>
-                    {puedeCobrar && <Button size="sm" className="bg-[#B95A3A] hover:bg-[#8B3A2A]" onClick={() => openAbono(c)} data-testid={`cxc-abonar-${c.codigo}`}><HandCoins className="w-4 h-4 mr-1" /> Abonar</Button>}
+                    {puedeCobrar && <Button size="sm" className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => openAbono(c)} data-testid={`cxc-abonar-${c.codigo}`}><HandCoins className="w-4 h-4 mr-1" /> Abonar</Button>}
                   </div>
                 </td>
               </tr>
@@ -153,7 +191,7 @@ export default function CuentasPorCobrar() {
       {/* Diálogo de abono */}
       <Dialog open={!!abonoCli} onOpenChange={(o) => !o && setAbonoCli(null)}>
         <DialogContent data-testid="abono-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#B95A3A]" /> Registrar abono</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> Registrar abono</DialogTitle></DialogHeader>
           {abonoCli && (
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-md p-3 flex items-center justify-between">
@@ -184,7 +222,7 @@ export default function CuentasPorCobrar() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setAbonoCli(null)}>Cancelar</Button>
-            <Button onClick={guardarAbono} disabled={saving} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="abono-guardar">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
+            <Button onClick={guardarAbono} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="abono-guardar">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -193,7 +231,7 @@ export default function CuentasPorCobrar() {
       <Dialog open={!!detCli} onOpenChange={(o) => !o && setDetCli(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="detalle-dialog">
           <DialogHeader><DialogTitle className="font-display">Estado de cuenta · {detCli?.nombre}</DialogTitle></DialogHeader>
-          {!detalle ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#B95A3A]" /></div> : (
+          {!detalle ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div> : (
             <div className="space-y-5">
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Saldo</div><div className="font-display font-bold text-red-600">{money(detalle.cliente.saldo)}</div></div>
@@ -254,8 +292,12 @@ export default function CuentasPorCobrar() {
             </div>
           )}
           <DialogFooter>
+            {detCli && detalle && <>
+              <Button variant="outline" onClick={recordarWhatsApp} data-testid="detalle-recordar"><MessageCircle className="w-4 h-4 mr-1 text-green-600" /> Recordar por WhatsApp</Button>
+              <Button variant="outline" onClick={generarPdf} data-testid="detalle-pdf"><FileText className="w-4 h-4 mr-1" /> PDF de adeudo</Button>
+            </>}
             {detCli && puedeCobrar && detalle && detalle.cliente.saldo > 0 &&
-              <Button className="bg-[#B95A3A] hover:bg-[#8B3A2A]" onClick={() => { setDetCli(null); openAbono(detCli); }} data-testid="detalle-abonar"><HandCoins className="w-4 h-4 mr-1" /> Registrar abono</Button>}
+              <Button className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setDetCli(null); openAbono(detCli); }} data-testid="detalle-abonar"><HandCoins className="w-4 h-4 mr-1" /> Registrar abono</Button>}
             <Button variant="outline" onClick={() => setDetCli(null)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>

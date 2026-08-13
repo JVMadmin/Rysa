@@ -1,5 +1,6 @@
 """Tests for client import saldo behavior (bug fix: SALDO not persisted on import)."""
 import os
+import uuid
 import pytest
 import requests
 
@@ -11,10 +12,11 @@ if not BASE_URL:
             if line.startswith("REACT_APP_BACKEND_URL="):
                 BASE_URL = line.split("=", 1)[1].strip().strip('"').rstrip("/")
 
-ADMIN_EMAIL = "REDACTED"
-ADMIN_PASSWORD = "REDACTED"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "testadmin@rysa-dev.com")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "TestAdmin_Rysa_2026_Dev")
 
-TEST_CODE = "QAIMP001"
+# Código único por corrida para no colisionar con artefactos de ejecuciones previas.
+TEST_CODE = "QAIMP" + uuid.uuid4().hex[:8].upper()
 
 
 @pytest.fixture(scope="module")

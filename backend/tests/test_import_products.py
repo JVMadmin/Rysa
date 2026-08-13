@@ -1,13 +1,20 @@
 """Tests for the product import fix (.xls/.xlsx/.csv robust reader)."""
 import io
 import os
+import asyncio
+from pathlib import Path
 import pytest
 import requests
 import xlwt
 from openpyxl import Workbook
+from dotenv import load_dotenv
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BACKEND_DIR / ".env", override=False)
 
 BASE = os.environ["REACT_APP_BACKEND_URL"].rstrip("/") + "/api"
-ADMIN = {"email": "REDACTED", "password": "REDACTED"}
+ADMIN = {"email": os.environ.get("TEST_ADMIN_EMAIL", "testadmin@rysa-dev.com"),
+         "password": os.environ.get("TEST_ADMIN_PASSWORD", "TestAdmin_Rysa_2026_Dev")}
 
 HEADERS = ["CODIGO", "DESCRIP", "COSTO", "EXISTENCIA", "IMPUESTO", "STATUS", "UTILPRECI1", "LINEA"]
 ROWS = [
@@ -192,15 +199,16 @@ def test_import_unsupported_returns_400(H):
 
 def test_cleanup(H):
     """Remove test products, inventory movements. Keep admin + PUBLICO client."""
-    from pymongo import MongoClient
-    mongo_url = os.environ["MONGO_URL"]
-    db_name = os.environ["DB_NAME"]
-    client = MongoClient(mongo_url)
-    db = client[db_name]
-    prod_res = db.products.delete_many({"codigo": {"$in": CREATED_CODES}})
-    inv_res = db.inventory_movements.delete_many({"codigo": {"$in": CREATED_CODES}})
-    print(f"Cleanup: deleted {prod_res.deleted_count} products, "
-          f"{inv_res.deleted_count} inv movements")
-    # Verify gone
-    remaining = list(db.products.find({"codigo": {"$in": CREATED_CODES}}))
-    assert len(remaining) == 0
+    import asyncio
+    async def _clean():
+        from pgstore.adapter import PGDatabase
+        db = PGDatabase()
+        prod_res = await db.products.delete_many({"codigo": {"$in": CREATED_CODES}})
+        inv_res = await db.inventory_movements.delete_many({"codigo": {"$in": CREATED_CODES}})
+        remaining = await db.products.find({"codigo": {"$in": CREATED_CODES}}).to_list(1000)
+        import pgstore
+        await pgstore.dispose()
+        return prod_res, inv_res, len(remaining)
+    prod_res, inv_res, found = asyncio.run(_clean())
+    print(f"Cleanup: deleted {prod_res} products, {inv_res} inv movements, found after: {found}")
+    assert found == 0

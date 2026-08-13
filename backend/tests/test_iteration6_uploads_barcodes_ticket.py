@@ -25,8 +25,8 @@ def _load_base_url():
     return "http://localhost:8001"
 
 BASE_URL = _load_base_url()
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "REDACTED")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "REDACTED")
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "testadmin@rysa-dev.com")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "TestAdmin_Rysa_2026_Dev")
 
 
 def _make_png_bytes(w=2, h=2):

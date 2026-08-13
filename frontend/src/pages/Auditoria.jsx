@@ -11,13 +11,13 @@ export default function Auditoria() {
   return (
     <div className="space-y-5" data-testid="auditoria-page">
       <div><h1 className="font-display text-2xl font-black tracking-tight">Auditoría</h1><p className="text-slate-500 text-sm">Registro de acciones críticas del sistema</p></div>
-      <div className="bg-white border border-slate-200 rounded-md overflow-x-auto">
+      <div className="card-soft overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
             <th className="p-3">Fecha</th><th className="p-3">Usuario</th><th className="p-3">Acción</th><th className="p-3">Entidad</th><th className="p-3">Detalle</th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={5} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
+            {loading && <tr><td colSpan={5} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
             {!loading && rows.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400"><ScrollText className="w-8 h-8 mx-auto mb-2" />Sin registros.</td></tr>}
             {!loading && rows.map((a) => (
               <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">

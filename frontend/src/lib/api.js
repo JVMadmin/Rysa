@@ -4,11 +4,44 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 export const api = axios.create({ baseURL: API, withCredentials: true });
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("rysa_token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
-});
+// Rutas que jamás deben intentar rotar sesión.
+const AUTH_SKIP = ["/auth/login", "/auth/refresh", "/auth/logout"];
+
+let refreshing = null;
+
+api.interceptors.response.use(
+  (res) => res,
+  async (err) => {
+    const { response, config } = err || {};
+    if (
+      response &&
+      response.status === 401 &&
+      config &&
+      !config._retried &&
+      !AUTH_SKIP.some((p) => (config.url || "").startsWith(p))
+    ) {
+      config._retried = true;
+      if (!refreshing) {
+        refreshing = api
+          .post("/auth/refresh")
+          .then(() => {
+            refreshing = null;
+          })
+          .catch((e) => {
+            refreshing = null;
+            throw e;
+          });
+      }
+      try {
+        await refreshing;
+        return api(config);
+      } catch (e) {
+        return Promise.reject(e);
+      }
+    }
+    return Promise.reject(err);
+  }
+);
 
 export function formatApiError(detail) {
   if (detail == null) return "Ocurrió un error. Intenta de nuevo.";

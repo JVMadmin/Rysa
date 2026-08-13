@@ -203,12 +203,12 @@ export default function Productos() {
           {can("importar") && <Button variant="outline" onClick={() => fileRef.current.click()} data-testid="import-btn"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
           <Button variant="outline" onClick={exportExcel} data-testid="export-btn"><Download className="w-4 h-4 mr-1" /> Exportar</Button>
           <Button variant="outline" onClick={openGlobal} data-testid="movimientos-btn"><ArrowDownUp className="w-4 h-4 mr-1" /> Movimientos</Button>
-          {can("producto.crear") && <Button onClick={() => { setEditing(null); setFormOpen(true); }} data-testid="nuevo-producto-btn" className="bg-[#B95A3A] hover:bg-[#8B3A2A]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
+          {can("producto.crear") && <Button onClick={() => { setEditing(null); setFormOpen(true); }} data-testid="nuevo-producto-btn" className="bg-[#C1401E] hover:bg-[#A03316]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center bg-white border border-slate-200 rounded-md p-3">
+      <div className="flex flex-wrap gap-2 items-center card-soft p-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
           <Input placeholder="Buscar por código, descripción, SKU, línea..." value={q}
@@ -244,7 +244,7 @@ export default function Productos() {
         <Button variant="outline" onClick={doSearch}><Search className="w-4 h-4" /></Button>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-md">
+      <div className="card-soft">
         <TableScroller testid="productos-scroller">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 sticky top-0">
@@ -255,14 +255,14 @@ export default function Productos() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
+            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
             {!loading && rows.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
             {!loading && rows.map((p) => {
               const [color, label] = dot(p);
               return (
                 <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`prod-row-${p.codigo}`}>
                   <td className="p-3"><div className="flex items-center gap-2"><span className={`w-2.5 h-2.5 rounded-full ${color}`} title={label} /><Badge className={estadoBadge[p.estado]}>{p.estado}</Badge></div></td>
-                  <td className="p-3 font-medium text-[#B95A3A]">{p.codigo}</td>
+                  <td className="p-3 font-medium text-[#C1401E]">{p.codigo}</td>
                   <td className="p-3 max-w-xs truncate">{p.descripcion}</td>
                   <td className="p-3 text-slate-500">{p.linea}</td>
                   <td className="p-3 text-right">{money(p.costo)}</td>
@@ -352,7 +352,7 @@ export default function Productos() {
                 </div>
               </div>
               <div className="flex justify-end">
-                <Button onClick={submitMov} disabled={savingMov} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="mov-guardar">
+                <Button onClick={submitMov} disabled={savingMov} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="mov-guardar">
                   {savingMov ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />} Registrar movimiento
                 </Button>
               </div>
@@ -422,11 +422,11 @@ export default function Productos() {
                 <th className="p-2 text-right">Entrada</th><th className="p-2 text-right">Salida</th><th className="p-2 text-right">Exist.</th>
               </tr></thead>
               <tbody>
-                {gLoading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#B95A3A]" /></td></tr>}
+                {gLoading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
                 {!gLoading && gMovs.map((m) => (
                   <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`gmov-row-${m.id}`}>
                     <td className="p-2 text-slate-500 whitespace-nowrap">{fmtFecha(m.fecha)}</td>
-                    <td className="p-2 font-medium text-[#B95A3A]">{m.codigo}</td>
+                    <td className="p-2 font-medium text-[#C1401E]">{m.codigo}</td>
                     <td className="p-2 max-w-[200px] truncate" title={m.descripcion}>{m.descripcion}</td>
                     <td className="p-2"><Badge className={movBadge(m.tipo)}>{m.tipo}</Badge></td>
                     <td className="p-2">{m.documento}</td>
@@ -497,12 +497,12 @@ export default function Productos() {
                 </table>
               </div>
               {preview.preview.length > 300 && <p className="text-xs text-slate-400">Mostrando 300 de {preview.total} filas.</p>}
-              {progress && <p className="text-sm text-[#B95A3A] font-medium" data-testid="import-progress">Importando... {progress.done} / {progress.total}</p>}
+              {progress && <p className="text-sm text-[#C1401E] font-medium" data-testid="import-progress">Importando... {progress.done} / {progress.total}</p>}
             </>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportOpen(false)} disabled={!!progress}>Cancelar</Button>
-            <Button onClick={confirmImport} disabled={!!progress} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="confirm-import">
+            <Button onClick={confirmImport} disabled={!!progress} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirm-import">
               {progress ? "Importando..." : "Confirmar importación"}
             </Button>
           </DialogFooter>

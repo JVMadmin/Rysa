@@ -46,13 +46,25 @@ module.exports = {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
+        success: 'hsl(var(--success))',
+        warning: 'hsl(var(--warning))',
+        ink: '#1A1A1A',
+        canvas: '#F6F5F4',
+        terracota: {
+          DEFAULT: '#C1401E',
+          dark: '#A03316',
+        },
         chart: {
-          '1': 'hsl(var(--chart-1))',
-          '2': 'hsl(var(--chart-2))',
-          '3': 'hsl(var(--chart-3))',
-          '4': 'hsl(var(--chart-4))',
-          '5': 'hsl(var(--chart-5))'
+          '1': 'hsl(13 73% 44%)',
+          '2': 'hsl(0 0% 10%)',
+          '3': 'hsl(32 95% 44%)',
+          '4': 'hsl(142 71% 45%)',
+          '5': 'hsl(217 9% 46%)'
         }
+      },
+      boxShadow: {
+        card: '0 1px 2px rgba(26,26,26,0.04), 0 8px 24px rgba(26,26,26,0.06)',
+        'card-lg': '0 10px 40px -10px rgba(26,26,26,0.14)',
       },
       keyframes: {
         'accordion-down': {

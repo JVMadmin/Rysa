@@ -72,7 +72,7 @@ sequenceDiagram
 - **Hash**: `bcrypt` ([deps.py:22-29](file:///c:/Users/emili/OneDrive/Desktop/Rysa/backend/deps.py#L22-L29))
 - **JWT**: HS256, secreto en `.env`, expiración **7 días** ([deps.py:37-40](file:///c:/Users/emili/OneDrive/Desktop/Rysa/backend/deps.py#L37-L40))
 - **Doble canal**: Cookie httpOnly (`access_token`, SameSite=None, Secure) + Header `Authorization: Bearer` ([deps.py:66-85](file:///c:/Users/emili/OneDrive/Desktop/Rysa/backend/deps.py#L66-L85))
-- **Admin seed**: Se crea automáticamente en `startup()` con las credenciales de `.env` (`test@gmail.com` / `REDACTED`)
+- **Admin seed**: Se crea automáticamente en `startup()` con las credenciales de `.env` (`test@gmail.com` / `<REDACTADO>`)
 
 ### RBAC (Control de acceso por roles)
 
@@ -89,7 +89,7 @@ Definido en [deps.py:43-60](file:///c:/Users/emili/OneDrive/Desktop/Rysa/backend
 - Frontend: `useAuth().can("permiso")` para habilitar/deshabilitar acciones en la UI
 
 > [!WARNING]
-> El JWT secret es débil (`REDACTED`) y las credenciales de admin/MongoDB están en texto plano en `.env`. Esto es inseguro para producción.
+> El JWT secret era débil (`<REDACTADO>`) y las credenciales de admin/MongoDB estaban en texto plano en `.env`. Esto es inseguro para producción.
 
 ---
 

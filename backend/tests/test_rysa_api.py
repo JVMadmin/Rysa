@@ -12,8 +12,8 @@ import pandas as pd
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/") if os.environ.get("REACT_APP_BACKEND_URL") else "http://localhost:8000"
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = "REDACTED"
-ADMIN_PASSWORD = "REDACTED"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "testadmin@rysa-dev.com")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "TestAdmin_Rysa_2026_Dev")
 
 
 @pytest.fixture(scope="session")
@@ -125,7 +125,7 @@ class TestClients:
     def test_create_client_auto_codigo(self, admin_client):
         r = admin_client.post(f"{API}/clients", json={
             "nombre": "TEST_Cliente Credito", "tipo": "menudeo",
-            "condicion_pago": "credito", "limite_credito": 5000,
+            "condicion_pago": "credito", "credito_autorizado": True, "limite_credito": 5000,
         })
         assert r.status_code == 200, r.text
         c = r.json()
@@ -158,14 +158,12 @@ class TestSales:
     def test_sale_contado_efectivo_updates_inventory_and_caja(self, admin_client, created_product):
         prod = admin_client.get(f"{API}/products/{created_product['id']}").json()
         existencia_prev = prod["existencia"]
-        precio = prod["precios"][0]["precio_con_iva"]  # con iva incluido? see model: items precio = sin iva
-        # Use precio_sin_iva as line price so subtotal+iva=total
-        precio_sin = prod["precios"][0]["precio_sin_iva"]
+        # El POS envía precio CON IVA (precio_con_iva): el backend extrae el IVA
+        # de cada línea, por lo que el total es el precio_con_iva por cantidad.
+        precio_con = prod["precios"][0]["precio_con_iva"]
         item = {"product_id": prod["id"], "codigo": prod["codigo"], "descripcion": prod["descripcion"],
-                "cantidad": 3, "unidad": "PZA", "precio": precio_sin, "iva_tasa": 16, "descuento": 0}
-        # compute expected total
-        subtotal = 3 * precio_sin
-        total_exp = round(subtotal * 1.16, 2)
+                "cantidad": 3, "unidad": "PZA", "precio": precio_con, "iva_tasa": 16, "descuento": 0}
+        total_exp = round(3 * precio_con, 2)
         pago = round(total_exp + 5, 2)  # extra for cambio
         r = admin_client.post(f"{API}/sales", json={
             "items": [item], "condicion": "contado",

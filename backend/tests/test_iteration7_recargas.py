@@ -7,13 +7,20 @@ from pathlib import Path
 
 
 def _load_base_url():
-    env = Path("/app/frontend/.env").read_text()
-    m = re.search(r"REACT_APP_BACKEND_URL=(\S+)", env)
-    return m.group(1).rstrip("/")
+    v = os.environ.get("REACT_APP_BACKEND_URL")
+    if v:
+        return v.rstrip("/")
+    try:
+        env = Path("/app/frontend/.env").read_text()
+        m = re.search(r"REACT_APP_BACKEND_URL=(\S+)", env)
+        return (m.group(1) if m else "http://localhost:8000").rstrip("/")
+    except Exception:
+        return "http://localhost:8000"
 
 
 BASE_URL = _load_base_url()
-ADMIN = {"email": "REDACTED", "password": "REDACTED"}
+ADMIN = {"email": os.environ.get("TEST_ADMIN_EMAIL", "testadmin@rysa-dev.com"),
+         "password": os.environ.get("TEST_ADMIN_PASSWORD", "TestAdmin_Rysa_2026_Dev")}
 
 
 @pytest.fixture(scope="module")
@@ -28,6 +35,16 @@ def client(token):
     s = requests.Session()
     s.headers.update({"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
     return s
+
+
+@pytest.fixture(scope="module")
+def recarga(client):
+    """Crea una recarga y la devuelve (autocontenida por worker de xdist)."""
+    payload = {"compania": "Telcel", "telefono": "5544332211", "monto": 20,
+               "metodo": "efectivo", "referencia_tae": "QA-REF-FIX", "comision": 2}
+    r = client.post(f"{BASE_URL}/api/recargas", json=payload)
+    assert r.status_code == 200, r.text
+    return r.json()
 
 
 # ---------------- POST /api/recargas ----------------
@@ -71,19 +88,19 @@ class TestRecargaCreate:
 
 # ---------------- GET /api/sales?rango=hoy ----------------
 class TestRecargaInSales:
-    def test_recarga_aparece_en_hoy(self, client):
+    def test_recarga_aparece_en_hoy(self, client, recarga):
         r = client.get(f"{BASE_URL}/api/sales", params={"rango": "hoy"})
         assert r.status_code == 200
         sales = r.json()
         recargas = [s for s in sales if s.get("tipo_venta") == "recarga"]
-        assert any(s["id"] == pytest.recarga_id for s in recargas), \
-            f"Recarga {pytest.recarga_folio} no aparece en rango=hoy"
+        assert any(s["id"] == recarga["id"] for s in recargas), \
+            f"Recarga {recarga['folio']} no aparece en rango=hoy"
 
 
 # ---------------- POST /api/sales/{id}/ticket-pdf ----------------
 class TestTicketPdf:
-    def test_ticket_pdf_devuelve_url(self, client):
-        r = client.post(f"{BASE_URL}/api/sales/{pytest.recarga_id}/ticket-pdf")
+    def test_ticket_pdf_devuelve_url(self, client, recarga):
+        r = client.post(f"{BASE_URL}/api/sales/{recarga['id']}/ticket-pdf")
         assert r.status_code == 200, r.text
         data = r.json()
         assert "url" in data and data["url"], data

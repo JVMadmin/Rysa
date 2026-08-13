@@ -4,6 +4,7 @@ import io
 import mimetypes
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
 # Directorio base para subidas local (configurable por variable de entorno)
@@ -79,22 +80,88 @@ def _money(v):
     except Exception:
         return "$0.00"
 
+
+def _elem_visible(el, default=True):
+    try:
+        return bool(el.get("visible", default))
+    except Exception:
+        return default
+
+
+def _build_default_elements(tc, settings, sale):
+    """Bloques por defecto (compatibilidad con el diseño previo)."""
+    els = [{"tipo": "empresa", "align": "center", "bold": True, "font_size": 11}]
+    if tc.get("mostrar_rfc", True) and settings.get("rfc"):
+        els.append({"tipo": "campo", "contenido": f"RFC: {settings.get('rfc')}", "align": "center"})
+    if tc.get("mostrar_direccion", True) and settings.get("direccion"):
+        els.append({"tipo": "campo", "contenido": settings.get("direccion", ""), "align": "center"})
+    if tc.get("mostrar_telefono", True) and settings.get("telefono"):
+        els.append({"tipo": "campo", "contenido": f"Tel: {settings.get('telefono')}", "align": "center"})
+    if tc.get("encabezado"):
+        els.append({"tipo": "texto", "contenido": tc.get("encabezado"), "align": "center"})
+    els.append({"tipo": "separador"})
+    els.append({"tipo": "folio"})
+    els.append({"tipo": "fecha"})
+    els.append({"tipo": "cliente"})
+    if sale.get("vendedor_nombre"):
+        els.append({"tipo": "atendio"})
+    els.append({"tipo": "separador"})
+    els.append({"tipo": "items"})
+    els.append({"tipo": "separador"})
+    incluye_iva = (settings or {}).get("precios_incluyen_iva", True)
+    if not incluye_iva:
+        els.append({"tipo": "subtotal"})
+        els.append({"tipo": "iva"})
+    els.append({"tipo": "total"})
+    if sale.get("condicion") == "credito":
+        els.append({"tipo": "credito"})
+    els.append({"tipo": "separador"})
+    if tc.get("pie"):
+        els.append({"tipo": "pie", "contenido": tc.get("pie")})
+        els.append({"tipo": "pie2"})
+    qr = tc.get("qr_contenido") or tc.get("qr_texto") or "{verificar}"
+    if tc.get("mostrar_qr", True) is not False:
+        els.append({"tipo": "qr", "contenido": qr, "qr_size": tc.get("qr_size", 18)})
+    return els
+
+
+def _apply_align(c, x, w, text, align, size, bold):
+    c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+    if align == "center":
+        c.drawCentredString(w / 2, x, text)
+    elif align == "right":
+        c.drawRightString(w - 4 * mm, x, text)
+    else:
+        c.drawString(4 * mm, x, text)
+
+
 def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
-    """Genera un PDF del ticket según la configuración (80mm o carta)."""
+    """Genera un PDF del ticket según la configuración.
+
+    Si `ticket_config.elements` es una lista de bloques (editor avanzado), se
+    renderiza ese diseño; si no, se usan los bloques por defecto (diseño previo).
+    Tipos de elemento: empresa, campo, texto, separador, folio, fecha, cliente,
+    atendio, items, subtotal, iva, total, credito, pie, logo, qr.
+    """
     tc = (settings or {}).get("ticket_config", {}) or {}
     size = tc.get("tamano", "80mm")
     empresa = settings.get("empresa_nombre", "Grupo RYSA")
-    buf = io.BytesIO()
+    base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
+    def verificar_url():
+        if not base_url:
+            return f"/api/sales/{sale.get('id')}/public"
+        return f"{base_url}/verificar/{sale.get('id')}"
+    elements = tc.get("elements") if isinstance(tc.get("elements"), list) else None
+    if not elements:
+        elements = _build_default_elements(tc, settings, sale)
 
+    buf = io.BytesIO()
     if size == "carta":
         c = canvas.Canvas(buf, pagesize=letter)
         w, h = letter
-        x, y = 25 * mm, h - 25 * mm
+        x = 25 * mm
+        y = h - 25 * mm
         line_h = 14
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(x, y, empresa)
-        y -= line_h * 1.5
-        c.setFont("Helvetica", 9)
     else:
         width = 80 * mm
         items = sale.get("items", [])
@@ -104,57 +171,104 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
         x = 4 * mm
         y = h - 8 * mm
         line_h = 11
-        c.setFont("Helvetica-Bold", 11)
-        c.drawCentredString(w / 2, y, empresa)
-        y -= line_h
-        c.setFont("Helvetica", 7)
 
-    def L(text, center=False, bold=False, sz=None):
+    def L(text, center=False, bold=False, sz=None, align=None):
         nonlocal y
-        c.setFont("Helvetica-Bold" if bold else "Helvetica", sz or (9 if size == "carta" else 7))
-        if center and size != "carta":
-            c.drawCentredString(w / 2, y, text)
-        elif center:
-            c.drawCentredString(w / 2, y, text)
-        else:
-            c.drawString(x, y, text)
+        if align is None:
+            align = "center" if center else "left"
+        _apply_align(c, y, w, text, align, sz or (9 if size == "carta" else 7), bold)
         y -= line_h
 
-    if tc.get("mostrar_rfc", True) and settings.get("rfc"):
-        L(f"RFC: {settings.get('rfc')}", center=(size != "carta"))
-    if tc.get("mostrar_direccion", True) and settings.get("direccion"):
-        L(settings.get("direccion", ""), center=(size != "carta"))
-    if tc.get("mostrar_telefono", True) and settings.get("telefono"):
-        L(f"Tel: {settings.get('telefono')}", center=(size != "carta"))
-    if tc.get("encabezado"):
-        L(tc.get("encabezado"), center=(size != "carta"))
+    def sep():
+        nonlocal y
+        _apply_align(c, y, w, "-" * 42, "left", 7, False)
+        y -= line_h
 
-    L("-" * 42)
-    L(f"FOLIO: {sale.get('folio', '')}", bold=True)
-    L(f"Fecha: {str(sale.get('fecha', ''))[:16].replace('T', ' ')}")
-    L(f"Cliente: {sale.get('cliente_nombre', 'Publico General')}")
-    if sale.get("vendedor_nombre"):
-        L(f"Atendio: {sale.get('vendedor_nombre')}")
-    L("-" * 42)
+    def campos_items():
+        nonlocal y
+        for it in sale.get("items", []):
+            desc = str(it.get("descripcion", ""))[:34]
+            _apply_align(c, y, w, desc, "left", 9 if size == "carta" else 7, False)
+            y -= line_h
+            cant = it.get("cantidad", 0)
+            precio = it.get("precio", 0)
+            importe = it.get("importe", cant * precio)
+            _apply_align(c, y, w, f"  {cant} x {_money(precio)}          {_money(importe)}", "left", 7, False)
+            y -= line_h
 
-    for it in sale.get("items", []):
-        desc = str(it.get("descripcion", ""))[:34]
-        L(desc)
-        cant = it.get("cantidad", 0)
-        precio = it.get("precio", 0)
-        importe = it.get("importe", cant * precio)
-        L(f"  {cant} x {_money(precio)}          {_money(importe)}")
+    # Resolver variables de plantilla para texto/QR
+    def fi(t):
+        try:
+            return (t or "").replace("{empresa}", empresa) \
+                .replace("{verificar}", verificar_url()) \
+                .replace("{cip}", "").replace("{folio}", sale.get("folio", "")) \
+                .replace("{cliente}", sale.get("cliente_nombre", "")) \
+                .replace("{total}", _money(sale.get("total"))) \
+                .replace("{fecha}", str(sale.get("fecha", ""))[:16].replace("T", " "))
+        except Exception:
+            return t or ""
 
-    L("-" * 42)
-    incluye_iva = (settings or {}).get("precios_incluyen_iva", True)
-    if not incluye_iva:
-        L(f"Subtotal: {_money(sale.get('subtotal'))}")
-        L(f"IVA: {_money(sale.get('iva_total'))}")
-    L(f"TOTAL: {_money(sale.get('total'))}", bold=True, sz=(12 if size == "carta" else 9))
-    if sale.get("condicion") == "credito":
-        L(f"** VENTA A CREDITO ** Saldo: {_money(sale.get('saldo'))}", center=(size != "carta"))
-    L("-" * 42)
-    L(tc.get("pie", "¡Gracias por su compra!"), center=(size != "carta"))
+    for el in elements:
+        if not _elem_visible(el):
+            continue
+        tipo = el.get("tipo", "texto")
+        cont = fi(el.get("contenido"))
+        align = el.get("align") or ("center" if size != "carta" else "left")
+        bold = el.get("bold", False)
+        fsz = el.get("font_size")
+        try:
+            if tipo == "logo" and settings.get("logo_url"):
+                p = get_safe_local_path(settings["logo_url"]) if not settings["logo_url"].startswith("http") else None
+                if p and os.path.exists(p):
+                    try:
+                        c.drawImage(ImageReader(p), w / 2 - 10 * mm, y, 20 * mm, 20 * mm * 0.6, preserveAspectRatio=True, mask="auto")
+                        y -= 14 * mm
+                    except Exception:
+                        pass
+            elif tipo == "qr":
+                import qrcode
+                from io import BytesIO
+                qr = qrcode.QRCode(err_correction=qrcode.constants.ERROR_CORRECT_M)
+                qr.add_data(cont or "https://gruporysa.com")
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                qbio = BytesIO()
+                img.save(qbio, format="PNG")
+                qbio.seek(0)
+                qs = el.get("qr_size") or 18
+                c.drawImage(ImageReader(qbio), w / 2 - (qs * mm) / 2, y - (qs * mm), qs * mm, qs * mm)
+                y -= (qs * mm + 4 * mm)
+            elif tipo == "empresa":
+                L(empresa, bold=True, sz=fsz or 11, align="center")
+            elif tipo in ("campo", "texto"):
+                L(cont, align=align, bold=bold, sz=fsz)
+            elif tipo == "encabezado":
+                L(cont, align="center", bold=bold, sz=fsz)
+            elif tipo == "separador":
+                sep()
+            elif tipo == "folio":
+                L(f"FOLIO: {sale.get('folio', '')}", bold=True, sz=fsz)
+            elif tipo == "fecha":
+                L(f"Fecha: {str(sale.get('fecha', ''))[:16].replace('T', ' ')}", sz=fsz)
+            elif tipo == "cliente":
+                L(f"Cliente: {sale.get('cliente_nombre', 'Público General')}", sz=fsz)
+            elif tipo == "atendio":
+                L(f"Atendió: {sale.get('vendedor_nombre')}", sz=fsz)
+            elif tipo == "items":
+                campos_items()
+            elif tipo == "subtotal":
+                L(f"Subtotal: {_money(sale.get('subtotal'))}", align=align, sz=fsz)
+            elif tipo == "iva":
+                L(f"IVA: {_money(sale.get('iva_total'))}", align=align, sz=fsz)
+            elif tipo == "total":
+                L(f"TOTAL: {_money(sale.get('total'))}", bold=True, align=align, sz=fsz or (12 if size == "carta" else 9))
+            elif tipo == "credito":
+                L(f"** VENTA A CRÉDITO ** Saldo: {_money(sale.get('saldo'))}", align="center", sz=fsz)
+            elif tipo == "pie" or tipo == "pie2":
+                L(cont if cont else tc.get("pie", "¡Gracias por su compra!"), align="center", sz=fsz)
+        except Exception:
+            # Nunca romper la generación del ticket por un bloque fallido.
+            continue
 
     c.showPage()
     c.save()

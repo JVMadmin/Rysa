@@ -11,8 +11,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, PauseCircle, PlayCircle, X, Package,
-  Banknote, ArrowLeftRight, CreditCard, Tag, Printer, Hash, Keyboard, FileText,
+  Banknote, ArrowLeftRight, CreditCard,   Tag, Printer, Hash, Keyboard, FileText,
   Smartphone, Landmark, Gift, DollarSign, User as UserIcon, Check, Tags, MessageCircle, Loader2,
+  Star, Flame, LayoutGrid, HandCoins,
 } from "lucide-react";
 
 const METODOS = [
@@ -24,7 +25,50 @@ const METODOS = [
   ["otros", "Otro", Gift],
 ];
 
-export default function POS() {
+const LISTAS_PCT_DEFAULT = [40, 30, 20, 15, 10];
+
+// Precio de una lista concreta. Usa el precio guardado del producto; si la lista
+// no tiene precio configurado lo calcula aplicando el % de utilidad de la
+// configuración (listas_precios_pct) sobre el costo, con IVA.
+const calcListPrice = (p, l, pct) => {
+  const n = pct?.length ?? LISTAS_PCT_DEFAULT.length;
+  if (Number(l) === n + 1) return Number(p.precio_minimo ?? 0);
+  const arr = p.precios || [];
+  const lIdx = Number(l) - 1;
+  const stored = arr[lIdx]?.precio_con_iva;
+  if (stored) return stored;
+  const costo = Number(p.costo ?? 0);
+  if (costo > 0 && lIdx < n) {
+    const pctLista = Number(pct[lIdx] ?? pct[0] ?? 0);
+    const sin = costo * (1 + pctLista / 100);
+    return +(sin * (1 + Number(p.iva_tasa ?? p.iva ?? 16) / 100)).toFixed(2);
+  }
+  return arr[0]?.precio_con_iva ?? 0;
+};
+
+const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold }) => (
+  <div className="relative">
+    <button onClick={onAdd} data-testid={`pos-prod-${p.codigo}`}
+      className="w-full text-left border border-slate-200 rounded-md p-3 hover:border-[#C1401E] hover:bg-slate-50 transition-colors">
+      {p.imagen_url && <img src={fileUrl(p.imagen_url)} alt="" className="h-14 w-14 object-contain mb-2 mx-auto" />}
+      <div className="text-xs text-slate-400">{p.codigo}</div>
+      <div className="text-sm font-medium line-clamp-2 h-10">{p.descripcion}</div>
+      <div className="flex items-center justify-between mt-1">
+        <span className="font-display font-bold text-[#C1401E]">{money(priceOf(p))}</span>
+        <span className="flex items-center gap-1">
+          {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">{p.vendidas}</Badge>}
+          <Badge variant="outline" className="text-xs">{p.existencia}</Badge>
+        </span>
+      </div>
+    </button>
+    <button onClick={onFav} title={isFav ? "Quitar de favoritos" : "Agregar a favoritos"} data-testid={`pos-fav-${p.codigo}`}
+      className="absolute top-1 right-1 p-1 text-slate-300 hover:text-amber-400 transition-colors">
+      <Star className={`w-4 h-4 ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
+    </button>
+  </div>
+);
+
+export default function POS({ windowId, windowLabel }) {
   const location = useLocation();
   const nav = useNavigate();
   const { user, can } = useAuth();
@@ -38,15 +82,19 @@ export default function POS() {
   const [vendedorId, setVendedorId] = useState("");
   const [lista, setLista] = useState(1);
   const [descGlobal, setDescGlobal] = useState(0);
+  const [descMode, setDescMode] = useState("$");
   const [descPct, setDescPct] = useState(0);
   const [incluyeIva, setIncluyeIva] = useState(true);
   const [clientQuery, setClientQuery] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
   const [linePrice, setLinePrice] = useState(null); // item para selector de precio
+  const [selProd, setSelProd] = useState(null); // producto resaltado en resultados de búsqueda
   const [libreVal, setLibreVal] = useState("");
   const [tipoVenta, setTipoVenta] = useState("directa");
   const [formaPago, setFormaPago] = useState("contado"); // contado | transferencia | credito
   const [payOpen, setPayOpen] = useState(false);
+  const [invOverride, setInvOverride] = useState(null); // {motivo} dialog de inventario insuficiente
+  const [invReason, setInvReason] = useState("");
   const [pagos, setPagos] = useState([{ metodo: "efectivo", monto: "" }]);
   const [suspended, setSuspended] = useState([]);
   const [suspOpen, setSuspOpen] = useState(false);
@@ -56,12 +104,24 @@ export default function POS() {
   const [settings, setSettings] = useState({});
   const [nextFolio, setNextFolio] = useState({ venta: "", cotizacion: "" });
   const [listaNames, setListaNames] = useState(["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"]);
+  const [listasPct, setListasPct] = useState(LISTAS_PCT_DEFAULT);
   const [priceCheckOpen, setPriceCheckOpen] = useState(false);
   const [pcQuery, setPcQuery] = useState("");
   const [pcResults, setPcResults] = useState([]);
   const searchRef = useRef();
   const pcRef = useRef();
   const qRef = useRef("");
+  // --- Catálogo POS: categorías, favoritos, más vendidos ---
+  const [categorias, setCategorias] = useState([]);
+  const [categoriaSel, setCategoriaSel] = useState("");
+  const [vista, setVista] = useState("todos"); // todos | favoritos | mas_vendidos
+  const [catalogo, setCatalogo] = useState([]);
+  const [favIds, setFavIds] = useState(new Set());
+  const [catLoading, setCatLoading] = useState(false);
+  // --- Abono de crédito desde POS ---
+  const [abonoCli, setAbonoCli] = useState(null);
+  const [abono, setAbono] = useState({ monto: "", metodo: "efectivo", referencia: "" });
+  const [abonoSaving, setAbonoSaving] = useState(false);
   const condicion = formaPago === "credito" ? "credito" : "contado";
   const clienteSel = useMemo(() => clients.find((c) => c.id === clienteId) || null, [clients, clienteId]);
   const credInfo = useMemo(() => {
@@ -82,7 +142,7 @@ export default function POS() {
       if (pub) setClienteId(pub.id);
     });
     api.get("/vendedores").then((r) => setVendedores(r.data));
-    api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); if (r.data && r.data.precios_incluyen_iva !== undefined) setIncluyeIva(!!r.data.precios_incluyen_iva); });
+    api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); if (r.data?.listas_precios_pct?.length) setListasPct(r.data.listas_precios_pct); if (r.data && r.data.precios_incluyen_iva !== undefined) setIncluyeIva(!!r.data.precios_incluyen_iva); });
     loadSuspended();
     refreshFolio();
   }, []);
@@ -133,6 +193,42 @@ export default function POS() {
     setResults(data.slice(0, 20));
   };
 
+  // Carga las categorías + favoritos una vez
+  const loadCatalogMeta = async () => {
+    try {
+      const [cats, favs] = await Promise.all([
+        api.get("/categories").catch(() => ({ data: [] })),
+        api.get("/favorites").catch(() => ({ data: [] })),
+      ]);
+      setCategorias(cats.data || []);
+      setFavIds(new Set((favs.data || []).map((p) => p.id)));
+    } catch {}
+  };
+
+  // Carga el catálogo según vista (todos/favoritos/más vendidos) y categoría
+  const loadCatalogo = useCallback(async (vistaActual, catActual) => {
+    setCatLoading(true);
+    try {
+      let data = [];
+      if (vistaActual === "favoritos") {
+        const { data: prods } = await api.get("/favorites");
+        data = prods || [];
+      } else if (vistaActual === "mas_vendidos") {
+        const { data: prods } = await api.get("/products/bestsellers", { params: { estado: "activo", limit: 40 } });
+        data = prods || [];
+      } else {
+        const params = { estado: "activo", skip: 0, limit: 200 };
+        if (catActual) params.categoria = catActual;
+        const { data: prods } = await api.get("/products", { params });
+        data = prods || [];
+      }
+      setCatalogo(data);
+    } catch {} finally { setCatLoading(false); }
+  }, []);
+
+  useEffect(() => { loadCatalogMeta(); }, []);
+  useEffect(() => { loadCatalogo(vista, categoriaSel); }, [vista, categoriaSel, loadCatalogo]);
+
   // Lector de código de barras: al presionar Enter, agrega el producto exacto (código o código de barras).
   const onSearchKey = async (e) => {
     if (e.key !== "Enter") return;
@@ -167,28 +263,48 @@ export default function POS() {
     finally { setWaSending(false); }
   };
 
-  const priceFromList = (p, l) => {
-    if (Number(l) === 6) return p.precio_minimo ?? 0;
-    const arr = p.precios || [];
-    const idx = Math.min(Math.max(Number(l) - 1, 0), (arr.length || 1) - 1);
-    return arr[idx]?.precio_con_iva ?? arr[0]?.precio_con_iva ?? 0;
-  };
+  const priceFromList = (p, l) => calcListPrice(p, l, listasPct);
   const priceOf = (p) => priceFromList(p, lista);
 
   const addToCart = (p) => {
+    setSelProd(p);
     setCart((c) => {
       const ex = c.find((i) => i.product_id === p.id);
       if (ex) return c.map((i) => (i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i));
-      return [...c, { product_id: p.id, codigo: p.codigo, descripcion: p.descripcion, cantidad: 1, unidad: p.unidad_medida, precio: priceOf(p), iva_tasa: p.iva_tasa || 16, descuento: 0, precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0 }];
+      return [...c, { product_id: p.id, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || "PZA", precio: priceOf(p), iva_tasa: p.iva_tasa || 16, costo: Number(p.costo ?? 0), descuento: 0, precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
     });
     setSelected(p.id);
+    setQ(""); qRef.current = ""; setResults([]);
+    searchRef.current?.focus();
+  };
+
+  // Agrega un producto al carrito con un precio elegido explícitamente
+  const addToCartWithPrice = (p, precio) => {
+    const pid = p.product_id || p.id;
+    setSelProd(p);
+    setCart((c) => {
+      const ex = c.find((i) => i.product_id === pid);
+      if (ex) return c.map((i) => (i.product_id === pid ? { ...i, precio: Number(precio) || 0 } : i));
+      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa || 16, costo: Number(p.costo ?? 0), descuento: 0, precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
+    });
+    setSelected(pid);
     setQ(""); qRef.current = ""; setResults([]);
     searchRef.current?.focus();
   };
   // Al cambiar la lista de precios se actualizan automáticamente los precios del carrito
   const applyLista = (l) => {
     setLista(l);
-    setCart((c) => c.map((i) => (i.precios?.length ? { ...i, precio: priceFromList({ precios: i.precios, precio_minimo: i.precio_minimo }, l) } : i)));
+    setCart((c) => c.map((i) => (i.precios?.length ? { ...i, precio: priceFromList({ precios: i.precios, precio_minimo: i.precio_minimo, costo: i.costo, iva_tasa: i.iva_tasa }, l) } : i)));
+  };
+  // Alterna un producto en los favoritos del usuario
+  const toggleFav = async (e, pid) => {
+    e.stopPropagation();
+    const isFav = favIds.has(pid);
+    setFavIds((prev) => { const n = new Set(prev); if (isFav) n.delete(pid); else n.add(pid); return n; });
+    try {
+      if (isFav) await api.delete(`/favorites/${pid}`);
+      else await api.post(`/favorites/${pid}`);
+    } catch { setFavIds((prev) => { const n = new Set(prev); if (isFav) n.add(pid); else n.delete(pid); return n; }); }
   };
   // Cliente searchable + aplica su lista de precios y descuento
   const pickClient = (c) => {
@@ -196,14 +312,16 @@ export default function POS() {
     setClientQuery(c.nombre);
     setClientOpen(false);
     const l = Number(c.precio_venta || c.lista_precios || 1);
-    if (l >= 1 && l <= 6) applyLista(l);
+    if (l >= 1 && l <= listaNames.length + 1) applyLista(l);
     setDescPct(Number(c.descuento_permanente || 0));
   };
   const filteredClients = clientQuery
-    ? clients.filter((c) => `${c.nombre} ${c.codigo}`.toLowerCase().includes(clientQuery.toLowerCase())).slice(0, 30)
-    : clients.slice(0, 30);
+    ? clients.filter((c) => `${c.nombre} ${c.codigo} ${c.rfc || ""}`.toLowerCase().includes(clientQuery.toLowerCase())).slice(0, 100)
+    : clients; // lista completa en orden alfabético (el backend ya ordena por nombre)
   const setLinePrecio = (item, precio) => {
-    setCart((c) => c.map((i) => (i.product_id === item.product_id ? { ...i, precio: Number(precio) || 0 } : i)));
+    const inCart = cart.some((i) => i.product_id === item.product_id);
+    if (inCart) setCart((c) => c.map((i) => (i.product_id === item.product_id ? { ...i, precio: Number(precio) || 0 } : i)));
+    else addToCartWithPrice(item, precio);
     setLinePrice(null); setLibreVal("");
   };
   const updateQty = (id, d) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Math.max(0.001, +(i.cantidad + d).toFixed(3)) } : i)));
@@ -214,8 +332,19 @@ export default function POS() {
   const totals = useMemo(() => {
     let brutoTotal = 0; // con IVA
     cart.forEach((i) => { brutoTotal += i.cantidad * i.precio - (i.descuento || 0); });
-    const descPctAmount = +(brutoTotal * (Number(descPct) || 0) / 100).toFixed(2);
-    const descGlobalTotal = +((Number(descGlobal) || 0) + descPctAmount).toFixed(2);
+    if (brutoTotal < 0) brutoTotal = 0;
+
+    // Descuento global: por monto ($) o por porcentaje (%) sobre el bruto
+    const globalRaw = +(Number(descGlobal) || 0);
+    const descGlobalAmount = descMode === "%"
+      ? +(brutoTotal * globalRaw / 100).toFixed(2)
+      : globalRaw;
+
+    const pct = +(Number(descPct) || 0);
+    const descPctAmount = +(brutoTotal * pct / 100).toFixed(2);
+
+    const descGlobalTotal = Math.min(brutoTotal, +((descGlobalAmount || 0) + descPctAmount).toFixed(2));
+
     let subtotal = 0, iva = 0;
     cart.forEach((i) => {
       const base = i.cantidad * i.precio - (i.descuento || 0);
@@ -224,8 +353,8 @@ export default function POS() {
     });
     const sub = subtotal - descGlobalTotal;
     const total = Math.max(0, +(sub + iva).toFixed(2));
-    return { subtotal: +sub.toFixed(2), iva: +iva.toFixed(2), total, descPctAmount, descGlobalTotal };
-  }, [cart, descGlobal, descPct]);
+    return { subtotal: +sub.toFixed(2), iva: +iva.toFixed(2), total, descPctAmount, descGlobalAmount, descGlobalTotal };
+  }, [cart, descGlobal, descPct, descMode]);
 
   const pagado = pagos.reduce((s, p) => s + Number(p.monto || 0), 0);
   const cambio = Math.max(0, +(pagado - totals.total).toFixed(2));
@@ -238,11 +367,20 @@ export default function POS() {
       if (e.key === "F8") { const t = target(); if (t) { updateQty(t, 1); setSelected(t); } }
       else if (e.key === "F9") { const t = target(); if (t) { updateQty(t, -1); setSelected(t); } }
       else if (e.key === "F7") { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }
-      else if (e.key === "F6") { const n = lista >= 5 ? 1 : lista + 1; applyLista(n); toast.info(`Lista: ${listaNames[n - 1]}`); }
+      else if (e.key === "F6") {
+        const t = target();
+        const item = t ? cart.find((i) => i.product_id === t) : null;
+        const prod = item || selProd;
+        if (!prod) return toast.error("Selecciona un producto del carrito o de la búsqueda");
+        if (!(prod.precios?.length || prod.precio_minimo != null)) return toast.error("El producto no tiene precios configurados");
+        const precio = item ? item.precio : calcListPrice(prod, lista, listasPct);
+        setLinePrice({ ...prod, product_id: prod.product_id || prod.id, precio });
+        setLibreVal(String(precio));
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, cart, listaNames, lista]);
+  }, [selected, cart, selProd, lista, listasPct]);
 
   const pcSearch = async (val) => {
     setPcQuery(val);
@@ -254,6 +392,17 @@ export default function POS() {
   const openPay = () => {
     if (cart.length === 0) return toast.error("Agrega productos");
     if (tipoVenta === "cotizacion") return confirmar();
+    // Inventario insuficiente: solo se permite con autorización y motivo.
+    const insuficiente = cart.filter((i) => {
+      if (i.agotado) return false;
+      const disp = Number(i.existencia ?? 0);
+      return i.product_id && Number(i.cantidad) > disp;
+    });
+    if (insuficiente.length > 0 && can("inventario.autorizar_negativo")) {
+      setInvOverride(insuficiente);
+      setInvReason("");
+      return;
+    }
     if (formaPago === "credito") { setPayOpen(true); return; }
     const metodo = formaPago === "transferencia" ? "transferencia" : "efectivo";
     setPagos([{ metodo, monto: String(totals.total) }]);
@@ -264,13 +413,18 @@ export default function POS() {
     try {
       const payload = {
         cliente_id: clienteId || null,
-        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo, descripcion: i.descripcion, cantidad: Number(i.cantidad), unidad: i.unidad, precio: Number(i.precio), iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0) })),
+        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", precio: Number(i.precio) || 0, iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0) })),
         descuento_global: totals.descGlobalTotal,
         condicion,
         pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0) })) : [],
         lista_precios: Number(lista),
         tipo_venta: tipoVenta,
-        vendedor_id: vendedorId || null,
+        // Operador: el backend fuerza vendedor_id = usuario autenticado salvo que el
+        // rol tenga el permiso de cambiar operador. Solo se envía si el usuario lo tiene.
+        vendedor_id: can("venta.cambiar_operador") ? (vendedorId || user.id) : null,
+        // Override de inventario negativo (rol autorizado, con motivo).
+        allow_negative_inventory: can("inventario.autorizar_negativo") && invReason !== "",
+        override_reason: invReason || null,
       };
       const { data } = await api.post("/sales", payload);
       setTicket(data);
@@ -283,10 +437,28 @@ export default function POS() {
 
   const suspender = async () => {
     if (cart.length === 0) return toast.error("Nada que suspender");
-    await api.post("/sales/suspend", { cliente_id: clienteId, items: cart, descuento_global: Number(descGlobal || 0), condicion, pagos: [], lista_precios: Number(lista), tipo_venta: tipoVenta });
+    await api.post("/sales/suspend", { cliente_id: clienteId, items: cart, descuento_global: totals.descGlobalAmount, condicion, pagos: [], lista_precios: Number(lista), tipo_venta: tipoVenta });
     toast.success("Venta suspendida"); setCart([]); setDescGlobal(0); loadSuspended();
   };
   const recuperar = async (s) => { setCart(s.payload.items); setDescGlobal(s.payload.descuento_global || 0); setClienteId(s.payload.cliente_id || clienteId); await api.delete(`/sales-suspended/${s.id}`); setSuspOpen(false); loadSuspended(); toast.info("Venta recuperada"); };
+
+  // Registrar abono directo al saldo del cliente desde el POS
+  const guardarAbono = async () => {
+    const monto = Number(abono.monto);
+    if (!monto || monto <= 0) return toast.error("Ingresa un monto válido");
+    setAbonoSaving(true);
+    try {
+      const { data } = await api.post(`/cxc/${abonoCli.id}/abono`, { ...abono, monto });
+      toast.success(`Abono ${data.folio} · saldo actual ${money(data.saldo_actual)}${data.caja_afectada ? " · entró a caja" : ""}`);
+      setAbonoCli(null);
+      // refresca clientes para actualizar saldo mostrado
+      const { data: cl } = await api.get("/clients", { params: { estado: "activo" } });
+      setClients(cl.data);
+      const pub = cl.data.find((c) => c.codigo === "PUBLICO");
+      if (pub && !clienteId) setClienteId(pub.id);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setAbonoSaving(false); }
+  };
 
   const folioActual = tipoVenta === "cotizacion" ? nextFolio.cotizacion : nextFolio.venta;
 
@@ -298,19 +470,24 @@ export default function POS() {
         <div className="flex flex-col sm:flex-row gap-2 mb-3">
           <div className="relative flex-1">
             <UserIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input
+              <Input
               value={clientQuery}
               onChange={(e) => { setClientQuery(e.target.value); setClientOpen(true); if (!e.target.value) setClienteId(""); }}
               onFocus={() => setClientOpen(true)}
-              placeholder="Cliente: escribe para buscar por nombre o clave..."
+              placeholder="Cliente: escribe para buscar por nombre, clave o RFC..."
               className="pl-10 h-12" data-testid="pos-cliente-search" />
             {clientOpen && filteredClients.length > 0 && (
-              <div className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-64 overflow-y-auto" data-testid="pos-cliente-list">
+              <div className="absolute z-30 mt-1 w-full card-soft shadow-lg max-h-64 overflow-y-auto" data-testid="pos-cliente-list">
                 {filteredClients.map((c) => (
                   <button key={c.id} onClick={() => pickClient(c)} data-testid={`pos-cliente-opt-${c.codigo}`}
                     className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between">
-                    <span className="truncate"><b className="text-[#B95A3A] mr-1">{c.codigo}</b> {c.nombre}</span>
-                    {Number(c.descuento_permanente) > 0 && <Badge variant="outline" className="text-[10px] ml-2">-{c.descuento_permanente}%</Badge>}
+                    <span className="truncate"><b className="text-[#C1401E] mr-1">{c.codigo}</b> {c.nombre}
+                      {c.rfc && <span className="text-slate-400 font-mono text-xs ml-1">· {c.rfc}</span>}
+                    </span>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      {c.rfc && <span className="font-mono text-[10px] text-slate-400">{c.rfc}</span>}
+                      {Number(c.descuento_permanente) > 0 && <Badge variant="outline" className="text-[10px] ml-2">-{c.descuento_permanente}%</Badge>}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -320,7 +497,7 @@ export default function POS() {
             <SelectTrigger className="h-12 sm:w-44" data-testid="pos-lista"><Tags className="w-4 h-4 mr-1 text-slate-400" /><SelectValue /></SelectTrigger>
             <SelectContent>
               {listaNames.map((n, i) => <SelectItem key={i} value={String(i + 1)}>{n}</SelectItem>)}
-              <SelectItem value="6">Precio mínimo</SelectItem>
+              <SelectItem value={String(listaNames.length + 1)}>Precio mínimo</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -332,43 +509,79 @@ export default function POS() {
           <Button variant="outline" className="h-12" onClick={() => { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }} data-testid="verificar-precio-btn"><Tag className="w-4 h-4 mr-1" /> Precio <kbd className="ml-1 text-[10px] bg-slate-100 px-1 rounded">F7</kbd></Button>
           <Button variant="outline" className="h-12" onClick={() => setSuspOpen(true)} data-testid="ver-suspendidas"><PlayCircle className="w-4 h-4 mr-1" /> {suspended.length}</Button>
         </div>
-        <div className="flex-1 overflow-y-auto bg-white border border-slate-200 rounded-md">
-          {results.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-300 p-10">
-              <Package className="w-12 h-12 mb-2" /><p className="text-sm text-slate-400">Escribe para buscar productos</p>
-              <div className="mt-6 flex flex-wrap gap-2 justify-center text-xs text-slate-400">
-                <span className="flex items-center gap-1"><Keyboard className="w-3.5 h-3.5" /> Atajos:</span>
-                <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F8</kbd> +cantidad</span>
-                <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F9</kbd> −cantidad</span>
-                <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F7</kbd> verificar precio</span>
-                <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F6</kbd> lista de precios</span>
+
+        {/* Vista del catálogo: todos / favoritos / más vendidos */}
+        {!q && (
+          <div className="flex items-center gap-1.5 mb-2">
+            {[["todos", "Todos", LayoutGrid], ["favoritos", "Favoritos", Star], ["mas_vendidos", "Más vendidos", Flame]].map(([k, l, Ic]) => (
+              <button key={k} onClick={() => setVista(k)} data-testid={`pos-vista-${k}`}
+                className={`flex items-center gap-1.5 px-3 h-9 rounded-md text-sm font-medium transition-colors ${vista === k ? "bg-[#C1401E] text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                <Ic className="w-4 h-4" /> {l}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Filtro por categoría */}
+        {!q && vista !== "favoritos" && categorias.length > 0 && (
+          <div className="flex gap-1.5 mb-2 overflow-x-auto pb-1">
+            <button onClick={() => setCategoriaSel("")} data-testid="pos-cat-todas"
+              className={`shrink-0 px-3 h-8 rounded-md text-xs font-medium ${categoriaSel === "" ? "bg-ink text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"}`}>Todas</button>
+            {categorias.map((c) => (
+              <button key={c.nombre} onClick={() => setCategoriaSel(c.nombre)} data-testid={`pos-cat-${c.nombre}`}
+                className={`shrink-0 px-3 h-8 rounded-md text-xs font-medium ${categoriaSel === c.nombre ? "bg-ink text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                {c.nombre} <span className="opacity-60">({c.count})</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto card-soft">
+          {catLoading && !q ? (
+            <div className="h-full flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>
+          ) : q ? (
+            results.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-300 p-10">
+                <Package className="w-12 h-12 mb-2" /><p className="text-sm text-slate-400">Escribe para buscar productos</p>
+                <div className="mt-6 flex flex-wrap gap-2 justify-center text-xs text-slate-400">
+                  <span className="flex items-center gap-1"><Keyboard className="w-3.5 h-3.5" /> Atajos:</span>
+                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F8</kbd> +cantidad</span>
+                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F9</kbd> −cantidad</span>
+                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F7</kbd> verificar precio</span>
+                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F6</kbd> precios del producto</span>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
+                {results.map((p) => (
+                  <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} />
+                ))}
+              </div>
+            )
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
-              {results.map((p) => (
-                <button key={p.id} onClick={() => addToCart(p)} data-testid={`pos-prod-${p.codigo}`}
-                  className="text-left border border-slate-200 rounded-md p-3 hover:border-[#B95A3A] hover:bg-slate-50 transition-colors">
-                  <div className="text-xs text-slate-400">{p.codigo}</div>
-                  <div className="text-sm font-medium line-clamp-2 h-10">{p.descripcion}</div>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className="font-display font-bold text-[#B95A3A]">{money(priceOf(p))}</span>
-                    <Badge variant="outline" className="text-xs">{p.existencia}</Badge>
-                  </div>
-                </button>
-              ))}
-            </div>
+            catalogo.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-300 p-10">
+                {vista === "favoritos" ? <Star className="w-12 h-12 mb-2" /> : <Package className="w-12 h-12 mb-2" />}
+                <p className="text-sm text-slate-400">{vista === "favoritos" ? "Aún no tienes productos favoritos. Marca la estrella de un producto para guardarlo." : "Sin productos en esta vista."}</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
+                {catalogo.map((p) => (
+                  <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} mostrarSold={vista === "mas_vendidos"} />
+                ))}
+              </div>
+            )
           )}
         </div>
       </div>
 
       {/* Derecha: ticket */}
-      <div className="lg:w-[42%] flex flex-col bg-white border border-slate-200 rounded-md min-h-0">
+      <div className="lg:w-[42%] flex flex-col card-soft min-h-0">
         <div className="p-3 border-b border-slate-200 space-y-2">
           <div className="flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5 text-[#B95A3A]" />
+            <ShoppingCart className="w-5 h-5 text-[#C1401E]" />
             <span className="font-display font-bold">Ticket</span>
-            <Badge className="bg-[#B95A3A]/10 text-[#B95A3A] font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
+            <Badge className="bg-[#C1401E]/10 text-[#C1401E] font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
             <span className="ml-auto text-sm text-slate-400">{cart.length} items</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -376,19 +589,26 @@ export default function POS() {
               <SelectTrigger className="h-9" data-testid="pos-tipo-venta"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="directa">Venta directa</SelectItem><SelectItem value="cotizacion">Cotización</SelectItem></SelectContent>
             </Select>
-            <Select value={vendedorId} onValueChange={setVendedorId}>
-              <SelectTrigger className="h-9" data-testid="pos-vendedor"><SelectValue placeholder="Vendedor" /></SelectTrigger>
-              <SelectContent>{vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
-            </Select>
+            {can("venta.cambiar_operador") ? (
+              <Select value={vendedorId} onValueChange={setVendedorId}>
+                <SelectTrigger className="h-9" data-testid="pos-vendedor"><SelectValue placeholder="Vendedor" /></SelectTrigger>
+                <SelectContent>{vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
+              </Select>
+            ) : (
+              <div className="flex items-center h-9 px-3 rounded-md border border-slate-200 text-sm text-slate-600" data-testid="pos-vendedor">
+                <UserIcon className="w-4 h-4 mr-2 text-slate-400" />
+                <span className="truncate">{user?.name || "Operador"}</span>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <UserIcon className="w-3.5 h-3.5" />
             <span className="truncate">{clienteSel ? clienteSel.nombre : "Público General"}</span>
-            <Badge variant="outline" className="ml-auto text-[10px]" data-testid="pos-lista-badge">{Number(lista) === 6 ? "Precio mínimo" : listaNames[lista - 1]}</Badge>
-            {Number(descPct) > 0 && <Badge className="bg-[#B95A3A]/10 text-[#B95A3A] text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
+            <Badge variant="outline" className="ml-auto text-[10px]" data-testid="pos-lista-badge">{Number(lista) === listaNames.length + 1 ? "Precio mínimo" : listaNames[lista - 1]}</Badge>
+            {Number(descPct) > 0 && <Badge className="bg-[#C1401E]/10 text-[#C1401E] text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
           </div>
           {credInfo && (
-            <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2" data-testid="pos-credito-indicador">
+            <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" data-testid="pos-credito-indicador">
               <div className="flex items-center justify-between text-xs">
                 <span className="flex items-center gap-2 font-semibold text-slate-700">
                   <span className={`w-2.5 h-2.5 rounded-full ${credInfo.dot}`} data-testid="pos-credito-dot" /> {credInfo.label}
@@ -399,6 +619,12 @@ export default function POS() {
                 <span className="text-slate-500">Saldo: <b className={credInfo.sal > 0 ? "text-red-600" : "text-slate-700"}>{money(credInfo.sal)}</b></span>
                 <span className="text-slate-500">Disponible: <b className={credInfo.disp <= 0 ? "text-red-600" : "text-green-700"}>{money(credInfo.disp)}</b></span>
               </div>
+              {credInfo.sal > 0 && can("caja.entrada") && (
+                <Button size="sm" onClick={() => { setAbonoCli(clienteSel); setAbono({ monto: "", metodo: "efectivo", referencia: "" }); }}
+                  className="w-full mt-2 bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-abonar-credito">
+                  <HandCoins className="w-4 h-4 mr-1" /> Abonar a la cuenta ({money(credInfo.sal)})
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -407,14 +633,15 @@ export default function POS() {
           {cart.length === 0 && <div className="p-8 text-center text-slate-300 text-sm">Carrito vacío</div>}
           {cart.map((i) => (
             <div key={i.product_id} onClick={() => setSelected(i.product_id)}
-              className={`p-3 cursor-pointer ${selected === i.product_id ? "bg-[#B95A3A]/5 ring-1 ring-inset ring-[#B95A3A]/30" : ""}`} data-testid={`cart-item-${i.codigo}`}>
+              className={`p-3 cursor-pointer ${selected === i.product_id ? "bg-[#C1401E]/5 ring-1 ring-inset ring-[#C1401E]/30" : ""}`} data-testid={`cart-item-${i.codigo}`}>
               <div className="flex justify-between gap-2">
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{i.descripcion}</div>
                   <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
-                    className="text-xs text-slate-400 hover:text-[#B95A3A] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
+                    className="text-xs text-slate-400 hover:text-[#C1401E] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
                     {i.codigo} · <span className="underline decoration-dotted">{money(i.precio)}</span> <Tag className="w-3 h-3" />
                   </button>
+                  {selected === i.product_id && <kbd className="text-[9px] bg-slate-100 px-1 py-0.5 rounded text-slate-400">F6</kbd>}
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
               </div>
@@ -436,27 +663,34 @@ export default function POS() {
             <div className="grid grid-cols-3 gap-2">
               {[["contado", "Contado", Banknote], ["transferencia", "Transferencia", ArrowLeftRight], ["credito", "Crédito", CreditCard]].map(([k, l, Ic]) => (
                 <button key={k} onClick={() => setFormaPago(k)} data-testid={`forma-pago-${k}`}
-                  className={`flex flex-col items-center gap-1 py-2 rounded-md border text-xs font-medium transition-colors ${formaPago === k ? "border-[#B95A3A] bg-[#B95A3A]/5 text-[#B95A3A]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                  className={`flex flex-col items-center gap-1 py-2 rounded-md border text-xs font-medium transition-colors ${formaPago === k ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                   <Ic className="w-4 h-4" /> {l}
                 </button>
               ))}
             </div>
           )}
           <div className="flex items-center gap-2">
-            <Label className="text-xs text-slate-500 whitespace-nowrap">Desc. global $</Label>
-            <Input type="number" value={descGlobal} onChange={(e) => setDescGlobal(e.target.value)} className="h-8" data-testid="pos-desc-global" />
+            <Label className="text-xs text-slate-500 whitespace-nowrap">Desc. global</Label>
+            <div className="flex items-center rounded-md border border-slate-200 overflow-hidden shrink-0">
+              <button onClick={() => setDescMode("$")} data-testid="desc-mode-$"
+                className={`px-2 h-8 text-xs font-bold ${descMode === "$" ? "bg-ink text-white" : "text-slate-500 hover:bg-slate-100"}`}>$</button>
+              <button onClick={() => setDescMode("%")} data-testid="desc-mode-%"
+                className={`px-2 h-8 text-xs font-bold border-l border-slate-200 ${descMode === "%" ? "bg-ink text-white" : "text-slate-500 hover:bg-slate-100"}`}>%</button>
+            </div>
+            <Input type="number" value={descGlobal} onChange={(e) => setDescGlobal(e.target.value)} className="h-8" data-testid="pos-desc-global" placeholder={descMode === "%" ? "0 %" : "0.00"} />
             <button
               onClick={() => { if (can("config") || can("producto.precio")) setIncluyeIva((v) => !v); else toast.error("Sin permiso para cambiar IVA"); }}
-              className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#B95A3A] text-[#B95A3A] bg-[#B95A3A]/5" : "border-slate-200 text-slate-400"}`}
+              className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#C1401E] text-[#C1401E] bg-[#C1401E]/5" : "border-slate-200 text-slate-400"}`}
               data-testid="pos-incluye-iva">
-              <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#B95A3A] border-[#B95A3A]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
+              <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#C1401E] border-[#C1401E]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
               Precios incluyen IVA
             </button>
           </div>
           <div className="text-sm space-y-0.5">
             {!incluyeIva && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>}
             {!incluyeIva && <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>}
-            {totals.descPctAmount > 0 && <div className="flex justify-between text-[#B95A3A]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
+            {totals.descGlobalAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}</span><span>-{money(totals.descGlobalAmount)}</span></div>}
+            {totals.descPctAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
             <div className="flex justify-between font-display text-2xl font-black pt-1"><span>Total</span><span data-testid="pos-total">{money(totals.total)}</span></div>
           </div>
           {creditoBloqueado && (
@@ -466,7 +700,7 @@ export default function POS() {
           )}
           <div className="flex gap-2">
             <Button variant="outline" className="h-12" onClick={suspender} data-testid="pos-suspend"><PauseCircle className="w-5 h-5" /></Button>
-            <Button className="flex-1 h-12 bg-[#B95A3A] hover:bg-[#8B3A2A] text-base font-bold" onClick={openPay} disabled={creditoBloqueado} data-testid="pos-cobrar">
+            <Button className="flex-1 h-12 bg-[#C1401E] hover:bg-[#A03316] text-base font-bold" onClick={openPay} disabled={creditoBloqueado} data-testid="pos-cobrar">
               {tipoVenta === "cotizacion" ? <><FileText className="w-5 h-5 mr-2" /> Guardar cotización</> : <>Cobrar · {money(totals.total)}</>}
             </Button>
           </div>
@@ -496,7 +730,34 @@ export default function POS() {
               <div className="flex justify-between text-lg font-bold"><span>Cambio</span><span data-testid="pos-cambio" className="text-green-600">{money(cambio)}</span></div>
             </div>
           )}
-          <DialogFooter><Button variant="outline" onClick={() => setPayOpen(false)}>Cancelar</Button><Button onClick={confirmar} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="confirmar-venta">Confirmar venta</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setPayOpen(false)}>Cancelar</Button><Button onClick={confirmar} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirmar-venta">Confirmar venta</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Inventario insuficiente: autorización (solo rol con permiso) */}
+      <Dialog open={!!invOverride} onOpenChange={(o) => { if (!o) setInvOverride(null); }}>
+        <DialogContent data-testid="inv-override-dialog">
+          <DialogHeader><DialogTitle className="font-display">Inventario insuficiente</DialogTitle></DialogHeader>
+          <div className="text-sm space-y-2">
+            <div className="rounded-lg bg-amber-50 border border-amber-200 p-3 text-amber-800">
+              Los siguientes productos tienen existencia insuficiente:
+            </div>
+            <ul className="text-slate-600 list-disc pl-5 text-sm">
+              {(invOverride || []).map((i) => (
+                <li key={i.product_id} data-testid="inv-override-item">
+                  <b>{i.descripcion}</b> — disp {Number(i.existencia ?? 0)} · pedido {Number(i.cantidad)}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-slate-500">Si continúas, el inventario quedará <b>negativo</b>. Esta acción queda registrada con tu usuario y un motivo.</p>
+            <Input placeholder="Motivo de la autorización (obligatorio)" value={invReason}
+              onChange={(e) => setInvReason(e.target.value)} data-testid="inv-override-reason" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setInvOverride(null); setInvReason(""); }}>Cancelar</Button>
+            <Button disabled={!invReason.trim()} onClick={() => { setInvOverride(null); setPayOpen(true); }}
+              className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="inv-override-continue">Continuar</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -507,13 +768,16 @@ export default function POS() {
           {linePrice && (
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
-                {(linePrice.precios || []).map((pr, i) => (
-                  <button key={i} onClick={() => setLinePrecio(linePrice, pr.precio_con_iva)} data-testid={`line-precio-${i + 1}`}
-                    className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-[#B95A3A] ${Math.abs(linePrice.precio - pr.precio_con_iva) < 0.001 ? "border-[#B95A3A] bg-[#B95A3A]/5" : "border-slate-200"}`}>
-                    <span className="text-sm text-slate-500">{listaNames[i] || `Precio ${i + 1}`}</span>
-                    <span className="font-display font-bold text-[#B95A3A]">{money(pr.precio_con_iva)}</span>
-                  </button>
-                ))}
+                {listaNames.map((_, i) => {
+                  const pr = priceFromList(linePrice, i + 1);
+                  return (
+                    <button key={i} onClick={() => setLinePrecio(linePrice, pr)} data-testid={`line-precio-${i + 1}`}
+                      className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-[#C1401E] ${Math.abs(linePrice.precio - pr) < 0.001 ? "border-[#C1401E] bg-[#C1401E]/5" : "border-slate-200"}`}>
+                      <span className="text-sm text-slate-500">{listaNames[i] || `Precio ${i + 1}`}</span>
+                      <span className="font-display font-bold text-[#C1401E]">{money(pr)}</span>
+                    </button>
+                  );
+                })}
                 <button onClick={() => setLinePrecio(linePrice, linePrice.precio_minimo)} data-testid="line-precio-min"
                   className="flex items-center justify-between border rounded-md px-3 py-2 hover:border-amber-500 border-slate-200">
                   <span className="text-sm text-slate-500">Precio mínimo</span>
@@ -525,7 +789,7 @@ export default function POS() {
                 {can("producto.precio") ? (
                   <div className="flex gap-2 mt-1">
                     <Input type="number" value={libreVal} onChange={(e) => setLibreVal(e.target.value)} placeholder="0.00" data-testid="line-precio-libre-input" />
-                    <Button onClick={() => setLinePrecio(linePrice, libreVal)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="line-precio-libre-apply">Aplicar</Button>
+                    <Button onClick={() => setLinePrecio(linePrice, libreVal)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="line-precio-libre-apply">Aplicar</Button>
                   </div>
                 ) : <p className="text-xs text-slate-400 mt-1">No tienes permiso para capturar precio libre.</p>}
               </div>
@@ -548,8 +812,8 @@ export default function POS() {
                 <div className="flex justify-between"><div className="font-medium text-sm">{p.descripcion}</div><Badge variant="outline">Exist: {p.existencia}</Badge></div>
                 <div className="text-xs text-slate-400 mb-2">{p.codigo}</div>
                 <div className="grid grid-cols-3 gap-2 text-xs">
-                  {(p.precios || []).map((pr, i) => (
-                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-[#B95A3A]">{money(pr.precio_con_iva)}</div></div>
+                  {listaNames.map((_, i) => (
+                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-[#C1401E]">{money(calcListPrice(p, i + 1, listasPct))}</div></div>
                   ))}
                 </div>
               </div>
@@ -568,7 +832,7 @@ export default function POS() {
             {suspended.map((s) => (
               <div key={s.id} className="flex items-center justify-between border border-slate-200 rounded-md p-3">
                 <div><div className="text-sm font-medium">{s.payload.items.length} productos</div><div className="text-xs text-slate-400">{s.fecha?.slice(0, 16).replace("T", " ")}</div></div>
-                <Button size="sm" onClick={() => recuperar(s)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]"><PlayCircle className="w-4 h-4 mr-1" /> Recuperar</Button>
+                <Button size="sm" onClick={() => recuperar(s)} className="bg-[#C1401E] hover:bg-[#A03316]"><PlayCircle className="w-4 h-4 mr-1" /> Recuperar</Button>
               </div>
             ))}
           </div>
@@ -582,6 +846,7 @@ export default function POS() {
           {ticket && (
             <div id="thermal-ticket" className="thermal font-mono text-[12px] text-black bg-white p-2 mx-auto">
               <div className="text-center">
+                {settings.logo_url && <img src={fileUrl(settings.logo_url)} alt="logo" className="h-12 mx-auto mb-1 object-contain" />}
                 <div className="font-bold text-[14px]">{settings.empresa_nombre || "Grupo RYSA"}</div>
                 {settings.direccion && <div>{settings.direccion}</div>}
                 {(settings.ciudad || settings.estado) && <div>{[settings.ciudad, settings.estado].filter(Boolean).join(", ")}</div>}
@@ -609,6 +874,13 @@ export default function POS() {
               {ticket.tipo_venta === "directa" && ticket.condicion === "contado" && (<><div className="flex justify-between mt-1"><span>Pagado</span><span>{money((ticket.pagos || []).reduce((s, p) => s + p.monto, 0))}</span></div><div className="flex justify-between"><span>Cambio</span><span>{money(ticket.cambio)}</span></div></>)}
               {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CRÉDITO ** Saldo: {money(ticket.saldo)}</div>}
               <div className="border-t border-dashed border-black my-1" />
+              {ticket.id && (
+                <div className="text-center">
+                  <img src={`${process.env.REACT_APP_BACKEND_URL}/api/sales/${ticket.id}/qr?destino=${encodeURIComponent(`${window.location.origin}/verificar/${ticket.id}`)}`} alt="QR de verificación"
+                    className="mx-auto w-24 h-24" data-testid="ticket-qr" />
+                  <div className="text-[9px] text-slate-500">{window.location.origin}/verificar/{ticket.id}</div>
+                </div>
+              )}
               <div className="text-center text-[11px]">¡Gracias por su compra!</div>
             </div>
           )}
@@ -621,7 +893,44 @@ export default function POS() {
               </Button>
             </div>
           </div>
-          <DialogFooter><Button onClick={() => window.print()} variant="outline" data-testid="ticket-print"><Printer className="w-4 h-4 mr-1" /> Imprimir</Button><Button onClick={() => setTicket(null)} className="bg-[#B95A3A] hover:bg-[#8B3A2A]" data-testid="ticket-nueva">Nueva venta</Button></DialogFooter>
+          <DialogFooter><Button onClick={() => window.print()} variant="outline" data-testid="ticket-print"><Printer className="w-4 h-4 mr-1" /> Imprimir</Button><Button onClick={() => setTicket(null)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="ticket-nueva">Nueva venta</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Abono directo a crédito del cliente desde el POS */}
+      <Dialog open={!!abonoCli} onOpenChange={(o) => !o && setAbonoCli(null)}>
+        <DialogContent data-testid="pos-abono-dialog">
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> Abonar a cuenta · {abonoCli?.nombre}</DialogTitle></DialogHeader>
+          {abonoCli && (
+            <div className="space-y-4">
+              <div className="bg-slate-50 rounded-md p-3 flex items-center justify-between">
+                <div><div className="text-xs text-slate-400">{abonoCli.codigo}{abonoCli.rfc ? ` · ${abonoCli.rfc}` : ""}</div><div className="font-semibold">{abonoCli.nombre}</div></div>
+                <div className="text-right"><div className="text-xs text-slate-400">Saldo actual</div><div className="font-display font-bold text-red-600">{money(abonoCli.saldo)}</div></div>
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Monto del abono</Label>
+                <div className="flex gap-2 mt-1">
+                  <Input type="number" value={abono.monto} onChange={(e) => setAbono((s) => ({ ...s, monto: e.target.value }))} placeholder="0.00" data-testid="pos-abono-monto" />
+                  <Button variant="outline" onClick={() => setAbono((s) => ({ ...s, monto: String(abonoCli.saldo) }))} data-testid="pos-abono-saldo-total">Saldo total</Button>
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Método de pago</Label>
+                <Select value={abono.metodo} onValueChange={(v) => setAbono((s) => ({ ...s, metodo: v }))}>
+                  <SelectTrigger className="mt-1" data-testid="pos-abono-metodo"><SelectValue /></SelectTrigger>
+                  <SelectContent>{METODOS.map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}</SelectContent>
+                </Select>
+                {abono.metodo === "efectivo" && <p className="text-[11px] text-slate-400 mt-1">El efectivo entrará a tu caja abierta (si tienes una).</p>}
+              </div>
+              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Referencia</Label>
+                <Input value={abono.referencia} onChange={(e) => setAbono((s) => ({ ...s, referencia: e.target.value }))} className="mt-1" placeholder="No. de recibo / operación" data-testid="pos-abono-referencia" /></div>
+              <p className="text-xs text-slate-400">El abono se aplica automáticamente a las ventas a crédito más antiguas primero (FIFO).</p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAbonoCli(null)}>Cancelar</Button>
+            <Button onClick={guardarAbono} disabled={abonoSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-abono-guardar">{abonoSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
