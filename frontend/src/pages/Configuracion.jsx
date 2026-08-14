@@ -48,6 +48,39 @@ export default function Configuracion() {
   const delEl = (i) => setS((x) => ({ ...x, ticket_config: { ...(x.ticket_config || {}), elements: (x.ticket_config?.elements || []).filter((_, idx) => idx !== i) } }));
   const setElements = (v) => setS((x) => ({ ...x, ticket_config: { ...(x.ticket_config || {}), elements: v } }));
 
+  // --- Diseño predeterminado de ticket (plantilla de bloques) ---
+  const aplicarDisenoPredeterminado = () => {
+    setS((x) => ({
+      ...x,
+      ticket_config: {
+        ...(x.ticket_config || {}), tamano: (x.ticket_config || {}).tamano || "80mm",
+        encabezado: (x.ticket_config || {}).encabezado || "",
+        pie: (x.ticket_config || {}).pie || "¡Gracias por su compra!",
+        mostrar_rfc: true, mostrar_direccion: true, mostrar_telefono: true, mostrar_qr: true,
+        elements: [
+          { tipo: "logo", align: "center" },
+          { tipo: "empresa", align: "center", bold: true, font_size: 11 },
+          { tipo: "campo", contenido: "RFC: {empresa}", align: "center" },
+          { tipo: "separador", align: "left" },
+          { tipo: "folio", align: "left", bold: true },
+          { tipo: "fecha", align: "left" },
+          { tipo: "cliente", align: "left" },
+          { tipo: "atendio", align: "left" },
+          { tipo: "separador", align: "left" },
+          { tipo: "items", align: "left" },
+          { tipo: "separador", align: "left" },
+          { tipo: "subtotal", align: "right" },
+          { tipo: "iva", align: "right" },
+          { tipo: "total", align: "center", bold: true, font_size: 12 },
+          { tipo: "separador", align: "left" },
+          { tipo: "pie", contenido: "¡Gracias por su compra!", align: "center" },
+          { tipo: "qr", contenido: "{verificar}", align: "center", qr_size: 18 },
+        ],
+      },
+    }));
+    toast.success("Diseño predeterminado aplicado. Revísalo y guarda.");
+  };
+
   const save = async () => {
     setSaving(true);
     try {
@@ -210,10 +243,14 @@ export default function Configuracion() {
               <div className="border-t pt-4">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs uppercase tracking-wider text-slate-500">Editor avanzado (bloques)</Label>
-                  <Button variant="outline" size="sm" onClick={() => setElements(null)} data-testid="cfg-elt-default"
-                    className="h-7 text-[11px]">Usar diseño estándar</Button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={aplicarDisenoPredeterminado} data-testid="cfg-elt-default-design"
+                      className="h-7 text-[11px]">Aplicar diseño predeterminado</Button>
+                    <Button variant="outline" size="sm" onClick={() => setElements(null)} data-testid="cfg-elt-default"
+                      className="h-7 text-[11px]">Usar diseño estándar</Button>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-1">Ordena los bloques: cada uno con contenido, alineación, negrita y tamaño. Incluye logo y código QR.</p>
+                <p className="text-[11px] text-slate-400 mt-1">"Aplicar diseño predeterminado" carga una plantilla completa editable (logo, datos, items, total y QR). "Usar diseño estándar" reemplaza los bloques por los valores por defecto.</p>
                 <div className="space-y-2 mt-3">
                   {elt.map((blk, i) => (
                     <div key={i} className="border border-slate-200 rounded-lg p-2 flex flex-col gap-2">

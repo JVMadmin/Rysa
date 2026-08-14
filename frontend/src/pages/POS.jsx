@@ -464,43 +464,179 @@ export default function POS({ windowId, windowLabel }) {
 
   return (
     <div className="flex flex-col lg:flex-row gap-4 -m-6 p-6 h-[calc(100vh-4rem)]" data-testid="pos-page">
-      {/* Izquierda */}
-      <div className="lg:w-[58%] flex flex-col min-h-0">
-        {/* Cliente (ancho completo, con búsqueda) + Lista de precios */}
-        <div className="flex flex-col sm:flex-row gap-2 mb-3">
-          <div className="relative flex-1">
-            <UserIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input
-              value={clientQuery}
-              onChange={(e) => { setClientQuery(e.target.value); setClientOpen(true); if (!e.target.value) setClienteId(""); }}
-              onFocus={() => setClientOpen(true)}
-              placeholder="Cliente: escribe para buscar por nombre, clave o RFC..."
-              className="pl-10 h-12" data-testid="pos-cliente-search" />
-            {clientOpen && filteredClients.length > 0 && (
-              <div className="absolute z-30 mt-1 w-full card-soft shadow-lg max-h-64 overflow-y-auto" data-testid="pos-cliente-list">
-                {filteredClients.map((c) => (
-                  <button key={c.id} onClick={() => pickClient(c)} data-testid={`pos-cliente-opt-${c.codigo}`}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between">
-                    <span className="truncate"><b className="text-[#C1401E] mr-1">{c.codigo}</b> {c.nombre}
-                      {c.rfc && <span className="text-slate-400 font-mono text-xs ml-1">· {c.rfc}</span>}
-                    </span>
-                    <span className="flex items-center gap-1.5 shrink-0">
-                      {c.rfc && <span className="font-mono text-[10px] text-slate-400">{c.rfc}</span>}
-                      {Number(c.descuento_permanente) > 0 && <Badge variant="outline" className="text-[10px] ml-2">-{c.descuento_permanente}%</Badge>}
-                    </span>
+      {/* Izquierda: Cliente (sobre el ticket) + Ticket/Carrito */}
+      <div className="lg:w-[42%] flex flex-col min-h-0">
+        {/* Cliente */}
+        <div className="flex flex-col sm:flex-row gap-2 mb-3 shrink-0">
+        <div className="relative flex-1">
+          <UserIcon className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input
+            value={clientQuery}
+            onChange={(e) => { setClientQuery(e.target.value); setClientOpen(true); if (!e.target.value) setClienteId(""); }}
+            onFocus={() => setClientOpen(true)}
+            placeholder="Cliente: escribe para buscar por nombre, clave o RFC..."
+            className="pl-10 h-12" data-testid="pos-cliente-search" />
+          {clientOpen && filteredClients.length > 0 && (
+            <div className="absolute z-30 mt-1 w-full card-soft shadow-lg max-h-64 overflow-y-auto" data-testid="pos-cliente-list">
+              {filteredClients.map((c) => (
+                <button key={c.id} onClick={() => pickClient(c)} data-testid={`pos-cliente-opt-${c.codigo}`}
+                  className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between">
+                  <span className="truncate"><b className="text-[#C1401E] mr-1">{c.codigo}</b> {c.nombre}
+                    {c.rfc && <span className="text-slate-400 font-mono text-xs ml-1">· {c.rfc}</span>}
+                  </span>
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    {c.rfc && <span className="font-mono text-[10px] text-slate-400">{c.rfc}</span>}
+                    {Number(c.descuento_permanente) > 0 && <Badge variant="outline" className="text-[10px] ml-2">-{c.descuento_permanente}%</Badge>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <Select value={String(lista)} onValueChange={(v) => applyLista(Number(v))}>
+          <SelectTrigger className="h-12 sm:w-44" data-testid="pos-lista"><Tags className="w-4 h-4 mr-1 text-slate-400" /><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {listaNames.map((n, i) => <SelectItem key={i} value={String(i + 1)}>{n}</SelectItem>)}
+            <SelectItem value={String(listaNames.length + 1)}>Precio mínimo</SelectItem>
+          </SelectContent>
+          </Select>
+        </div>
+
+        {/* Ticket / Carrito */}
+        <div className="flex flex-col card-soft min-h-0 flex-1">
+          <div className="p-3 border-b border-slate-200 space-y-2">
+            <div className="flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-[#C1401E]" />
+              <span className="font-display font-bold">Ticket</span>
+              <Badge className="bg-[#C1401E]/10 text-[#C1401E] font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
+              <span className="ml-auto text-sm text-slate-400">{cart.length} items</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Select value={tipoVenta} onValueChange={setTipoVenta}>
+                <SelectTrigger className="h-9" data-testid="pos-tipo-venta"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="directa">Venta directa</SelectItem><SelectItem value="cotizacion">Cotización</SelectItem></SelectContent>
+              </Select>
+              {can("venta.cambiar_operador") ? (
+                <Select value={vendedorId} onValueChange={setVendedorId}>
+                  <SelectTrigger className="h-9" data-testid="pos-vendedor"><SelectValue placeholder="Vendedor" /></SelectTrigger>
+                  <SelectContent>{vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
+                </Select>
+              ) : (
+                <div className="flex items-center h-9 px-3 rounded-md border border-slate-200 text-sm text-slate-600" data-testid="pos-vendedor">
+                  <UserIcon className="w-4 h-4 mr-2 text-slate-400" />
+                  <span className="truncate">{user?.name || "Operador"}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <UserIcon className="w-3.5 h-3.5" />
+              <span className="truncate">{clienteSel ? clienteSel.nombre : "Público General"}</span>
+              <Badge variant="outline" className="ml-auto text-[10px]" data-testid="pos-lista-badge">{Number(lista) === listaNames.length + 1 ? "Precio mínimo" : listaNames[lista - 1]}</Badge>
+              {Number(descPct) > 0 && <Badge className="bg-[#C1401E]/10 text-[#C1401E] text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
+            </div>
+            {credInfo && (
+              <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" data-testid="pos-credito-indicador">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-2 font-semibold text-slate-700">
+                    <span className={`w-2.5 h-2.5 rounded-full ${credInfo.dot}`} data-testid="pos-credito-dot" /> {credInfo.label}
+                  </span>
+                  <span className="text-slate-400">Límite {money(credInfo.lim)}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs mt-1">
+                  <span className="text-slate-500">Saldo: <b className={credInfo.sal > 0 ? "text-red-600" : "text-slate-700"}>{money(credInfo.sal)}</b></span>
+                  <span className="text-slate-500">Disponible: <b className={credInfo.disp <= 0 ? "text-red-600" : "text-green-700"}>{money(credInfo.disp)}</b></span>
+                </div>
+                {credInfo.sal > 0 && can("caja.entrada") && (
+                  <Button size="sm" onClick={() => { setAbonoCli(clienteSel); setAbono({ monto: "", metodo: "efectivo", referencia: "" }); }}
+                    className="w-full mt-2 bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-abonar-credito">
+                    <HandCoins className="w-4 h-4 mr-1" /> Abonar a la cuenta ({money(credInfo.sal)})
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+            {cart.length === 0 && <div className="p-8 text-center text-slate-300 text-sm">Carrito vacío</div>}
+            {cart.map((i) => (
+              <div key={i.product_id} onClick={() => setSelected(i.product_id)}
+                className={`p-3 cursor-pointer ${selected === i.product_id ? "bg-[#C1401E]/5 ring-1 ring-inset ring-[#C1401E]/30" : ""}`} data-testid={`cart-item-${i.codigo}`}>
+                <div className="flex justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{i.descripcion}</div>
+                    <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
+                      className="text-xs text-slate-400 hover:text-[#C1401E] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
+                      {i.codigo} · <span className="underline decoration-dotted">{money(i.precio)}</span> <Tag className="w-3 h-3" />
+                    </button>
+                    {selected === i.product_id && <kbd className="text-[9px] bg-slate-100 px-1 py-0.5 rounded text-slate-400">F6</kbd>}
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                </div>
+                <div className="flex items-center gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center border border-slate-200 rounded">
+                    <button onClick={() => updateQty(i.product_id, -1)} className="px-2 py-1 hover:bg-slate-100"><Minus className="w-3 h-3" /></button>
+                    <Input value={i.cantidad} onChange={(e) => setQty(i.product_id, e.target.value)} className="w-14 h-8 border-0 text-center p-0" data-testid={`cart-qty-${i.codigo}`} />
+                    <button onClick={() => updateQty(i.product_id, 1)} className="px-2 py-1 hover:bg-slate-100"><Plus className="w-3 h-3" /></button>
+                  </div>
+                  <Input type="number" value={i.descuento} onChange={(e) => setLineDisc(i.product_id, e.target.value)} placeholder="Desc $" className="w-20 h-8" title="Descuento" />
+                  <span className="ml-auto font-semibold">{money(i.cantidad * i.precio - (i.descuento || 0))}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="p-3 border-t border-slate-200 space-y-2">
+            {tipoVenta === "directa" && (
+              <div className="grid grid-cols-3 gap-2">
+                {[["contado", "Contado", Banknote], ["transferencia", "Transferencia", ArrowLeftRight], ["credito", "Crédito", CreditCard]].map(([k, l, Ic]) => (
+                  <button key={k} onClick={() => setFormaPago(k)} data-testid={`forma-pago-${k}`}
+                    className={`flex flex-col items-center gap-1 py-2 rounded-md border text-xs font-medium transition-colors ${formaPago === k ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                    <Ic className="w-4 h-4" /> {l}
                   </button>
                 ))}
               </div>
             )}
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-slate-500 whitespace-nowrap">Desc. global</Label>
+              <div className="flex items-center rounded-md border border-slate-200 overflow-hidden shrink-0">
+                <button onClick={() => setDescMode("$")} data-testid="desc-mode-$"
+                  className={`px-2 h-8 text-xs font-bold ${descMode === "$" ? "bg-ink text-white" : "text-slate-500 hover:bg-slate-100"}`}>$</button>
+                <button onClick={() => setDescMode("%")} data-testid="desc-mode-%"
+                  className={`px-2 h-8 text-xs font-bold border-l border-slate-200 ${descMode === "%" ? "bg-ink text-white" : "text-slate-500 hover:bg-slate-100"}`}>%</button>
+              </div>
+              <Input type="number" value={descGlobal} onChange={(e) => setDescGlobal(e.target.value)} className="h-8" data-testid="pos-desc-global" placeholder={descMode === "%" ? "0 %" : "0.00"} />
+              <button
+                onClick={() => { if (can("config") || can("producto.precio")) setIncluyeIva((v) => !v); else toast.error("Sin permiso para cambiar IVA"); }}
+                className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#C1401E] text-[#C1401E] bg-[#C1401E]/5" : "border-slate-200 text-slate-400"}`}
+                data-testid="pos-incluye-iva">
+                <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#C1401E] border-[#C1401E]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
+                Precios incluyen IVA
+              </button>
+            </div>
+            <div className="text-sm space-y-0.5">
+              {!incluyeIva && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>}
+              {!incluyeIva && <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>}
+              {totals.descGlobalAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}</span><span>-{money(totals.descGlobalAmount)}</span></div>}
+              {totals.descPctAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
+              <div className="flex justify-between font-display text-2xl font-black pt-1"><span>Total</span><span data-testid="pos-total">{money(totals.total)}</span></div>
+            </div>
+            {creditoBloqueado && (
+              <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2" data-testid="pos-credito-bloqueo">
+                <CreditCard className="w-4 h-4" /> Este cliente no tiene crédito habilitado. Usa contado o habilita su crédito en Clientes.
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" className="h-12" onClick={suspender} data-testid="pos-suspend"><PauseCircle className="w-5 h-5" /></Button>
+              <Button className="flex-1 h-12 bg-[#C1401E] hover:bg-[#A03316] text-base font-bold" onClick={openPay} disabled={creditoBloqueado} data-testid="pos-cobrar">
+                {tipoVenta === "cotizacion" ? <><FileText className="w-5 h-5 mr-2" /> Guardar cotización</> : <>Cobrar · {money(totals.total)}</>}
+              </Button>
+            </div>
           </div>
-          <Select value={String(lista)} onValueChange={(v) => applyLista(Number(v))}>
-            <SelectTrigger className="h-12 sm:w-44" data-testid="pos-lista"><Tags className="w-4 h-4 mr-1 text-slate-400" /><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {listaNames.map((n, i) => <SelectItem key={i} value={String(i + 1)}>{n}</SelectItem>)}
-              <SelectItem value={String(listaNames.length + 1)}>Precio mínimo</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
+      </div>
+
+      {/* Derecha: Productos / Catálogo */}
+      <div className="lg:w-[58%] flex flex-col min-h-0">
         <div className="flex items-center gap-2 mb-3">
           <div className="relative flex-1">
             <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -572,138 +708,6 @@ export default function POS({ windowId, windowLabel }) {
               </div>
             )
           )}
-        </div>
-      </div>
-
-      {/* Derecha: ticket */}
-      <div className="lg:w-[42%] flex flex-col card-soft min-h-0">
-        <div className="p-3 border-b border-slate-200 space-y-2">
-          <div className="flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5 text-[#C1401E]" />
-            <span className="font-display font-bold">Ticket</span>
-            <Badge className="bg-[#C1401E]/10 text-[#C1401E] font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
-            <span className="ml-auto text-sm text-slate-400">{cart.length} items</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Select value={tipoVenta} onValueChange={setTipoVenta}>
-              <SelectTrigger className="h-9" data-testid="pos-tipo-venta"><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="directa">Venta directa</SelectItem><SelectItem value="cotizacion">Cotización</SelectItem></SelectContent>
-            </Select>
-            {can("venta.cambiar_operador") ? (
-              <Select value={vendedorId} onValueChange={setVendedorId}>
-                <SelectTrigger className="h-9" data-testid="pos-vendedor"><SelectValue placeholder="Vendedor" /></SelectTrigger>
-                <SelectContent>{vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
-              </Select>
-            ) : (
-              <div className="flex items-center h-9 px-3 rounded-md border border-slate-200 text-sm text-slate-600" data-testid="pos-vendedor">
-                <UserIcon className="w-4 h-4 mr-2 text-slate-400" />
-                <span className="truncate">{user?.name || "Operador"}</span>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <UserIcon className="w-3.5 h-3.5" />
-            <span className="truncate">{clienteSel ? clienteSel.nombre : "Público General"}</span>
-            <Badge variant="outline" className="ml-auto text-[10px]" data-testid="pos-lista-badge">{Number(lista) === listaNames.length + 1 ? "Precio mínimo" : listaNames[lista - 1]}</Badge>
-            {Number(descPct) > 0 && <Badge className="bg-[#C1401E]/10 text-[#C1401E] text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
-          </div>
-          {credInfo && (
-            <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" data-testid="pos-credito-indicador">
-              <div className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-2 font-semibold text-slate-700">
-                  <span className={`w-2.5 h-2.5 rounded-full ${credInfo.dot}`} data-testid="pos-credito-dot" /> {credInfo.label}
-                </span>
-                <span className="text-slate-400">Límite {money(credInfo.lim)}</span>
-              </div>
-              <div className="flex items-center justify-between text-xs mt-1">
-                <span className="text-slate-500">Saldo: <b className={credInfo.sal > 0 ? "text-red-600" : "text-slate-700"}>{money(credInfo.sal)}</b></span>
-                <span className="text-slate-500">Disponible: <b className={credInfo.disp <= 0 ? "text-red-600" : "text-green-700"}>{money(credInfo.disp)}</b></span>
-              </div>
-              {credInfo.sal > 0 && can("caja.entrada") && (
-                <Button size="sm" onClick={() => { setAbonoCli(clienteSel); setAbono({ monto: "", metodo: "efectivo", referencia: "" }); }}
-                  className="w-full mt-2 bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-abonar-credito">
-                  <HandCoins className="w-4 h-4 mr-1" /> Abonar a la cuenta ({money(credInfo.sal)})
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-          {cart.length === 0 && <div className="p-8 text-center text-slate-300 text-sm">Carrito vacío</div>}
-          {cart.map((i) => (
-            <div key={i.product_id} onClick={() => setSelected(i.product_id)}
-              className={`p-3 cursor-pointer ${selected === i.product_id ? "bg-[#C1401E]/5 ring-1 ring-inset ring-[#C1401E]/30" : ""}`} data-testid={`cart-item-${i.codigo}`}>
-              <div className="flex justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{i.descripcion}</div>
-                  <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
-                    className="text-xs text-slate-400 hover:text-[#C1401E] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
-                    {i.codigo} · <span className="underline decoration-dotted">{money(i.precio)}</span> <Tag className="w-3 h-3" />
-                  </button>
-                  {selected === i.product_id && <kbd className="text-[9px] bg-slate-100 px-1 py-0.5 rounded text-slate-400">F6</kbd>}
-                </div>
-                <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
-              </div>
-              <div className="flex items-center gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
-                <div className="flex items-center border border-slate-200 rounded">
-                  <button onClick={() => updateQty(i.product_id, -1)} className="px-2 py-1 hover:bg-slate-100"><Minus className="w-3 h-3" /></button>
-                  <Input value={i.cantidad} onChange={(e) => setQty(i.product_id, e.target.value)} className="w-14 h-8 border-0 text-center p-0" data-testid={`cart-qty-${i.codigo}`} />
-                  <button onClick={() => updateQty(i.product_id, 1)} className="px-2 py-1 hover:bg-slate-100"><Plus className="w-3 h-3" /></button>
-                </div>
-                <Input type="number" value={i.descuento} onChange={(e) => setLineDisc(i.product_id, e.target.value)} placeholder="Desc $" className="w-20 h-8" title="Descuento" />
-                <span className="ml-auto font-semibold">{money(i.cantidad * i.precio - (i.descuento || 0))}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="p-3 border-t border-slate-200 space-y-2">
-          {tipoVenta === "directa" && (
-            <div className="grid grid-cols-3 gap-2">
-              {[["contado", "Contado", Banknote], ["transferencia", "Transferencia", ArrowLeftRight], ["credito", "Crédito", CreditCard]].map(([k, l, Ic]) => (
-                <button key={k} onClick={() => setFormaPago(k)} data-testid={`forma-pago-${k}`}
-                  className={`flex flex-col items-center gap-1 py-2 rounded-md border text-xs font-medium transition-colors ${formaPago === k ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-                  <Ic className="w-4 h-4" /> {l}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-slate-500 whitespace-nowrap">Desc. global</Label>
-            <div className="flex items-center rounded-md border border-slate-200 overflow-hidden shrink-0">
-              <button onClick={() => setDescMode("$")} data-testid="desc-mode-$"
-                className={`px-2 h-8 text-xs font-bold ${descMode === "$" ? "bg-ink text-white" : "text-slate-500 hover:bg-slate-100"}`}>$</button>
-              <button onClick={() => setDescMode("%")} data-testid="desc-mode-%"
-                className={`px-2 h-8 text-xs font-bold border-l border-slate-200 ${descMode === "%" ? "bg-ink text-white" : "text-slate-500 hover:bg-slate-100"}`}>%</button>
-            </div>
-            <Input type="number" value={descGlobal} onChange={(e) => setDescGlobal(e.target.value)} className="h-8" data-testid="pos-desc-global" placeholder={descMode === "%" ? "0 %" : "0.00"} />
-            <button
-              onClick={() => { if (can("config") || can("producto.precio")) setIncluyeIva((v) => !v); else toast.error("Sin permiso para cambiar IVA"); }}
-              className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#C1401E] text-[#C1401E] bg-[#C1401E]/5" : "border-slate-200 text-slate-400"}`}
-              data-testid="pos-incluye-iva">
-              <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#C1401E] border-[#C1401E]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
-              Precios incluyen IVA
-            </button>
-          </div>
-          <div className="text-sm space-y-0.5">
-            {!incluyeIva && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>}
-            {!incluyeIva && <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>}
-            {totals.descGlobalAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}</span><span>-{money(totals.descGlobalAmount)}</span></div>}
-            {totals.descPctAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
-            <div className="flex justify-between font-display text-2xl font-black pt-1"><span>Total</span><span data-testid="pos-total">{money(totals.total)}</span></div>
-          </div>
-          {creditoBloqueado && (
-            <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2" data-testid="pos-credito-bloqueo">
-              <CreditCard className="w-4 h-4" /> Este cliente no tiene crédito habilitado. Usa contado o habilita su crédito en Clientes.
-            </div>
-          )}
-          <div className="flex gap-2">
-            <Button variant="outline" className="h-12" onClick={suspender} data-testid="pos-suspend"><PauseCircle className="w-5 h-5" /></Button>
-            <Button className="flex-1 h-12 bg-[#C1401E] hover:bg-[#A03316] text-base font-bold" onClick={openPay} disabled={creditoBloqueado} data-testid="pos-cobrar">
-              {tipoVenta === "cotizacion" ? <><FileText className="w-5 h-5 mr-2" /> Guardar cotización</> : <>Cobrar · {money(totals.total)}</>}
-            </Button>
-          </div>
         </div>
       </div>
 
