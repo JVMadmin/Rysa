@@ -64,8 +64,18 @@ def build_index_ddl(collection: str) -> str:
 
 
 async def _ensure_table(collection: str):
+    if collection in DDL_CACHE:
+        return
     eng = get_engine()
-    async with eng.connect() as conn:
+    # Advisory lock de transacción: serializa la migración de esquema de cada
+    # colección entre todas las conexiones/procesos. Sin esto, dos peticiones
+    # concurrentes bloquean la misma tabla en modo SHARE (CREATE INDEX) y luego
+    # ambas intentan subir a AccessExclusiveLock (ALTER TABLE), causando
+    # deadlock (share->exclusive upgrade).
+    async with eng.begin() as conn:
+        await conn.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+            {"k": f"rysa_ddl:{collection}"})
         await conn.execute(text(build_create_table(collection)))
         await conn.execute(text(build_index_ddl(collection)))
         # Migración idempotente: agregar columnas NUMERIC faltantes a tablas
@@ -73,7 +83,6 @@ async def _ensure_table(collection: str):
         for c in _typed_cols(collection):
             await conn.execute(text(
                 f'ALTER TABLE {_quote(collection)} ADD COLUMN IF NOT EXISTS "{c}" numeric'))
-        await conn.commit()
     DDL_CACHE.add(collection)
 
 
