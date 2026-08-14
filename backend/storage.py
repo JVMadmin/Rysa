@@ -89,8 +89,11 @@ def _elem_visible(el, default=True):
 
 
 def _build_default_elements(tc, settings, sale):
-    """Bloques por defecto (compatibilidad con el diseño previo)."""
-    els = [{"tipo": "empresa", "align": "center", "bold": True, "font_size": 11}]
+    """Bloques por defecto: diseño de ticket limpio y completo (logo, datos, items, total, QR)."""
+    els = []
+    if settings.get("logo_url"):
+        els.append({"tipo": "logo", "align": "center"})
+    els.append({"tipo": "empresa", "align": "center", "bold": True, "font_size": 11})
     if tc.get("mostrar_rfc", True) and settings.get("rfc"):
         els.append({"tipo": "campo", "contenido": f"RFC: {settings.get('rfc')}", "align": "center"})
     if tc.get("mostrar_direccion", True) and settings.get("direccion"):
@@ -100,9 +103,12 @@ def _build_default_elements(tc, settings, sale):
     if tc.get("encabezado"):
         els.append({"tipo": "texto", "contenido": tc.get("encabezado"), "align": "center"})
     els.append({"tipo": "separador"})
-    els.append({"tipo": "folio"})
-    els.append({"tipo": "fecha"})
-    els.append({"tipo": "cliente"})
+    if sale.get("folio"):
+        els.append({"tipo": "folio"})
+    if sale.get("fecha"):
+        els.append({"tipo": "fecha"})
+    if sale.get("cliente_nombre"):
+        els.append({"tipo": "cliente"})
     if sale.get("vendedor_nombre"):
         els.append({"tipo": "atendio"})
     els.append({"tipo": "separador"})
@@ -112,17 +118,20 @@ def _build_default_elements(tc, settings, sale):
     if not incluye_iva:
         els.append({"tipo": "subtotal"})
         els.append({"tipo": "iva"})
-    els.append({"tipo": "total"})
+    els.append({"tipo": "total", "align": "center"})
     if sale.get("condicion") == "credito":
         els.append({"tipo": "credito"})
     els.append({"tipo": "separador"})
     if tc.get("pie"):
         els.append({"tipo": "pie", "contenido": tc.get("pie")})
         els.append({"tipo": "pie2"})
+    else:
+        els.append({"tipo": "pie", "contenido": "¡Gracias por su compra!"})
     qr = tc.get("qr_contenido") or tc.get("qr_texto") or "{verificar}"
     if tc.get("mostrar_qr", True) is not False:
         els.append({"tipo": "qr", "contenido": qr, "qr_size": tc.get("qr_size", 18)})
     return els
+
 
 
 def _apply_align(c, x, w, text, align, size, bold):

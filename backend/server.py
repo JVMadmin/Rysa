@@ -160,6 +160,15 @@ def _p_date(v):
     except Exception:
         return "__ERR__"
 
+def asegurar_codigo_como_barras(doc: dict) -> dict:
+    """Añade el código del producto como código de barras si aún no está registrado."""
+    codigo = str(doc.get("codigo") or "").strip()
+    barras = [str(x).strip() for x in doc.get("codigos_barras") or [] if str(x).strip()]
+    if codigo and codigo not in barras:
+        barras.insert(0, codigo)
+    doc["codigos_barras"] = barras
+    return doc
+
 def parse_row(canon: dict):
     """canon: {COLNAME_UPPER: raw}. Devuelve (data lowercase, errores)."""
     data, errores = {}, []
@@ -1003,6 +1012,7 @@ async def create_product(data: ProductInput, user: dict = Depends(require_permis
     doc = data.model_dump()
     doc["codigo"] = codigo
     doc["id"] = uid()
+    doc = asegurar_codigo_como_barras(doc)
     doc["precios"] = calc_precios(doc["costo"], doc["precios"], doc["iva_tasa"])
     doc["created_at"] = iso_now()
     doc["updated_at"] = iso_now()
@@ -1022,6 +1032,7 @@ async def update_product(product_id: str, data: ProductInput, user: dict = Depen
     doc = data.model_dump()
     doc.pop("existencia", None)  # existencia solo cambia por movimientos
     doc["codigo"] = existing["codigo"]
+    doc = asegurar_codigo_como_barras(doc)
     doc["precios"] = calc_precios(doc["costo"], doc["precios"], doc["iva_tasa"])
     doc["updated_at"] = iso_now()
     await db.products.update_one({"id": product_id}, {"$set": doc})
@@ -1127,6 +1138,109 @@ async def upsert_category(data: CategoryInput, user: dict = Depends(require_perm
     await db.categories.update_one({"nombre": data.nombre}, {"$set": doc}, upsert=True)
     await log_audit(user, "editar", "categoria", data.nombre, "Categoría actualizada")
     return {"ok": True, "nombre": data.nombre}
+
+@api.delete("/categories/{nombre}")
+async def delete_category(nombre: str, user: dict = Depends(require_permission("producto.editar"))):
+    nombre = nombre.strip()
+    if not nombre:
+        raise HTTPException(400, "El nombre es obligatorio")
+    res = await db.categories.delete_one({"nombre": nombre})
+    if res == 0:
+        raise HTTPException(404, "Categoría no encontrada")
+    await log_audit(user, "eliminar", "categoria", nombre, "Categoría eliminada")
+    return {"ok": True, "nombre": nombre}
+
+@api.get("/categories/export/excel")
+async def export_categories(user: dict = Depends(require_permission("exportar"))):
+    cats = []
+    async for c in db.categories.find({}, {"_id": 0}):
+        cats.append({
+            "NOMBRE": c.get("nombre", ""), "CLAVE": c.get("clave", ""),
+            "DESCRIPCION": c.get("descripcion", ""), "FICHA_TECNICA": c.get("ficha_tecnica", ""),
+            "IMAGEN_URL": c.get("imagen_url", ""),
+        })
+    df = pd.DataFrame(cats or [{c: None for c in ["NOMBRE", "CLAVE", "DESCRIPCION", "FICHA_TECNICA", "IMAGEN_URL"]}])
+    data = df_to_excel_bytes(df)
+    return StreamingResponse(io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=categorias.xlsx"})
+
+@api.get("/categories/plantilla/excel")
+async def plantilla_categories(user: dict = Depends(get_current_user)):
+    df = pd.DataFrame(columns=["NOMBRE", "CLAVE", "DESCRIPCION", "FICHA_TECNICA", "IMAGEN_URL"])
+    data = df_to_excel_bytes(df)
+    return StreamingResponse(io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=plantilla_categorias.xlsx"})
+
+@api.post("/categories/import/preview")
+async def import_categories_preview(file: UploadFile = File(...), user: dict = Depends(require_permission("importar"))):
+    content = await file.read()
+    df = read_import_table(content, file.filename or "").fillna("")
+    df.columns = [str(c).strip().upper() for c in df.columns]
+    rows = df.to_dict("records")
+    if not rows:
+        raise HTTPException(400, "El archivo no contiene registros.")
+    if not any(c == "NOMBRE" for c in df.columns):
+        raise HTTPException(400, "El archivo no tiene la columna NOMBRE. Descarga la plantilla de categorías.")
+    preview, vistos = [], set()
+    total = nuevos = existentes = con_errores = 0
+    for i, r in enumerate(rows):
+        nombre = str(r.get("NOMBRE", "")).strip()
+        errores = []
+        if not nombre:
+            errores.append({"campo": "NOMBRE", "valor": "", "motivo": "El nombre es obligatorio"})
+        elif nombre in vistos:
+            errores.append({"campo": "NOMBRE", "valor": nombre, "motivo": "Nombre duplicado en el archivo"})
+        vistos.add(nombre)
+        existe = bool(await db.categories.find_one({"nombre": nombre}))
+        if errores:
+            con_errores += 1
+        elif existe:
+            existentes += 1
+        else:
+            nuevos += 1
+        data = {
+            "nombre": nombre,
+            "clave": str(r.get("CLAVE", "")).strip(),
+            "descripcion": str(r.get("DESCRIPCION", "")).strip(),
+            "ficha_tecnica": str(r.get("FICHA_TECNICA", "")).strip(),
+            "imagen_url": str(r.get("IMAGEN_URL", "")).strip(),
+        }
+        preview.append({"fila": i + 2, "codigo": nombre, "nombre": nombre, "descripcion": data["descripcion"],
+                        "existe": existe, "errores": errores, "data": data})
+        total += 1
+    return {"total": total, "nuevos": nuevos, "existentes": existentes, "con_errores": con_errores,
+            "columnas": ["NOMBRE", "CLAVE", "DESCRIPCION", "FICHA_TECNICA", "IMAGEN_URL"], "preview": preview}
+
+@api.post("/categories/import/confirm")
+async def import_categories_confirm(payload: dict, user: dict = Depends(require_permission("importar"))):
+    rows = payload.get("rows", [])
+    mode = payload.get("mode", "ambos")
+    creados = actualizados = omitidos = 0
+    for r in rows:
+        if r.get("errores"):
+            omitidos += 1; continue
+        d = r.get("data", {})
+        nombre = str(d.get("nombre", "")).strip()
+        if not nombre:
+            omitidos += 1; continue
+        existing = await db.categories.find_one({"nombre": nombre})
+        if existing and mode == "nuevos":
+            omitidos += 1; continue
+        if not existing and mode == "actualizar":
+            omitidos += 1; continue
+        doc = {"nombre": nombre, "clave": d.get("clave", ""), "descripcion": d.get("descripcion", ""),
+               "ficha_tecnica": d.get("ficha_tecnica", ""), "imagen_url": d.get("imagen_url", ""),
+               "updated_at": iso_now()}
+        await db.categories.update_one({"nombre": nombre}, {"$set": doc}, upsert=True)
+        if existing:
+            actualizados += 1
+        else:
+            creados += 1
+    if creados or actualizados:
+        await log_audit(user, "importar", "categoria", "", f"{creados} creados, {actualizados} actualizados, {omitidos} omitidos")
+    return {"creados": creados, "actualizados": actualizados, "omitidos": omitidos}
 
 # =========================================================================
 # CLIENTES
@@ -2364,6 +2478,7 @@ async def import_confirm(payload: dict, user: dict = Depends(require_permission(
             omitidos += 1; continue
         doc = build_product_doc(d)
         doc["codigo"] = codigo
+        doc = asegurar_codigo_como_barras(doc)
         doc["updated_at"] = iso_now()
         ex_val = doc.pop("existencia", None)
         if existing:
