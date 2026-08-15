@@ -11,7 +11,7 @@ import Usuarios from "@/pages/Usuarios";
 import { ImageUpload } from "@/components/ImageUpload";
 import { fileUrl, API } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { Building2, MapPin, DollarSign, Store, UserCog, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap } from "lucide-react";
+import { Building2, MapPin, DollarSign, Store, UserCog, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap, HardDrive } from "lucide-react";
 
 export default function Configuracion() {
   const { can } = useAuth();
@@ -21,7 +21,9 @@ export default function Configuracion() {
   const [importFile, setImportFile] = useState(null);
   const [importing, setImporting] = useState(false);
 
-  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: [40, 30, 20, 15, 10], logo_url: "", ticket_config: {}, ...r.data, ticket_config: { tamano: "80mm", mostrar_rfc: true, mostrar_direccion: true, mostrar_telefono: true, encabezado: "", pie: "¡Gracias por su compra!", ...(r.data?.ticket_config || {}) } })); }, []);
+  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: [40, 30, 20, 15, 10], logo_url: "", ticket_config: {}, storage: { backend: "local", upload_dir: "" }, ...r.data, ticket_config: { tamano: "80mm", mostrar_rfc: true, mostrar_direccion: true, mostrar_telefono: true, encabezado: "", pie: "¡Gracias por su compra!", ...(r.data?.ticket_config || {}) }, storage: { backend: "local", upload_dir: "", ...(r.data?.storage || {}) } })); }, []);
+
+  const setStorage = (k, v) => setS((x) => ({ ...x, storage: { ...(x.storage || {}), [k]: v } }));
 
   const set = (k, v) => setS((x) => ({ ...x, [k]: v }));
   const setTc = (k, v) => setS((x) => ({ ...x, ticket_config: { ...(x.ticket_config || {}), [k]: v } }));
@@ -140,6 +142,7 @@ export default function Configuracion() {
           <TabsTrigger value="sucursales" data-testid="tab-sucursales"><Store className="w-4 h-4 mr-1" /> Sucursales</TabsTrigger>
           <TabsTrigger value="ticket" data-testid="tab-ticket"><Receipt className="w-4 h-4 mr-1" /> Diseño de ticket</TabsTrigger>
           <TabsTrigger value="usuarios" data-testid="tab-usuarios"><UserCog className="w-4 h-4 mr-1" /> Usuarios</TabsTrigger>
+          <TabsTrigger value="storage" data-testid="tab-storage"><HardDrive className="w-4 h-4 mr-1" /> Almacenamiento</TabsTrigger>
           {can("config") && <TabsTrigger value="datos" data-testid="tab-datos"><DatabaseZap className="w-4 h-4 mr-1" /> Datos</TabsTrigger>}
         </TabsList>
 
@@ -329,6 +332,35 @@ export default function Configuracion() {
 
         <TabsContent value="usuarios" className="pt-4">
           <Usuarios embedded />
+        </TabsContent>
+
+        <TabsContent value="storage" className="pt-4">
+          <div className="card-soft p-5 max-w-xl space-y-5" data-testid="storage-panel">
+            <div className="flex items-center gap-2 text-slate-700 font-semibold"><HardDrive className="w-4 h-4 text-[#C1401E]" /> Almacenamiento de archivos</div>
+            <p className="text-sm text-slate-500">Este ERP guarda las imágenes de productos, categorías, logo y PDFs de ticket en un almacenamiento local. Aquí puedes seleccionar el directorio donde se guardarán (por ejemplo, al instalar en tu VPS).</p>
+
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-slate-500 mb-1 block">Tipo de almacenamiento</Label>
+              <div className="flex gap-2">
+                {[["local", "Local (disco del servidor)"]].map(([v, l]) => (
+                  <button key={v} type="button" onClick={() => setStorage("backend", v)} data-testid={`storage-backend-${v}`}
+                    className={`flex-1 py-2 rounded-md border text-sm font-medium ${(s.storage?.backend || "local") === v ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-slate-500">Directorio de almacenamiento (upload_dir)</Label>
+              <Input value={s.storage?.upload_dir || ""} onChange={(e) => setStorage("upload_dir", e.target.value)} className="mt-1 font-mono" placeholder="Ej. /var/www/rysa/uploads" data-testid="storage-upload-dir" />
+              <p className="text-[11px] text-slate-400 mt-1">Si se deja vacío, se usa el directorio definido por la variable de entorno <span className="font-mono">UPLOAD_DIR</span> del servidor.</p>
+            </div>
+
+            <div className="border border-slate-200 rounded-md p-3 bg-slate-50 text-sm" data-testid="storage-status">
+              <div className="text-xs uppercase tracking-wider text-slate-400 mb-1">Directorio efectivo actual</div>
+              <div className="font-mono text-slate-700">{s.storage?.upload_dir || "(UPLOAD_DIR del servidor)"}</div>
+              <p className="text-[11px] text-slate-400 mt-1">Guardado y reinicio del servidor aplican el cambio. Los archivos ya subidos no se mueven automáticamente.</p>
+            </div>
+          </div>
         </TabsContent>
 
         {can("config") && (

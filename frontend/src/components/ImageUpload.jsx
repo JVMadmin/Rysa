@@ -19,7 +19,7 @@ export function ImageUpload({ value, onChange, testid = "image-upload", heightCl
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const { data } = await api.post("/uploads/image", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const { data } = await api.post("/uploads/image", fd);
       onChange(fileUrl(data.url));
       toast.success("Imagen subida");
     } catch (err) {

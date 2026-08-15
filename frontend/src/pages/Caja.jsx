@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2, History, Search, Users } from "lucide-react";
+import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2, History, Search, Users, ArrowUpDown } from "lucide-react";
 
 export default function Caja() {
   const { isAdminOrOwner } = useAuth();
@@ -24,7 +24,30 @@ export default function Caja() {
   const [histDesde, setHistDesde] = useState("");
   const [histHasta, setHistHasta] = useState("");
   const [histEstado, setHistEstado] = useState("all");
+  const [histOperador, setHistOperador] = useState("all");
+  const [sort, setSort] = useState({ key: "fecha_apertura", dir: "desc" });
   const [detCaja, setDetCaja] = useState(null);
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+  const sortedHist = [...hist];
+  if (sort.key) {
+    sortedHist.sort((a, b) => {
+      const getV = (r) => {
+        if (sort.key === "caja") return r.caja_nombre || "";
+        if (sort.key === "cajero") return r.usuario_nombre || "";
+        if (sort.key === "fondo") return Number(r.fondo_inicial || 0);
+        if (sort.key === "esperado") return r.cierre ? Number(r.cierre.efectivo_esperado || 0) : -1;
+        if (sort.key === "contado") return r.cierre ? Number(r.cierre.efectivo_contado || 0) : -1;
+        if (sort.key === "diferencia") return r.cierre ? Number(r.cierre.diferencia || 0) : -1;
+        return r[sort.key] || "";
+      };
+      let x = getV(a), y = getV(b);
+      if (["fondo", "esperado", "contado", "diferencia"].includes(sort.key)) { x = Number(x || 0); y = Number(y || 0); return sort.dir === "asc" ? x - y : y - x; }
+      let r;
+      if (sort.key === "fecha_apertura" || sort.key === "fecha_cierre") { x = String(a[sort.key] || ""); y = String(b[sort.key] || ""); r = x.localeCompare(y); }
+      else r = String(x).localeCompare(String(y), "es", { numeric: true });
+      return sort.dir === "asc" ? r : -r;
+    });
+  }
 
   const [operadores, setOperadores] = useState([]);
   const [loadingOps, setLoadingOps] = useState(isAdminOrOwner);
@@ -38,6 +61,7 @@ export default function Caja() {
     if (histDesde) params.desde = histDesde;
     if (histHasta) params.hasta = histHasta;
     if (histEstado !== "all") params.estado = histEstado;
+    if (histOperador !== "all") params.usuario_id = histOperador;
     const { data } = await api.get("/caja/historial", { params });
     setHist(data);
   };
@@ -216,18 +240,33 @@ export default function Caja() {
               <SelectTrigger className="w-36 h-9" data-testid="hist-estado"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="all">Todas</SelectItem><SelectItem value="abierta">Abiertas</SelectItem><SelectItem value="cerrada">Cerradas</SelectItem></SelectContent>
             </Select>
+            <Select value={histOperador} onValueChange={(v) => { setHistOperador(v); loadHist(); }}>
+              <SelectTrigger className="w-44 h-9" data-testid="hist-operador"><SelectValue placeholder="Operador" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los operadores</SelectItem>
+                {(operadores || []).map((o) => <SelectItem key={o.usuario_id} value={o.usuario_id}>{o.usuario_nombre}</SelectItem>)}
+              </SelectContent>
+            </Select>
             <Button variant="outline" className="h-9" onClick={loadHist} data-testid="hist-buscar"><Search className="w-4 h-4" /></Button>
           </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-              <th className="p-2">Caja</th><th className="p-2">Estado</th><th className="p-2">Cajero</th><th className="p-2">Apertura</th><th className="p-2">Cierre</th>
-              <th className="p-2 text-right">Fondo</th><th className="p-2 text-right">Esperado</th><th className="p-2 text-right">Contado</th><th className="p-2 text-right">Diferencia</th><th className="p-2"></th>
+              {[{ key: "caja", label: "Caja" }, { key: "estado", label: "Estado", noSort: true }, { key: "cajero", label: "Cajero" }, { key: "fecha_apertura", label: "Apertura" }, { key: "fecha_cierre", label: "Cierre" },
+                { key: "fondo", label: "Fondo", right: true }, { key: "esperado", label: "Esperado", right: true }, { key: "contado", label: "Contado", right: true }, { key: "diferencia", label: "Diferencia", right: true }].map((col) => (
+                <th key={col.key} onClick={() => !col.noSort && toggleSort(col.key)} className={`p-2 ${col.noSort ? "" : "cursor-pointer select-none hover:text-[#C1401E]"} ${col.right ? "text-right" : "text-left"}`}>
+                  <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
+                    {col.label}
+                    {sort.key === col.key ? (sort.dir === "asc" ? "↑" : "↓") : !col.noSort && <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                  </span>
+                </th>
+              ))}
+              <th className="p-2"></th>
             </tr></thead>
             <tbody>
               {hist.length === 0 && <tr><td colSpan={10} className="p-6 text-center text-slate-400">Sin registros en el rango.</td></tr>}
-              {hist.map((c) => (
+              {sortedHist.map((c) => (
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`caja-hist-${c.id}`}>
                   <td className="p-2 font-semibold text-slate-800">{c.caja_nombre || "Caja"}</td>
                   <td className="p-2"><Badge className={c.estado === "abierta" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}>{c.estado}</Badge></td>

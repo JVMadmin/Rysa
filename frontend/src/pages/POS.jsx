@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useCart } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,56 +47,74 @@ const calcListPrice = (p, l, pct) => {
   return arr[0]?.precio_con_iva ?? 0;
 };
 
-const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold }) => (
+const PRODUCT_EX_CLS = (ex) => {
+  const n = Number(ex || 0);
+  if (n <= 0) return "bg-red-100 text-red-700 border-red-300";
+  if (n < 5) return "bg-orange-100 text-orange-700 border-orange-300";
+  if (n < 10) return "bg-yellow-100 text-yellow-700 border-yellow-300";
+  return "bg-green-100 text-green-700 border-green-300";
+};
+
+const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold }) => {
+  const conIva = priceOf(p);
+  const tasa = Number(p.iva_tasa || 16);
+  const sinIva = +(conIva / (1 + tasa / 100)).toFixed(2);
+  return (
   <div className="relative">
     <button onClick={onAdd} data-testid={`pos-prod-${p.codigo}`}
-      className="w-full text-left border border-slate-200 rounded-md p-3 hover:border-[#C1401E] hover:bg-slate-50 transition-colors">
-      {p.imagen_url && <img src={fileUrl(p.imagen_url)} alt="" className="h-14 w-14 object-contain mb-2 mx-auto" />}
-      <div className="text-xs text-slate-400">{p.codigo}</div>
-      <div className="text-sm font-medium line-clamp-2 h-10">{p.descripcion}</div>
-      <div className="flex items-center justify-between mt-1">
-        <span className="font-display font-bold text-[#C1401E]">{money(priceOf(p))}</span>
-        <span className="flex items-center gap-1">
-          {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">{p.vendidas}</Badge>}
-          <Badge variant="outline" className="text-xs">{p.existencia}</Badge>
+      className="w-full text-left border border-slate-200 rounded-md p-2 hover:border-[#C1401E] hover:bg-slate-50 transition-colors">
+      {p.imagen_url && <img src={fileUrl(p.imagen_url)} alt="" className="h-10 w-10 object-contain mb-1 mx-auto" />}
+      <div className="text-[10px] text-slate-400 truncate">{p.codigo}</div>
+      <div className="text-xs font-medium line-clamp-2 h-7">{p.descripcion}</div>
+      <div className="flex items-center justify-between mt-0.5">
+        <div>
+          <span className="font-display font-bold text-[#C1401E] text-xs">{money(conIva)}</span>
+          <span className="text-[9px] text-slate-400 ml-0.5">({money(sinIva)})</span>
+        </div>
+        <span className="flex items-center gap-0.5">
+          {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="text-[9px] text-amber-600 border-amber-300 h-4 leading-none">{p.vendidas}</Badge>}
+          <Badge variant="outline" className={`text-[11px] h-5 leading-none px-1.5 font-bold ${PRODUCT_EX_CLS(p.existencia)}`} data-testid={`pos-ex-${p.codigo}`}>{p.existencia}</Badge>
         </span>
       </div>
     </button>
     <button onClick={onFav} title={isFav ? "Quitar de favoritos" : "Agregar a favoritos"} data-testid={`pos-fav-${p.codigo}`}
-      className="absolute top-1 right-1 p-1 text-slate-300 hover:text-amber-400 transition-colors">
-      <Star className={`w-4 h-4 ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
+      className="absolute top-0.5 right-0.5 p-0.5 text-slate-300 hover:text-amber-400 transition-colors">
+      <Star className={`w-[15px] h-[15px] ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
     </button>
   </div>
-);
+  );
+};
 
 export default function POS({ windowId, windowLabel }) {
   const location = useLocation();
   const nav = useNavigate();
   const { user, can } = useAuth();
+  const {
+    cart, setCart,
+    descGlobal, setDescGlobal,
+    descMode, setDescMode,
+    descPct, setDescPct,
+    clienteId, setClienteId,
+    lista, setLista,
+    tipoVenta, setTipoVenta,
+    formaPago, setFormaPago,
+    vendedorId, setVendedorId,
+    pagos, setPagos,
+  } = useCart(windowId);
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
-  const [cart, setCart] = useState([]);
   const [selected, setSelected] = useState(null);
   const [clients, setClients] = useState([]);
-  const [clienteId, setClienteId] = useState("");
   const [vendedores, setVendedores] = useState([]);
-  const [vendedorId, setVendedorId] = useState("");
-  const [lista, setLista] = useState(1);
-  const [descGlobal, setDescGlobal] = useState(0);
-  const [descMode, setDescMode] = useState("$");
-  const [descPct, setDescPct] = useState(0);
   const [incluyeIva, setIncluyeIva] = useState(true);
   const [clientQuery, setClientQuery] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
-  const [linePrice, setLinePrice] = useState(null); // item para selector de precio
-  const [selProd, setSelProd] = useState(null); // producto resaltado en resultados de búsqueda
+  const [linePrice, setLinePrice] = useState(null);
+  const [selProd, setSelProd] = useState(null);
   const [libreVal, setLibreVal] = useState("");
-  const [tipoVenta, setTipoVenta] = useState("directa");
-  const [formaPago, setFormaPago] = useState("contado"); // contado | transferencia | credito
   const [payOpen, setPayOpen] = useState(false);
   const [invOverride, setInvOverride] = useState(null); // {motivo} dialog de inventario insuficiente
   const [invReason, setInvReason] = useState("");
-  const [pagos, setPagos] = useState([{ metodo: "efectivo", monto: "" }]);
   const [suspended, setSuspended] = useState([]);
   const [suspOpen, setSuspOpen] = useState(false);
   const [ticket, setTicket] = useState(null);
@@ -122,6 +141,25 @@ export default function POS({ windowId, windowLabel }) {
   const [abonoCli, setAbonoCli] = useState(null);
   const [abono, setAbono] = useState({ monto: "", metodo: "efectivo", referencia: "" });
   const [abonoSaving, setAbonoSaving] = useState(false);
+  const [printMode, setPrintMode] = useState("thermal"); // thermal | invoice
+
+  const injectPageSize = useCallback((size) => {
+    let el = document.getElementById("print-page-size");
+    if (!el) { el = document.createElement("style"); el.id = "print-page-size"; document.head.appendChild(el); }
+    el.textContent = `@page { size: ${size}; margin: 0; }`;
+  }, []);
+
+  const printThermal = useCallback(() => {
+    injectPageSize("80mm auto");
+    document.body.classList.remove("print-mode-invoice");
+    setTimeout(() => { window.print(); }, 50);
+  }, [injectPageSize]);
+
+  const printInvoice = useCallback(() => {
+    injectPageSize("Letter portrait");
+    document.body.classList.add("print-mode-invoice");
+    setTimeout(() => { window.print(); document.body.classList.remove("print-mode-invoice"); }, 50);
+  }, [injectPageSize]);
   const condicion = formaPago === "credito" ? "credito" : "contado";
   const clienteSel = useMemo(() => clients.find((c) => c.id === clienteId) || null, [clients, clienteId]);
   const credInfo = useMemo(() => {
@@ -139,7 +177,7 @@ export default function POS({ windowId, windowLabel }) {
     api.get("/clients", { params: { estado: "activo" } }).then((r) => {
       setClients(r.data);
       const pub = r.data.find((c) => c.codigo === "PUBLICO");
-      if (pub) setClienteId(pub.id);
+      if (pub && !clienteId) setClienteId(pub.id);
     });
     api.get("/vendedores").then((r) => setVendedores(r.data));
     api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); if (r.data?.listas_precios_pct?.length) setListasPct(r.data.listas_precios_pct); if (r.data && r.data.precios_incluyen_iva !== undefined) setIncluyeIva(!!r.data.precios_incluyen_iva); });
@@ -465,7 +503,7 @@ export default function POS({ windowId, windowLabel }) {
   return (
     <div className="flex flex-col lg:flex-row gap-4 -m-6 p-6 h-[calc(100vh-4rem)]" data-testid="pos-page">
       {/* Izquierda: Cliente (sobre el ticket) + Ticket/Carrito */}
-      <div className="lg:w-[42%] flex flex-col min-h-0">
+      <div className="lg:w-[68%] flex flex-col min-h-0">
         {/* Cliente */}
         <div className="flex flex-col sm:flex-row gap-2 mb-3 shrink-0">
         <div className="relative flex-1">
@@ -558,31 +596,40 @@ export default function POS({ windowId, windowLabel }) {
 
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
             {cart.length === 0 && <div className="p-8 text-center text-slate-300 text-sm">Carrito vacío</div>}
-            {cart.map((i) => (
+            {cart.map((i) => {
+              const tasa = Number(i.iva_tasa || 16) / 100;
+              const linBruto = i.cantidad * i.precio - (i.descuento || 0);
+              const uniSin = linBruto ? +(i.precio / (1 + tasa)).toFixed(2) : 0;
+              const uniIva = +(i.precio - uniSin).toFixed(2);
+              return (
               <div key={i.product_id} onClick={() => setSelected(i.product_id)}
-                className={`p-3 cursor-pointer ${selected === i.product_id ? "bg-[#C1401E]/5 ring-1 ring-inset ring-[#C1401E]/30" : ""}`} data-testid={`cart-item-${i.codigo}`}>
-                <div className="flex justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{i.descripcion}</div>
+                className={`p-1 cursor-pointer ${selected === i.product_id ? "bg-[#C1401E]/[0.035] ring-1 ring-inset ring-[#C1401E]/[0.18]" : ""}`} data-testid={`cart-item-${i.codigo}`}>
+                <div className="flex justify-between gap-1">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-medium truncate">{i.descripcion}</div>
                     <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
-                      className="text-xs text-slate-400 hover:text-[#C1401E] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
-                      {i.codigo} · <span className="underline decoration-dotted">{money(i.precio)}</span> <Tag className="w-3 h-3" />
+                      className="text-[10px] text-slate-400 hover:text-[#C1401E] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
+                      {i.codigo} · <span className="underline decoration-dotted">{money(i.precio)}</span> c/u <Tag className="w-2.5 h-2.5" />
                     </button>
-                    {selected === i.product_id && <kbd className="text-[9px] bg-slate-100 px-1 py-0.5 rounded text-slate-400">F6</kbd>}
+                    <div className="text-[10px] text-slate-400 tabular-nums" data-testid={`cart-neto-${i.codigo}`}>
+                      Sin IVA {money(uniSin)} · IVA {money(uniIva)}
+                    </div>
+                    {selected === i.product_id && <kbd className="text-[8px] bg-slate-100 px-1 py-0.5 rounded text-slate-400">F6</kbd>}
                   </div>
-                  <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
                 </div>
-                <div className="flex items-center gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1 mt-0.5" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center border border-slate-200 rounded">
-                    <button onClick={() => updateQty(i.product_id, -1)} className="px-2 py-1 hover:bg-slate-100"><Minus className="w-3 h-3" /></button>
-                    <Input value={i.cantidad} onChange={(e) => setQty(i.product_id, e.target.value)} className="w-14 h-8 border-0 text-center p-0" data-testid={`cart-qty-${i.codigo}`} />
-                    <button onClick={() => updateQty(i.product_id, 1)} className="px-2 py-1 hover:bg-slate-100"><Plus className="w-3 h-3" /></button>
+                    <button onClick={() => updateQty(i.product_id, -1)} className="px-1.5 py-0.5 hover:bg-slate-100"><Minus className="w-2.5 h-2.5" /></button>
+                    <Input value={i.cantidad} onChange={(e) => setQty(i.product_id, e.target.value)} className="w-12 h-6 border-0 text-center p-0 text-xs" data-testid={`cart-qty-${i.codigo}`} />
+                    <button onClick={() => updateQty(i.product_id, 1)} className="px-1.5 py-0.5 hover:bg-slate-100"><Plus className="w-2.5 h-2.5" /></button>
                   </div>
-                  <Input type="number" value={i.descuento} onChange={(e) => setLineDisc(i.product_id, e.target.value)} placeholder="Desc $" className="w-20 h-8" title="Descuento" />
-                  <span className="ml-auto font-semibold">{money(i.cantidad * i.precio - (i.descuento || 0))}</span>
+                  <Input type="number" value={i.descuento} onChange={(e) => setLineDisc(i.product_id, e.target.value)} placeholder="Desc $" className="w-16 h-6 text-xs" title="Descuento" />
+                  <span className="ml-auto text-xs font-semibold tabular-nums">{money(linBruto)}</span>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="p-3 border-t border-slate-200 space-y-2">
@@ -636,14 +683,14 @@ export default function POS({ windowId, windowLabel }) {
       </div>
 
       {/* Derecha: Productos / Catálogo */}
-      <div className="lg:w-[58%] flex flex-col min-h-0">
-        <div className="flex items-center gap-2 mb-3">
+      <div className="lg:w-[32%] flex flex-col min-h-0">
+        <div className="flex items-center gap-1.5 mb-2">
           <div className="relative flex-1">
-            <Search className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input ref={searchRef} autoFocus value={q} onChange={(e) => search(e.target.value)} onKeyDown={onSearchKey} placeholder="Buscar producto por código, código de barras o descripción..." className="pl-10 h-12 text-base" data-testid="pos-search-input" />
+            <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input ref={searchRef} autoFocus value={q} onChange={(e) => search(e.target.value)} onKeyDown={onSearchKey} placeholder="Buscar producto..." className="pl-8 h-9 text-sm" data-testid="pos-search-input" />
           </div>
-          <Button variant="outline" className="h-12" onClick={() => { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }} data-testid="verificar-precio-btn"><Tag className="w-4 h-4 mr-1" /> Precio <kbd className="ml-1 text-[10px] bg-slate-100 px-1 rounded">F7</kbd></Button>
-          <Button variant="outline" className="h-12" onClick={() => setSuspOpen(true)} data-testid="ver-suspendidas"><PlayCircle className="w-4 h-4 mr-1" /> {suspended.length}</Button>
+          <Button variant="outline" className="h-9 text-xs px-2" onClick={() => { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }} data-testid="verificar-precio-btn"><Tag className="w-3 h-3 mr-1" /> Precio <kbd className="ml-1 text-[9px] bg-slate-100 px-1 rounded">F7</kbd></Button>
+          <Button variant="outline" className="h-9 text-xs px-2" onClick={() => setSuspOpen(true)} data-testid="ver-suspendidas"><PlayCircle className="w-3 h-3 mr-1" /> {suspended.length}</Button>
         </div>
 
         {/* Vista del catálogo: todos / favoritos / más vendidos */}
@@ -688,7 +735,7 @@ export default function POS({ windowId, windowLabel }) {
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
+              <div className="grid grid-cols-1 gap-1 p-1">
                 {results.map((p) => (
                   <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} />
                 ))}
@@ -701,7 +748,7 @@ export default function POS({ windowId, windowLabel }) {
                 <p className="text-sm text-slate-400">{vista === "favoritos" ? "Aún no tienes productos favoritos. Marca la estrella de un producto para guardarlo." : "Sin productos en esta vista."}</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2">
+              <div className="grid grid-cols-1 gap-1 p-1">
                 {catalogo.map((p) => (
                   <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} mostrarSold={vista === "mas_vendidos"} />
                 ))}
@@ -843,50 +890,188 @@ export default function POS({ windowId, windowLabel }) {
         </DialogContent>
       </Dialog>
 
-      {/* Ticket térmico */}
-      <Dialog open={!!ticket} onOpenChange={(o) => !o && setTicket(null)}>
-        <DialogContent data-testid="ticket-dialog">
-          <DialogHeader><DialogTitle className="font-display text-center">{ticket?.tipo_venta === "cotizacion" ? "Cotización" : "Ticket de venta"}</DialogTitle></DialogHeader>
+{/* Ticket térmico + Factura/Cotización */}
+      <Dialog open={!!ticket} onOpenChange={(o) => { if (!o) setTicket(null); }}>
+        <DialogContent data-testid="ticket-dialog" className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="font-display text-center">
+              {ticket?.tipo_venta === "cotizacion" ? "Cotización" : "Ticket de venta"}
+            </DialogTitle>
+          </DialogHeader>
           {ticket && (
-            <div id="thermal-ticket" className="thermal font-mono text-[12px] text-black bg-white p-2 mx-auto">
-              <div className="text-center">
-                {settings.logo_url && <img src={fileUrl(settings.logo_url)} alt="logo" className="h-12 mx-auto mb-1 object-contain" />}
-                <div className="font-bold text-[14px]">{settings.empresa_nombre || "Grupo RYSA"}</div>
-                {settings.direccion && <div>{settings.direccion}</div>}
-                {(settings.ciudad || settings.estado) && <div>{[settings.ciudad, settings.estado].filter(Boolean).join(", ")}</div>}
-                {settings.telefono && <div>Tel: {settings.telefono}</div>}
-                {settings.rfc && <div>RFC: {settings.rfc}</div>}
+            <>
+              {/* Toggle vista */}
+              <div className="flex justify-center gap-2 mb-3">
+                <Button size="sm" variant={printMode === "thermal" ? "default" : "outline"}
+                  onClick={() => setPrintMode("thermal")}
+                  className={printMode === "thermal" ? "bg-[#C1401E]" : ""}>
+                  Ticket térmico
+                </Button>
+                <Button size="sm" variant={printMode === "invoice" ? "default" : "outline"}
+                  onClick={() => setPrintMode("invoice")}
+                  className={printMode === "invoice" ? "bg-[#C1401E]" : ""}>
+                  {ticket.tipo_venta === "cotizacion" ? "Cotización" : "Factura"}
+                </Button>
               </div>
-              <div className="border-t border-dashed border-black my-1" />
-              <div>{ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FOLIO"}: {ticket.folio}</div>
-              <div>Fecha: {ticket.fecha?.slice(0, 16).replace("T", " ")}</div>
-              <div>Cliente: {ticket.cliente_nombre}</div>
-              <div>Atendió: {ticket.vendedor_nombre}</div>
-              <div className="border-t border-dashed border-black my-1" />
-              <table className="w-full">
-                <tbody>
-                  {ticket.items.map((i, k) => (
-                    <tr key={k}><td className="align-top">{i.cantidad} x {i.descripcion}<br /><span className="text-[10px]">{money(i.precio)} c/u</span></td><td className="text-right align-top">{money(i.cantidad * i.precio - (i.descuento || 0))}</td></tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="border-t border-dashed border-black my-1" />
-              {!incluyeIva && <div className="flex justify-between"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>}
-              {!incluyeIva && <div className="flex justify-between"><span>IVA</span><span>{money(ticket.iva_total)}</span></div>}
-              <div className="flex justify-between font-bold text-[14px]"><span>TOTAL</span><span>{money(ticket.total)}</span></div>
-              {incluyeIva && <div className="text-center text-[10px]">Precios con IVA incluido</div>}
-              {ticket.tipo_venta === "directa" && ticket.condicion === "contado" && (<><div className="flex justify-between mt-1"><span>Pagado</span><span>{money((ticket.pagos || []).reduce((s, p) => s + p.monto, 0))}</span></div><div className="flex justify-between"><span>Cambio</span><span>{money(ticket.cambio)}</span></div></>)}
-              {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CRÉDITO ** Saldo: {money(ticket.saldo)}</div>}
-              <div className="border-t border-dashed border-black my-1" />
-              {ticket.id && (
+
+              {/* Thermal ticket (80mm) */}
+              {printMode === "thermal" && (
+              <div id="thermal-ticket" className="thermal font-mono text-[12px] text-black bg-white p-2 mx-auto">
                 <div className="text-center">
-                  <img src={`${process.env.REACT_APP_BACKEND_URL}/api/sales/${ticket.id}/qr?destino=${encodeURIComponent(`${window.location.origin}/verificar/${ticket.id}`)}`} alt="QR de verificación"
-                    className="mx-auto w-24 h-24" data-testid="ticket-qr" />
-                  <div className="text-[9px] text-slate-500">{window.location.origin}/verificar/{ticket.id}</div>
+                  <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" className="h-12 mx-auto mb-1 object-contain" />
+                  <div className="font-bold text-[11px]">RAYMUNDO GOMEZ DIAZ</div>
+                  <div className="font-bold text-[14px]">{settings.empresa_nombre || "Grupo RYSA"}</div>
+                  {settings.direccion && <div>{settings.direccion}</div>}
+                  {(settings.ciudad || settings.estado) && <div>{[settings.ciudad, settings.estado].filter(Boolean).join(", ")}</div>}
+                  {settings.telefono && <div>Tel: {settings.telefono}</div>}
+                  {settings.rfc && <div>RFC: {settings.rfc}</div>}
                 </div>
+                <div className="border-t border-dashed border-black my-1" />
+                <div>{ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FOLIO"}: {ticket.folio}</div>
+                <div>Fecha: {ticket.fecha?.slice(0, 16).replace("T", " ")}</div>
+                <div>Cliente: {ticket.cliente_nombre}</div>
+                <div>Atendió: {ticket.vendedor_nombre}</div>
+                <div className="border-t border-dashed border-black my-1" />
+                <table className="w-full">
+                  <tbody>
+                    {ticket.items.map((i, k) => (
+                      <tr key={k}><td className="align-top">{i.cantidad} x {i.descripcion}<br /><span className="text-[10px]">{money(i.precio)} c/u</span></td><td className="text-right align-top">{money(i.cantidad * i.precio - (i.descuento || 0))}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="border-t border-dashed border-black my-1" />
+                {!incluyeIva && <div className="flex justify-between"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>}
+                {!incluyeIva && <div className="flex justify-between"><span>IVA</span><span>{money(ticket.iva_total)}</span></div>}
+                <div className="flex justify-between font-bold text-[14px]"><span>TOTAL</span><span>{money(ticket.total)}</span></div>
+                {incluyeIva && <div className="text-center text-[10px]">Precios con IVA incluido</div>}
+                {ticket.tipo_venta === "directa" && ticket.condicion === "contado" && (<><div className="flex justify-between mt-1"><span>Pagado</span><span>{money((ticket.pagos || []).reduce((s, p) => s + p.monto, 0))}</span></div><div className="flex justify-between"><span>Cambio</span><span>{money(ticket.cambio)}</span></div></>)}
+                {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CRÉDITO ** Saldo: {money(ticket.saldo)}</div>}
+                <div className="border-t border-dashed border-black my-1" />
+                {ticket.id && (
+                  <div className="text-center">
+                    <img src={`${process.env.REACT_APP_BACKEND_URL}/api/sales/${ticket.id}/qr?destino=${encodeURIComponent(`${window.location.origin}/verificar/${ticket.id}`)}`} alt="QR de verificación"
+                      className="mx-auto w-24 h-24" data-testid="ticket-qr" />
+                    <div className="text-[9px] text-slate-500">{window.location.origin}/verificar/{ticket.id}</div>
+                  </div>
+                )}
+                <div className="text-center text-[11px]">¡Gracias por su compra!</div>
+              </div>
               )}
-              <div className="text-center text-[11px]">¡Gracias por su compra!</div>
-            </div>
+
+              {/* Invoice/Quote letter-size template */}
+              {printMode === "invoice" && (
+              <div id="invoice-template" className="invoice-letter mx-auto" style={{ padding: "15mm 20mm" }}>
+                {/* Header */}
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" style={{ height: 60 }} className="object-contain" />
+                  </div>
+                  <div className="text-right" style={{ fontSize: "9pt", color: "#475569" }}>
+                    <div style={{ fontSize: "14pt", fontWeight: 700, color: "#C1401E" }}>{settings.empresa_nombre || "Grupo RYSA"}</div>
+                    <div>RAYMUNDO GOMEZ DIAZ</div>
+                    {settings.rfc && <div>RFC: {settings.rfc}</div>}
+                    {settings.direccion && <div>{settings.direccion}</div>}
+                    {[settings.ciudad, settings.estado, settings.cp].filter(Boolean).join(", ")}
+                    {settings.telefono && <div>Tel: {settings.telefono}</div>}
+                    {settings.correo && <div>{settings.correo}</div>}
+                  </div>
+                </div>
+
+                {/* Línea divisoria */}
+                <div style={{ height: 3, background: "#C1401E", marginBottom: 12 }} />
+
+                {/* Título */}
+                <div className="text-center mb-5">
+                  <div style={{ fontSize: "18pt", fontWeight: 800, color: "#C1401E", letterSpacing: 2 }}>
+                    {ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FACTURA"}
+                  </div>
+                  <div style={{ fontSize: "10pt", color: "#64748B" }}>Folio: {ticket.folio}</div>
+                </div>
+
+                {/* Fecha y cliente */}
+                <div className="flex justify-between mb-4" style={{ fontSize: "9pt" }}>
+                  <div>
+                    <strong>Cliente:</strong> {ticket.cliente_nombre}<br />
+                    <strong>Atendió:</strong> {ticket.vendedor_nombre}<br />
+                    {ticket.condicion === "credito" && <><strong>Condición:</strong> Crédito<br /></>}
+                  </div>
+                  <div className="text-right">
+                    <strong>Fecha:</strong> {ticket.fecha?.slice(0, 16).replace("T", " ")}<br />
+                    <strong>Vencimiento:</strong> {ticket.fecha?.slice(0, 10)}<br />
+                  </div>
+                </div>
+
+                {/* Tabla de productos */}
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: "12%" }}>Código</th>
+                      <th>Descripción</th>
+                      <th className="text-right" style={{ width: "10%" }}>Cant.</th>
+                      <th className="text-right" style={{ width: "15%" }}>Precio</th>
+                      <th className="text-right" style={{ width: "10%" }}>IVA</th>
+                      <th className="text-right" style={{ width: "13%" }}>Descuento</th>
+                      <th className="text-right" style={{ width: "15%" }}>Importe</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ticket.items.map((i, k) => {
+                      const linBruto = i.cantidad * i.precio - (i.descuento || 0);
+                      return (
+                        <tr key={k}>
+                          <td style={{ fontSize: "8pt" }}>{i.codigo}</td>
+                          <td>{i.descripcion}</td>
+                          <td className="text-right">{i.cantidad}</td>
+                          <td className="text-right">{money(i.precio)}</td>
+                          <td className="text-right">{i.iva_tasa}%</td>
+                          <td className="text-right">{i.descuento ? money(i.descuento) : "-"}</td>
+                          <td className="text-right" style={{ fontWeight: 600 }}>{money(linBruto)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Totales */}
+                <div className="flex justify-end mt-3" style={{ fontSize: "10pt" }}>
+                  <div style={{ width: 250 }}>
+                    {!incluyeIva && (
+                      <div className="flex justify-between py-1"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>
+                    )}
+                    {!incluyeIva && (
+                      <div className="flex justify-between py-1"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(ticket.iva_total)}</span></div>
+                    )}
+                    <div className="flex justify-between py-1" style={{ fontWeight: 700, fontSize: "12pt", color: "#C1401E", borderTop: "2px solid #C1401E" }}>
+                      <span>TOTAL</span><span>{money(ticket.total)}</span>
+                    </div>
+                    {incluyeIva && <div style={{ fontSize: "8pt", color: "#94a3b8", textAlign: "right" }}>IVA incluido</div>}
+                    {ticket.condicion === "credito" && (
+                      <div style={{ fontSize: "9pt", color: "#dc2626", textAlign: "right", marginTop: 4 }}>
+                        Saldo pendiente: {money(ticket.saldo)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div style={{ marginTop: 30, paddingTop: 10, borderTop: "1px solid #e2e8f0", fontSize: "8pt", color: "#94a3b8", textAlign: "center" }}>
+                  {ticket.tipo_venta === "cotizacion" ? (
+                    <p style={{ color: "#475569" }}>
+                      Cotización válida por <strong>15 días</strong>. Precios sujetos a cambio sin previo aviso.
+                    </p>
+                  ) : (
+                    <p>Esta factura es un comprobante fiscal. Conserve una copia para sus registros.</p>
+                  )}
+                  <p style={{ marginTop: 4 }}>{settings.empresa_nombre || "Grupo RYSA"} · {settings.rfc || ""}</p>
+                  {ticket.id && (
+                    <p style={{ marginTop: 4 }}>
+                      Verifique su comprobante en: {window.location.origin}/verificar/{ticket.id}
+                    </p>
+                  )}
+                </div>
+              </div>
+              )}
+            </>
           )}
           <div className="border-t border-slate-200 pt-3 space-y-2" data-testid="ticket-whatsapp-box">
             <Label className="text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5 text-green-600" /> Enviar por WhatsApp</Label>
@@ -897,7 +1082,15 @@ export default function POS({ windowId, windowLabel }) {
               </Button>
             </div>
           </div>
-          <DialogFooter><Button onClick={() => window.print()} variant="outline" data-testid="ticket-print"><Printer className="w-4 h-4 mr-1" /> Imprimir</Button><Button onClick={() => setTicket(null)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="ticket-nueva">Nueva venta</Button></DialogFooter>
+          <DialogFooter className="flex-wrap gap-2">
+            <Button onClick={printThermal} variant="outline" data-testid="ticket-print">
+              <Printer className="w-4 h-4 mr-1" /> Imprimir ticket
+            </Button>
+            <Button onClick={printInvoice} variant="outline" data-testid="invoice-print">
+              <Printer className="w-4 h-4 mr-1" /> Imprimir {ticket?.tipo_venta === "cotizacion" ? "cotización" : "factura"}
+            </Button>
+            <Button onClick={() => setTicket(null)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="ticket-nueva">Nueva venta</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

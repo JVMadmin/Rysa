@@ -442,7 +442,7 @@ class PGCollection:
         await _ensure_table(self.name)
         p = {}
         match = next((st for st in pipeline if "$match" in st), {})["$match"]
-        group = next((st for st in pipeline if "$group" in st), {})
+        group = next((st for st in pipeline if "$group" in st), {}).get("$group", {})
         pid = group.get("_id", "_id")
         if isinstance(pid, str) and pid.startswith("$"):
             pid = pid[1:]

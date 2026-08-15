@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Tags, Pencil, PackageSearch, ImageIcon, Plus, Trash2, Download, Upload, FileDown, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Loader2, Tags, Pencil, PackageSearch, ImageIcon, Plus, Trash2, Download, Upload, FileDown, CheckCircle2, AlertTriangle, Search } from "lucide-react";
 import { ImageUpload } from "@/components/ImageUpload";
 import { fileUrl } from "@/lib/api";
 
@@ -21,6 +21,7 @@ export default function Categorias() {
   const nav = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
   const [edit, setEdit] = useState(null);
   const [isNew, setIsNew] = useState(false);
   const [f, setF] = useState({ ...BLANK });
@@ -122,13 +123,24 @@ export default function Categorias() {
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={onFile} data-testid="cat-import-file" />
 
       {loading ? <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div> : (
-        rows.length === 0 ? (
+        <>
+        <div className="card-soft p-3">
+          <div className="relative max-w-md">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input placeholder="Buscar categoría por nombre, clave o descripción..." value={q}
+              onChange={(e) => setQ(e.target.value)} className="pl-9" data-testid="cat-buscar" />
+          </div>
+        </div>
+        {(() => {
+          const ql = q.trim().toLowerCase();
+          const visible = ql ? rows.filter((c) => `${c.nombre} ${c.clave || ""} ${c.descripcion || ""}`.toLowerCase().includes(ql)) : rows;
+          return visible.length === 0 ? (
           <div className="card-soft p-12 text-center text-slate-400">
-            <Tags className="w-10 h-10 mx-auto mb-3" />No hay categorías. Crea una nueva, importa un archivo o importa productos con la columna CATEGORIA.
+            <Tags className="w-10 h-10 mx-auto mb-3" />{ql ? "Sin categorías que coincidan con tu búsqueda." : "No hay categorías. Crea una nueva, importa un archivo o importa productos con la columna CATEGORIA."}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {rows.map((c) => (
+            {visible.map((c) => (
               <div key={c.nombre} className="group card-soft overflow-hidden hover:shadow-md transition-all" data-testid={`cat-card-${c.nombre}`}>
                 <div className="h-32 bg-slate-100 relative overflow-hidden">
                   {c.imagen_url
@@ -153,7 +165,9 @@ export default function Categorias() {
               </div>
             ))}
           </div>
-        )
+        );
+        })()}
+        </>
       )}
 
       <Dialog open={!!edit} onOpenChange={(o) => !o && close()}>

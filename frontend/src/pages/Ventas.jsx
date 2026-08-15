@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Eye, XCircle, Copy, Printer, Plus, Loader2, Receipt, FileText, Search, BarChart3, Send } from "lucide-react";
+import { Eye, XCircle, Copy, Printer, Plus, Loader2, Receipt, FileText, Search, BarChart3, Send, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 
 const QUICK = [["hoy", "Hoy"], ["semana", "Esta semana"], ["mes", "Este mes"], ["mes_anterior", "Mes anterior"], ["all", "Todas"]];
 
@@ -31,9 +31,29 @@ export default function Ventas() {
   const [remitirSale, setRemitirSale] = useState(null);
   const [facturarSale, setFacturarSale] = useState(null);
   const [factCliente, setFactCliente] = useState("");
+  const [factClienteQuery, setFactClienteQuery] = useState("");
+  const [factClienteOpen, setFactClienteOpen] = useState(false);
+  const [factBilling, setFactBilling] = useState({ rfc: "", razon_social: "", cp: "", reg_fiscal: "", uso_cfdi: "", direccion: "" });
   const [clientes, setClientes] = useState([]);
   const [busy, setBusy] = useState("");
   const [sel, setSel] = useState([]);
+  const [sort, setSort] = useState({ key: "fecha", dir: "desc" });
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+  const sorted = [...rows];
+  if (sort.key) {
+    sorted.sort((a, b) => {
+      const getV = (r) => {
+        if (sort.key === "total") return Number(r.total || 0);
+        if (sort.key === "cliente") return r.cliente_nombre || "";
+        if (sort.key === "vendedor") return r.vendedor_nombre || r.usuario_nombre || "";
+        return r[sort.key] || "";
+      };
+      let x = getV(a), y = getV(b);
+      if (sort.key === "total") { x = Number(x || 0); y = Number(y || 0); return sort.dir === "asc" ? x - y : y - x; }
+      const r = String(x || "").localeCompare(String(y || ""), "es", { numeric: true });
+      return sort.dir === "asc" ? r : -r;
+    });
+  }
 
   const facturables = rows.filter((s) => s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion");
   const toggleSel = (id) => setSel((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
@@ -84,7 +104,27 @@ export default function Ventas() {
     setRemitirSale(null);
   };
 
-  const abrirFacturar = (s) => { setFacturarSale(s); setFactCliente(s.cliente_id || "publico"); };
+  const selectFactCliente = (v) => {
+    setFactCliente(v);
+    const c = clientes.find((x) => x.id === v);
+    setFactClienteQuery(c ? `${c.codigo || ""} ${c.nombre}`.trim() : "Público General (XAXX010101000)");
+    setFactClienteOpen(false);
+    setFactBilling({
+      rfc: c?.rfc || "",
+      razon_social: c?.nombre || "",
+      cp: c?.cp || "",
+      reg_fiscal: c?.reg_fiscal || "",
+      uso_cfdi: c?.uso_cfdi || "",
+      direccion: [c?.calle, c?.numero_exterior, c?.colonia, c?.ciudad, c?.estado_geo].filter(Boolean).join(", "),
+    });
+  };
+  const abrirFacturar = (s) => {
+    setFacturarSale(s);
+    selectFactCliente(s.cliente_id || "publico");
+  };
+  const filteredFactClientes = factClienteQuery
+    ? clientes.filter((c) => `${c.codigo} ${c.nombre} ${c.rfc || ""}`.toLowerCase().includes(factClienteQuery.toLowerCase())).slice(0, 50)
+    : clientes.slice(0, 50);
   const facturar = async () => {
     setBusy("fact");
     try {
@@ -93,7 +133,7 @@ export default function Ventas() {
         const c = clientes.find((x) => x.id === factCliente);
         await api.put(`/sales/${facturarSale.id}/cliente`, { cliente_id: factCliente, cliente_nombre: c?.nombre || "" });
       }
-      const { data } = await api.post(`/facturacion/sale/${facturarSale.id}`);
+      const { data } = await api.post(`/facturacion/sale/${facturarSale.id}`, factBilling);
       toast.success(`CFDI emitido · ${data.uuid || "(sandbox)"}`);
       setFacturarSale(null); load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
@@ -149,13 +189,23 @@ export default function Ventas() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
             <th className="p-3 w-8">{can("venta.facturar") ? <input type="checkbox" checked={sel.length === facturables.length && facturables.length > 0} onChange={(e) => setSel(e.target.checked ? facturables.map((f) => f.id) : [])} data-testid="sel-todas" /> : null}</th>
-            <th className="p-3">Estado</th><th className="p-3">Folio</th><th className="p-3">Fecha</th><th className="p-3">Cliente</th><th className="p-3">Vendedor</th>
-            <th className="p-3 text-right">Total</th><th className="p-3">Cond.</th><th className="p-3 text-center">Factura</th><th className="p-3"></th>
+            {[{ key: "estado", label: "Estado" }, { key: "folio", label: "Folio" }, { key: "fecha", label: "Fecha" }, { key: "cliente", label: "Cliente" }, { key: "vendedor", label: "Vendedor" }].map((col) => (
+              <th key={col.key} onClick={() => toggleSort(col.key)} className={`p-3 cursor-pointer select-none hover:text-[#C1401E] ${col.right ? "text-right" : "text-left"}`}>
+                <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
+                  {col.label}
+                  {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                </span>
+              </th>
+            ))}
+            <th className="p-3 text-right cursor-pointer select-none hover:text-[#C1401E]" onClick={() => toggleSort("total")}>
+              <span className="inline-flex items-center gap-1 flex-row-reverse">Total {sort.key === "total" ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-30" />}</span>
+            </th>
+            <th className="p-3">Cond.</th><th className="p-3 text-center">Factura</th><th className="p-3"></th>
           </tr></thead>
           <tbody>
             {loading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-400"><Receipt className="w-8 h-8 mx-auto mb-2" />Sin ventas.</td></tr>}
-            {!loading && rows.map((s) => {
+            {!loading && sorted.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-400"><Receipt className="w-8 h-8 mx-auto mb-2" />Sin ventas.</td></tr>}
+            {!loading && sorted.map((s) => {
               const facturable = s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion";
               return (
               <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`venta-row-${s.folio}`}>
@@ -226,22 +276,65 @@ export default function Ventas() {
         </DialogContent>
       </Dialog>
 
-      {/* Facturar directo */}
+{/* Facturar directo */}
       <Dialog open={!!facturarSale} onOpenChange={(o) => !o && setFacturarSale(null)}>
-        <DialogContent data-testid="facturar-dialog">
+        <DialogContent className="max-w-lg" data-testid="facturar-dialog">
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><FileText className="w-5 h-5" /> Facturar venta {facturarSale?.folio}</DialogTitle></DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[65vh] overflow-y-auto">
             <div className="bg-slate-50 rounded p-3 text-sm flex justify-between"><span>Total</span><b>{money(facturarSale?.total)}</b></div>
-            <div>
+            <div className="relative">
               <Label className="text-xs uppercase tracking-wider text-slate-500">Cliente receptor</Label>
-              <Select value={factCliente} onValueChange={setFactCliente}>
-                <SelectTrigger className="mt-1" data-testid="facturar-cliente"><SelectValue placeholder="Selecciona cliente" /></SelectTrigger>
-                <SelectContent className="max-h-72">
-                  <SelectItem value="publico">Público General (XAXX010101000)</SelectItem>
-                  {clientes.map((c) => <SelectItem key={c.id} value={c.id}>{c.codigo} · {c.nombre}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-slate-400 mt-1">Se preselecciona el cliente de la venta; puedes cambiarlo antes de timbrar.</p>
+              <Input
+                value={factClienteQuery}
+                onChange={(e) => { setFactClienteQuery(e.target.value); setFactClienteOpen(true); }}
+                onFocus={() => setFactClienteOpen(true)}
+                onBlur={() => setTimeout(() => setFactClienteOpen(false), 150)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (filteredFactClientes[0]) selectFactCliente(filteredFactClientes[0].id); } }}
+                placeholder="Busca cliente por código, nombre o RFC..."
+                className="mt-1" data-testid="facturar-cliente" />
+              {factClienteOpen && (
+                <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-64 overflow-y-auto">
+                  <button type="button" onMouseDown={() => selectFactCliente("publico")} className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 ${factCliente === "publico" ? "bg-slate-100 font-medium" : ""}`}>
+                    Público General (XAXX010101000)
+                  </button>
+                  {filteredFactClientes.map((c) => (
+                    <button key={c.id} type="button" onMouseDown={() => selectFactCliente(c.id)} className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 ${factCliente === c.id ? "bg-slate-100 font-medium" : ""}`}>
+                      <span className="font-medium">{c.codigo}</span> · {c.nombre}
+                      {c.rfc && <span className="block text-[11px] text-slate-400 font-mono">RFC: {c.rfc}</span>}
+                    </button>
+                  ))}
+                  {filteredFactClientes.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">Sin resultados</div>}
+                </div>
+              )}
+            </div>
+            <div className="border-t pt-3 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Datos de facturación</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <Label className="text-xs text-slate-500">RFC</Label>
+                  <Input value={factBilling.rfc} onChange={(e) => setFactBilling((s) => ({ ...s, rfc: e.target.value }))} placeholder="XAXX010101000" className="mt-1 font-mono" />
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-xs text-slate-500">Razón social</Label>
+                  <Input value={factBilling.razon_social} onChange={(e) => setFactBilling((s) => ({ ...s, razon_social: e.target.value }))} placeholder="PUBLICO EN GENERAL" className="mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-500">Código Postal</Label>
+                  <Input value={factBilling.cp} onChange={(e) => setFactBilling((s) => ({ ...s, cp: e.target.value }))} placeholder="CP" className="mt-1 font-mono" />
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-500">Régimen fiscal</Label>
+                  <Input value={factBilling.reg_fiscal} onChange={(e) => setFactBilling((s) => ({ ...s, reg_fiscal: e.target.value }))} placeholder="601" className="mt-1 font-mono" />
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-xs text-slate-500">Uso CFDI</Label>
+                  <Input value={factBilling.uso_cfdi} onChange={(e) => setFactBilling((s) => ({ ...s, uso_cfdi: e.target.value }))} placeholder="G03" className="mt-1 font-mono" />
+                </div>
+                <div className="col-span-2">
+                  <Label className="text-xs text-slate-500">Dirección fiscal</Label>
+                  <Input value={factBilling.direccion} onChange={(e) => setFactBilling((s) => ({ ...s, direccion: e.target.value }))} placeholder="Calle, número, colonia, ciudad, estado" className="mt-1" />
+                </div>
+              </div>
             </div>
           </div>
           <DialogFooter>

@@ -11,6 +11,19 @@ from reportlab.pdfgen import canvas
 # En producción en el VPS se puede establecer UPLOAD_DIR=/var/www/rysa/uploads
 UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
 
+# Directorio elegido desde la UI de Configuración (se aplica en tiempo de ejecución).
+_OVERRIDE_DIR = None
+
+def set_upload_dir(path: str):
+    """Permite seleccionar el directorio de almacenamiento local desde Configuración."""
+    global _OVERRIDE_DIR
+    path = (path or "").strip()
+    _OVERRIDE_DIR = path or None
+
+def base_upload_dir() -> str:
+    """Ruta efectiva: la elegida en la UI, o la variable de entorno, o el valor por defecto."""
+    return _OVERRIDE_DIR or os.environ.get("UPLOAD_DIR", os.path.join(os.getcwd(), "uploads"))
+
 MIME_TYPES = {
     "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
     "gif": "image/gif", "webp": "image/webp", "pdf": "application/pdf",
@@ -18,7 +31,7 @@ MIME_TYPES = {
 
 def get_safe_local_path(storage_path: str) -> str:
     """Resuelve la ruta y previene vulnerabilidades de Path Traversal."""
-    base = os.path.abspath(UPLOAD_DIR)
+    base = os.path.abspath(base_upload_dir())
     # Evitamos que usen rutas absolutas o de retroceso que apunten fuera de UPLOAD_DIR
     target = os.path.abspath(os.path.join(base, storage_path))
     if not target.startswith(base):
@@ -27,8 +40,8 @@ def get_safe_local_path(storage_path: str) -> str:
 
 def init_storage():
     """Garantiza la existencia del directorio de almacenamiento."""
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    return UPLOAD_DIR
+    os.makedirs(base_upload_dir(), exist_ok=True)
+    return base_upload_dir()
 
 def detect_mime_type(data: bytes) -> str:
     """Inspecciona los primeros bytes (firmas mágicas) para validar el tipo MIME real."""
@@ -93,6 +106,7 @@ def _build_default_elements(tc, settings, sale):
     els = []
     if settings.get("logo_url"):
         els.append({"tipo": "logo", "align": "center"})
+        els.append({"tipo": "texto", "contenido": "RAYMUNDO GOMEZ DIAZ", "align": "center", "font_size": 8})
     els.append({"tipo": "empresa", "align": "center", "bold": True, "font_size": 11})
     if tc.get("mostrar_rfc", True) and settings.get("rfc"):
         els.append({"tipo": "campo", "contenido": f"RFC: {settings.get('rfc')}", "align": "center"})
@@ -100,6 +114,8 @@ def _build_default_elements(tc, settings, sale):
         els.append({"tipo": "campo", "contenido": settings.get("direccion", ""), "align": "center"})
     if tc.get("mostrar_telefono", True) and settings.get("telefono"):
         els.append({"tipo": "campo", "contenido": f"Tel: {settings.get('telefono')}", "align": "center"})
+    if settings.get("correo"):
+        els.append({"tipo": "campo", "contenido": f"Email: {settings.get('correo')}", "align": "center"})
     if tc.get("encabezado"):
         els.append({"tipo": "texto", "contenido": tc.get("encabezado"), "align": "center"})
     els.append({"tipo": "separador"})
@@ -109,8 +125,6 @@ def _build_default_elements(tc, settings, sale):
         els.append({"tipo": "fecha"})
     if sale.get("cliente_nombre"):
         els.append({"tipo": "cliente"})
-    if sale.get("vendedor_nombre"):
-        els.append({"tipo": "atendio"})
     els.append({"tipo": "separador"})
     els.append({"tipo": "items"})
     els.append({"tipo": "separador"})
@@ -121,12 +135,11 @@ def _build_default_elements(tc, settings, sale):
     els.append({"tipo": "total", "align": "center"})
     if sale.get("condicion") == "credito":
         els.append({"tipo": "credito"})
+    els.append({"tipo": "articulos"})
+    if sale.get("vendedor_nombre"):
+        els.append({"tipo": "atendio"})
     els.append({"tipo": "separador"})
-    if tc.get("pie"):
-        els.append({"tipo": "pie", "contenido": tc.get("pie")})
-        els.append({"tipo": "pie2"})
-    else:
-        els.append({"tipo": "pie", "contenido": "¡Gracias por su compra!"})
+    els.append({"tipo": "texto", "contenido": "VERIFIQUE SU COMPRA Y SU CAMBIO", "align": "center", "font_size": 8})
     qr = tc.get("qr_contenido") or tc.get("qr_texto") or "{verificar}"
     if tc.get("mostrar_qr", True) is not False:
         els.append({"tipo": "qr", "contenido": qr, "qr_size": tc.get("qr_size", 18)})
@@ -227,7 +240,11 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
         fsz = el.get("font_size")
         try:
             if tipo == "logo" and settings.get("logo_url"):
-                p = get_safe_local_path(settings["logo_url"]) if not settings["logo_url"].startswith("http") else None
+                logo_path = settings["logo_url"]
+                # Si es una URL completa o relativa de /api/files/, extraemos el path local
+                if "/api/files/" in logo_path:
+                    logo_path = logo_path.split("/api/files/", 1)[1]
+                p = get_safe_local_path(logo_path) if not logo_path.startswith("http") else None
                 if p and os.path.exists(p):
                     try:
                         c.drawImage(ImageReader(p), w / 2 - 10 * mm, y, 20 * mm, 20 * mm * 0.6, preserveAspectRatio=True, mask="auto")
@@ -237,7 +254,7 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
             elif tipo == "qr":
                 import qrcode
                 from io import BytesIO
-                qr = qrcode.QRCode(err_correction=qrcode.constants.ERROR_CORRECT_M)
+                qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M)
                 qr.add_data(cont or "https://gruporysa.com")
                 qr.make(fit=True)
                 img = qr.make_image(fill_color="black", back_color="white")
@@ -261,6 +278,10 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
                 L(f"Fecha: {str(sale.get('fecha', ''))[:16].replace('T', ' ')}", sz=fsz)
             elif tipo == "cliente":
                 L(f"Cliente: {sale.get('cliente_nombre', 'Público General')}", sz=fsz)
+            elif tipo == "articulos":
+                items_data = sale.get("items") or []
+                total_art = sum(float(it.get("cantidad", 0) or 0) for it in items_data)
+                L(f"Artículos vendidos: {int(total_art)}", sz=fsz)
             elif tipo == "atendio":
                 L(f"Atendió: {sale.get('vendedor_nombre')}", sz=fsz)
             elif tipo == "items":

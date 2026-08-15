@@ -568,6 +568,7 @@ class SettingsInput(BaseModel):
     logo_url: Optional[str] = ""
     ticket_config: dict = Field(default_factory=dict)
     sucursales: List[SucursalItem] = Field(default_factory=list)
+    storage: dict = Field(default_factory=dict)
 
 # =========================================================================
 # INVENTARIO (KARDEX) - helper
@@ -1121,6 +1122,7 @@ async def list_categories(user: dict = Depends(get_current_user)):
     async for c in db.categories.find({}, {"_id": 0}):
         managed[c["nombre"]] = c
     nombres = set(counts) | set(managed)
+    nombres = {n for n in nombres if n}
     out = []
     for n in sorted(nombres):
         m = managed.get(n, {})
@@ -1149,6 +1151,19 @@ async def delete_category(nombre: str, user: dict = Depends(require_permission("
         raise HTTPException(404, "Categoría no encontrada")
     await log_audit(user, "eliminar", "categoria", nombre, "Categoría eliminada")
     return {"ok": True, "nombre": nombre}
+
+@api.post("/categories/sync")
+async def sync_categories(user: dict = Depends(get_current_user)):
+    """Sincroniza la colección categories con las clasificaciones de productos."""
+    creadas = 0
+    async for r in db.products.aggregate([
+        {"$match": {"clasificacion": {"$nin": ["", None]}}},
+        {"$group": {"_id": "$clasificacion"}},
+    ]):
+        await db.categories.update_one({"nombre": r["_id"]}, {"$set": {"nombre": r["_id"]}}, upsert=True)
+        creadas += 1
+    await log_audit(user, "sincronizar", "categoria", "", f"{creadas} categorías sincronizadas")
+    return {"ok": True, "sincronizadas": creadas}
 
 @api.get("/categories/export/excel")
 async def export_categories(user: dict = Depends(require_permission("exportar"))):
@@ -1624,10 +1639,13 @@ async def caja_operadores(user: dict = Depends(require_permission("caja.ver"))):
 
 @api.get("/caja/historial")
 async def caja_historial(desde: Optional[str] = None, hasta: Optional[str] = None,
-                         estado: Optional[str] = None, user: dict = Depends(require_permission("caja.ver"))):
+                         estado: Optional[str] = None, usuario_id: Optional[str] = None,
+                         user: dict = Depends(require_permission("caja.ver"))):
     query = {}
     if not es_admin_sistema(user):
         query["usuario_id"] = user["id"]
+    elif usuario_id:
+        query["usuario_id"] = usuario_id
     if estado in ("abierta", "cerrada"):
         query["estado"] = estado
     cajas = await db.cajas.find(query, {"_id": 0}).sort("fecha_apertura", -1).to_list(500)
@@ -2004,7 +2022,14 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
     for cid, cli in cmap.items():
         a = agg.get(cid)
         if not a:
-            continue
+            # Cliente con saldo pero sin ventas a crédito individuales
+            # (p. ej. saldo inicial importado). Se exhibe como vigente.
+            a = {k: 0.0 for k in AGING_KEYS}
+            a["corriente"] = round(float(cli.get("saldo", 0) or 0), 2)
+            a.update({"vencido": 0.0, "max_dias": 0, "n": 0,
+                      "monto_original": round(float(cli.get("saldo", 0) or 0), 2),
+                      "con_abonos": 0, "sin_abonos": 0,
+                      "facturadas": 0, "no_facturadas": 0, "folios": []})
         pendiente_total = sum(a[k] for k in AGING_KEYS)
         abonado_parcial = a["monto_original"] > pendiente_total
         if a["vencido"] > 0:
@@ -2038,8 +2063,13 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
             continue
         if facturada == "no" and item["no_facturadas"] == 0:
             continue
-        if ql and ql not in str(cli.get("nombre", "")).lower() and ql not in str(cli.get("codigo", "")).lower():
-            continue
+        if ql:
+            haystack = " ".join(str(v or "") for v in [
+                cli.get("nombre", ""), cli.get("codigo", ""), cli.get("rfc", ""),
+                cli.get("telefono", ""), cli.get("celular", ""),
+            ]).lower()
+            if ql not in haystack:
+                continue
         rows.append(item)
     rows.sort(key=lambda r: r["vencido"] * 1e9 + r["saldo"], reverse=True)
     tot = {"cartera": round(sum(r["saldo"] for r in rows), 2),
@@ -2780,10 +2810,35 @@ async def delete_sucursal(sucursal_id: str, user: dict = Depends(require_permiss
 # =========================================================================
 # CONFIGURACIÓN / SETTINGS
 # =========================================================================
+def aplicar_storage_config(s):
+    """Aplica el directorio de almacenamiento local elegido en Configuración."""
+    try:
+        st = (s or {}).get("storage") or {}
+        if st.get("backend") in (None, "", "local"):
+            if st.get("upload_dir"):
+                storage.set_upload_dir(st["upload_dir"])
+            else:
+                # Si no hay sobrescritura elegida, vuelve al del entorno
+                storage.set_upload_dir(None)
+    except Exception:
+        pass
+
+
+def _storage_status():
+    storage.init_storage()
+    return {"backend": "local", "upload_dir": storage.base_upload_dir()}
+
+
 @api.get("/settings")
 async def get_settings(user: dict = Depends(get_current_user)):
     s = await db.settings.find_one({"_id": "app"}, {"_id": 0})
-    return s or {}
+    if not s:
+        s = {}
+    st = s.get("storage") or {}
+    st = {**st, "backend": st.get("backend") or "local", "upload_dir": st.get("upload_dir") or storage.base_upload_dir()}
+    s = {**s, "storage": st}
+    return s
+
 
 @api.get("/settings/branding")
 async def get_branding():
@@ -2799,6 +2854,7 @@ async def get_branding():
 async def update_settings(data: SettingsInput, user: dict = Depends(require_permission("config"))):
     doc = data.model_dump()
     await db.settings.update_one({"_id": "app"}, {"$set": doc}, upsert=True)
+    aplicar_storage_config(doc)
     await log_audit(user, "editar", "configuracion", "app", "Actualización de configuración")
     return doc
 
@@ -2872,7 +2928,7 @@ async def sale_qr_png(sale_id: str, size: int = 240, destino: Optional[str] = No
     else:
         base_url = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
         url = f"{base_url}/verificar/{sale_id}" if base_url else f"/api/sales/{sale_id}/public"
-    qr = qrcode.QRCode(err_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
     qr.add_data(url)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
@@ -3081,8 +3137,17 @@ async def ventas_facturables(user: dict = Depends(get_current_user)):
                                  "facturado": {"$ne": True}}, {"_id": 0}).sort("fecha", -1).to_list(500)
     return sales
 
+class FacturacionInput(BaseModel):
+    rfc: Optional[str] = ""
+    razon_social: Optional[str] = ""
+    cp: Optional[str] = ""
+    reg_fiscal: Optional[str] = ""
+    uso_cfdi: Optional[str] = ""
+    direccion: Optional[str] = ""
+
+
 @api.post("/facturacion/sale/{sale_id}")
-async def emitir_cfdi(sale_id: str, user: dict = Depends(require_permission("venta.crear"))):
+async def emitir_cfdi(sale_id: str, data: Optional[FacturacionInput] = None, user: dict = Depends(require_permission("venta.crear"))):
     cfg = await get_pac_config()
     if not pac_configurado(cfg):
         raise HTTPException(400, "El PAC no está configurado. Ve a Configuración → Facturación y captura tu API Key de Facty.")
@@ -3092,7 +3157,9 @@ async def emitir_cfdi(sale_id: str, user: dict = Depends(require_permission("ven
     if sale.get("facturado"):
         raise HTTPException(400, "Esta venta ya fue facturada")
     cliente = await db.clients.find_one({"id": sale.get("cliente_id")}, {"_id": 0}) if sale.get("cliente_id") else None
-    result = await pac_provider.crear_factura(sale, cliente, cfg)
+    receptor = data.model_dump() if data else {}
+    receptor = {k: (v or "") for k, v in receptor.items()}
+    result = await pac_provider.crear_factura(sale, cliente, cfg, receptor)
     fid = result.get("id")
     uuid_ = result.get("uuid")
     doc = {"id": uid(), "sale_id": sale_id, "folio_venta": sale.get("folio"),
@@ -3620,6 +3687,27 @@ async def startup():
         logger.info("Almacenamiento local inicializado en: %s", storage.UPLOAD_DIR)
     except Exception as e:
         logger.error("Storage init falló: %s", str(e)[:160])
+    try:
+        st_cfg = await db.settings.find_one({"_id": "app"}, {"storage": 1})
+        if st_cfg:
+            aplicar_storage_config(st_cfg)
+            logger.info("Storage configurado desde Configuración: %s", storage.base_upload_dir())
+    except Exception as e:
+        logger.warning("No se pudo aplicar storage desde settings: %s", str(e)[:120])
+
+    # Backfill: asegura que todo producto tenga su código registrado también como
+    # código de barras (requisito: el código se usa para llenar el código de barras).
+    try:
+        filled = 0
+        async for p in db.products.find({"$or": [{"codigos_barras": {"$in": ["", None]}}, {"codigos_barras": {"$exists": False}}]}):
+            doc = asegurar_codigo_como_barras({**p, "codigo": p.get("codigo", "")})
+            if doc.get("codigos_barras") != p.get("codigos_barras"):
+                await db.products.update_one({"id": p["id"]}, {"$set": {"codigos_barras": doc["codigos_barras"]}})
+                filled += 1
+        if filled:
+            logger.info("Backfill de códigos de barras: %d productos actualizados", filled)
+    except Exception as e:
+        logger.warning("Backfill de códigos de barras falló: %s", str(e)[:120])
     await db.users.create_index("email", unique=True)
     await db.users.create_index("id", unique=True)
     await db.products.create_index("codigo")
@@ -3630,7 +3718,20 @@ async def startup():
         await db.clients.create_index("codigo", unique=True)
     except Exception as e:
         logger.warning("Índice único clients.codigo: %s", str(e)[:120])
-        
+
+    # Sincronizar categorías desde clasificaciones de productos
+    try:
+        creadas = 0
+        async for r in db.products.aggregate([
+            {"$match": {"clasificacion": {"$nin": ["", None]}}},
+            {"$group": {"_id": "$clasificacion"}},
+        ]):
+            await db.categories.update_one({"nombre": r["_id"]}, {"$set": {"nombre": r["_id"]}}, upsert=True)
+            creadas += 1
+        logger.info("Categorías sincronizadas desde clasificaciones: %d", creadas)
+    except Exception as e:
+        logger.warning("Sync de categorías falló: %s", str(e)[:120])
+
     # Seed admin SOLO en desarrollo y SOLO con credenciales de variables de
     # entorno (jamás hardcodeadas). Sin ADMIN_EMAIL/ADMIN_PASSWORD o con una
     # contraseña < 12 caracteres simplemente se omite el seed.

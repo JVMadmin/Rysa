@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useContext } from "react";
 import POS from "@/pages/POS";
 import { Button } from "@/components/ui/button";
 import { Plus, X, ShoppingCart } from "lucide-react";
+import { CartContext } from "@/context/CartContext";
 
 let _seq = 2;
 
@@ -10,6 +11,7 @@ function one(id, label) {
 }
 
 export default function MultiPos() {
+  const { clearCartState } = useContext(CartContext);
   const [windows, setWindows] = useState(() => [
     { id: 1, label: "POS 1" },
     { id: _seq++, label: "POS 2" },
@@ -22,6 +24,7 @@ export default function MultiPos() {
     setActive(id);
   };
   const close = (id) => {
+    clearCartState(id);
     setWindows((w) => {
       const rest = w.filter((x) => x.id !== id);
       return rest.length ? rest : [{ id: _seq++, label: `POS ${_seq}` }];

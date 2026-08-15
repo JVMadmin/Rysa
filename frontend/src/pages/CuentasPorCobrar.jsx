@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock, MessageCircle, FileText } from "lucide-react";
+import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock, MessageCircle, FileText, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 
 const METODOS = [["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferencia", "Transferencia"], ["deposito", "Depósito"], ["otros", "Otros"]];
 
@@ -32,6 +32,25 @@ export default function CuentasPorCobrar() {
   const [soloVencidos, setSoloVencidos] = useState(false);
   const [estado, setEstado] = useState("todos");
   const [facturada, setFacturada] = useState("todas");
+  const [sort, setSort] = useState({ key: "saldo", dir: "desc" });
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+  const sorted = [...(data.clientes || [])];
+  if (sort.key) {
+    sorted.sort((a, b) => {
+      const getV = (r) => {
+        if (["saldo", "vencido", "corriente"].includes(sort.key)) return r[sort.key];
+        if (["b1_30", "b31_60", "b61_90", "b90"].includes(sort.key)) return r.aging?.[sort.key] ?? 0;
+        if (sort.key === "dias") return r.max_dias ?? 0;
+        if (sort.key === "cliente") return r.nombre || "";
+        if (sort.key === "contacto") return r.telefono || r.celular || "";
+        return r[sort.key];
+      };
+      let x = getV(a), y = getV(b);
+      if (["saldo", "vencido", "corriente", "b1_30", "b31_60", "b61_90", "b90", "dias"].includes(sort.key)) { x = Number(x || 0); y = Number(y || 0); return sort.dir === "asc" ? x - y : y - x; }
+      const r = String(x || "").localeCompare(String(y || ""), "es", { numeric: true });
+      return sort.dir === "asc" ? r : -r;
+    });
+  }
   const puedeCobrar = can("caja.entrada");
 
   // Abono
@@ -124,7 +143,7 @@ export default function CuentasPorCobrar() {
       <div className="flex flex-wrap gap-2 card-soft p-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <Input placeholder="Buscar por nombre o clave de cliente..." value={q}
+          <Input placeholder="Buscar por nombre, clave, RFC o teléfono..." value={q}
             onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} className="pl-9" data-testid="cxc-buscar" />
         </div>
         <div className="flex items-center gap-2 border border-slate-200 rounded-md px-3">
@@ -155,16 +174,24 @@ export default function CuentasPorCobrar() {
       <div className="card-soft overflow-x-auto">
         <table className="w-full text-sm whitespace-nowrap">
           <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-            <th className="p-3">Cliente</th><th className="p-3">Contacto</th>
-            <th className="p-3 text-right">Saldo</th><th className="p-3 text-right">Vencido</th>
-            <th className="p-3 text-right">Corriente</th><th className="p-3 text-right">1-30</th><th className="p-3 text-right">31-60</th>
-            <th className="p-3 text-right">61-90</th><th className="p-3 text-right">+90</th><th className="p-3 text-center">Días</th>
+            {[{ key: "cliente", label: "Cliente" }, { key: "contacto", label: "Contacto" },
+              { key: "saldo", label: "Saldo", right: true }, { key: "vencido", label: "Vencido", right: true },
+              { key: "corriente", label: "Corriente", right: true }, { key: "b1_30", label: "1-30", right: true },
+              { key: "b31_60", label: "31-60", right: true }, { key: "b61_90", label: "61-90", right: true },
+              { key: "b90", label: "+90", right: true }, { key: "dias", label: "Días", center: true }].map((col) => (
+              <th key={col.key} onClick={() => toggleSort(col.key)} className={`p-3 cursor-pointer select-none hover:text-[#C1401E] ${col.right ? "text-right" : col.center ? "text-center" : "text-left"}`}>
+                <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
+                  {col.label}
+                  {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                </span>
+              </th>
+            ))}
             <th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
-            {!loading && data.clientes.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin cuentas por cobrar. ¡Todo al día!</td></tr>}
-            {!loading && data.clientes.map((c) => (
+            {loading && <tr><td colSpan={12} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {!loading && data.clientes.length === 0 && <tr><td colSpan={12} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin cuentas por cobrar. ¡Todo al día!</td></tr>}
+            {!loading && sorted.map((c) => (
               <tr key={c.cliente_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cxc-row-${c.codigo}`}>
                 <td className="p-3"><div className="font-medium text-[#C1401E]">{c.codigo}</div><div className="text-slate-700 max-w-[200px] truncate" title={c.nombre}>{c.nombre}</div></td>
                 <td className="p-3 text-slate-500 text-xs">{c.telefono || c.celular || "—"}</td>

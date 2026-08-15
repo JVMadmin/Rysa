@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import ProductForm from "@/components/ProductForm";
 import { TableScroller } from "@/components/TableScroller";
 import { toast } from "sonner";
-import { Plus, Search, Download, Upload, Pencil, History, Loader2, Boxes, FileDown, ArrowDownUp } from "lucide-react";
+import { Plus, Search, Download, Upload, Pencil, History, Loader2, Boxes, FileDown, ArrowDownUp, ArrowUp, ArrowDown } from "lucide-react";
 const dot = (p) => {
   const ex = Number(p.existencia || 0), min = Number(p.stock_minimo || 0);
   if (ex <= 0) return ["bg-red-500", "Sin existencia"];
@@ -61,6 +61,23 @@ export default function Productos() {
   const [total, setTotal] = useState(0);
   const [nonce, setNonce] = useState(0);
   const pageSize = 50;
+  const [sort, setSort] = useState({ key: "", dir: "asc" });
+  const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+  const sorted = [...rows];
+  if (sort.key) {
+    const numFields = ["costo", "existencia", "stock_minimo"];
+    sorted.sort((a, b) => {
+      const getV = (r) => {
+        if (sort.key === "precio") return r.precios?.[0]?.precio_con_iva ?? 0;
+        if (sort.key === "utilidad") { const psi = r.precios?.[0]?.precio_sin_iva ?? 0; return psi - (r.costo || 0); }
+        return r[sort.key];
+      };
+      let x = getV(a), y = getV(b);
+      if (numFields.includes(sort.key) || sort.key === "precio" || sort.key === "utilidad") { x = Number(x || 0); y = Number(y || 0); return sort.dir === "asc" ? x - y : y - x; }
+      const r = String(x || "").localeCompare(String(y || ""), "es", { numeric: true });
+      return sort.dir === "asc" ? r : -r;
+    });
+  }
   const fileRef = useRef();
 
   const load = async () => {
@@ -249,15 +266,26 @@ export default function Productos() {
         <table className="w-full text-sm">
           <thead className="bg-slate-50 sticky top-0">
             <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-              <th className="p-3">Estado</th><th className="p-3">Código</th><th className="p-3">Descripción</th>
-              <th className="p-3">Línea</th><th className="p-3 text-right">Costo</th><th className="p-3 text-right">Exist.</th>
-              <th className="p-3">U.M.</th><th className="p-3 text-right">Precio</th><th className="p-3 text-right">Utilidad</th><th className="p-3 text-right">Min</th><th className="p-3"></th>
+              {[{ key: "estado", label: "Estado", noSort: true }, { key: "codigo", label: "Código" }, { key: "descripcion", label: "Descripción" },
+                { key: "linea", label: "Línea" }, { key: "clasificacion", label: "Clasifica" },
+                { key: "costo", label: "Costo", right: true }, { key: "existencia", label: "Exist.", right: true },
+                { key: "unidad_medida", label: "U.M." },
+                { key: "precio", label: "Precio", right: true }, { key: "utilidad", label: "Utilidad", right: true },
+                { key: "stock_minimo", label: "Min", right: true }].map((col) => (
+                <th key={col.key} onClick={() => !col.noSort && toggleSort(col.key)} className={`p-3 select-none ${col.noSort ? "" : "cursor-pointer hover:text-[#C1401E]"} ${col.right ? "text-right" : "text-left"}`}>
+                  <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
+                    {col.label}
+                    {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : !col.noSort && <ArrowDownUp className="w-3 h-3 opacity-30" />}
+                  </span>
+                </th>
+              ))}
+              <th className="p-3"></th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={11} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={11} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
-            {!loading && rows.map((p) => {
+            {loading && <tr><td colSpan={12} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {!loading && sorted.length === 0 && <tr><td colSpan={12} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
+            {!loading && sorted.map((p) => {
               const [color, label] = dot(p);
               return (
                 <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`prod-row-${p.codigo}`}>
@@ -265,6 +293,7 @@ export default function Productos() {
                   <td className="p-3 font-medium text-[#C1401E]">{p.codigo}</td>
                   <td className="p-3 max-w-xs truncate">{p.descripcion}</td>
                   <td className="p-3 text-slate-500">{p.linea}</td>
+                  <td className="p-3 text-slate-500">{p.clasificacion || "—"}</td>
                   <td className="p-3 text-right">{money(p.costo)}</td>
                   <td className="p-3 text-right font-semibold">{p.existencia}</td>
                   <td className="p-3">{p.unidad_medida}</td>

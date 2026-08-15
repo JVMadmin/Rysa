@@ -168,6 +168,8 @@ export default function Recargas() {
           {ticket && (
             <div id="thermal-ticket" className="thermal font-mono text-[12px] text-black bg-white p-2 mx-auto">
               <div className="text-center">
+                <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" className="h-12 mx-auto mb-1 object-contain" />
+                <div className="font-bold text-[11px]">RAYMUNDO GOMEZ DIAZ</div>
                 <div className="font-bold text-[14px]">{settings.empresa_nombre || "Grupo RYSA"}</div>
                 {settings.telefono && <div>Tel: {settings.telefono}</div>}
               </div>
@@ -180,6 +182,13 @@ export default function Recargas() {
               <div className="border-t border-dashed border-black my-1" />
               <div className="flex justify-between font-bold text-[14px]"><span>MONTO</span><span>{money(ticket.total)}</span></div>
               <div className="border-t border-dashed border-black my-1" />
+              {ticket.id && (
+                <div className="text-center">
+                  <img src={`${process.env.REACT_APP_BACKEND_URL}/api/sales/${ticket.id}/qr?destino=${encodeURIComponent(`${window.location.origin}/verificar/${ticket.id}`)}`} alt="QR de verificación"
+                    className="mx-auto w-24 h-24" />
+                  <div className="text-[9px] text-slate-500">{window.location.origin}/verificar/{ticket.id}</div>
+                </div>
+              )}
               <div className="text-center text-[11px]">¡Gracias por su compra!</div>
             </div>
           )}

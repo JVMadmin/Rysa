@@ -145,15 +145,22 @@ def _download(cfg, path, media, signed_url=None, params=None):
 
 
 # ───────────────────── Mapeo de campos RYSA → Facty ─────────────────────
-def _receptor(cliente):
-    rfc = (cliente.get("rfc") if cliente else "") or "XAXX010101000"
-    generico = rfc == "XAXX010101000"
+def _receptor(cliente, overrides=None):
+    o = overrides or {}
+    def _pick(field, default):
+        val = o.get(field)
+        if val is not None and str(val).strip() != "":
+            return val
+        return (cliente.get(field) if cliente else "") or default
+    rfc = _pick("rfc", "XAXX010101000")
+    generico = rfc.upper() == "XAXX010101000"
+    razon = _pick("razon_social", "PUBLICO EN GENERAL")
     return {
         "rfc": rfc.upper(),
-        "razonSocial": ((cliente.get("nombre") if cliente else "") or "PUBLICO EN GENERAL").upper(),
-        "usoCfdi": (cliente.get("uso_cfdi") if cliente else "") or ("S01" if generico else "G03"),
-        "regimenFiscal": (cliente.get("reg_fiscal") if cliente else "") or ("616" if generico else "601"),
-        "cp": (cliente.get("cp") if cliente else "") or "",
+        "razonSocial": str(razon).upper(),
+        "usoCfdi": str(_pick("uso_cfdi", "S01" if generico else "G03")).upper(),
+        "regimenFiscal": str(_pick("reg_fiscal", "616" if generico else "601")).upper(),
+        "cp": str(_pick("cp", "")).strip(),
     }
 
 
@@ -179,7 +186,7 @@ _FORMA_PAGO = {"efectivo": "01", "tarjeta": "04", "transferencia": "03",
                "spei": "03", "deposito": "03", "otros": "99"}
 
 
-def _payload_factura(sale, cliente, cfg):
+def _payload_factura(sale, cliente, cfg, receptor=None):
     formas = sale.get("pagos") or [{}]
     forma = _FORMA_PAGO.get((formas[0].get("metodo") if formas else "efectivo"), "01")
     metodo = "PPD" if sale.get("condicion") == "credito" else "PUE"
@@ -192,7 +199,7 @@ def _payload_factura(sale, cliente, cfg):
             "regimenFiscal": cfg.get("regimen_fiscal") or "601",
             "cp": cfg.get("lugar_expedicion") or "",
         },
-        "receptor": _receptor(cliente),
+        "receptor": _receptor(cliente, receptor),
         "metodoPago": metodo,
         "formaPago": forma,
         "serie": cfg.get("serie") or "A",
@@ -209,10 +216,10 @@ async def listar_timbres(cfg):
     return {"disponibles": int(dato or 0), "plan": None, "raw": data}
 
 
-async def crear_factura(sale, cliente, cfg):
+async def crear_factura(sale, cliente, cfg, receptor=None):
     """Timbra una factura de ingreso (CFDI 4.0). Consume un timbre.
     Devuelve {id, uuid, serie, folio, total}."""
-    payload = _payload_factura(sale, cliente, cfg)
+    payload = _payload_factura(sale, cliente, cfg, receptor)
     result = _request(cfg, "POST", PATH_CREAR, json=payload)
     if not isinstance(result, dict) or result.get("__raw__"):
         return {"id": None, "uuid": None, "serie": payload.get("serie"),

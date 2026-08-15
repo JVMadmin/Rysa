@@ -120,6 +120,8 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
     setSaving(true);
     try {
       const payload = { ...f };
+      // Campos legacy DBF: el backend los tipa OPTIONAL[str], así que se envían siempre como texto
+      ALL.forEach((k) => { if (T[k] !== "L" && payload[k] != null && typeof payload[k] !== "string") payload[k] = String(payload[k]); });
       // sincronizar campos usados por POS / inventario
       payload.descripcion = f.descrip;
       payload.descripcion_larga = f.descriplrg;
