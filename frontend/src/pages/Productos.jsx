@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { api, formatApiError, money } from "@/lib/api";
+import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -279,12 +279,13 @@ export default function Productos() {
                   </span>
                 </th>
               ))}
+              <th className="p-3">Imagen</th>
               <th className="p-3"></th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={12} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
-            {!loading && sorted.length === 0 && <tr><td colSpan={12} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
+            {loading && <tr><td colSpan={13} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {!loading && sorted.length === 0 && <tr><td colSpan={13} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
             {!loading && sorted.map((p) => {
               const [color, label] = dot(p);
               return (
@@ -302,6 +303,17 @@ export default function Productos() {
                     {(() => { const psi = p.precios?.[0]?.precio_sin_iva ?? 0; const u = psi - (p.costo || 0); const m = psi ? (u / psi * 100) : 0; return (<span className={u > 0 ? "text-emerald-700 font-semibold" : "text-red-600"}>{money(u)} <span className="text-xs text-slate-400">({m.toFixed(0)}%)</span></span>); })()}
                   </td>
                   <td className="p-3 text-right text-slate-500">{p.stock_minimo}</td>
+                  <td className="p-3">
+                    {p.imagen_url ? (
+                      <img src={fileUrl(p.imagen_url)} alt=""
+                        className="w-9 h-9 object-contain rounded border border-slate-100"
+                        data-testid={`prod-img-${p.codigo}`} />
+                    ) : (
+                      <div className="w-9 h-9 rounded bg-slate-100 flex items-center justify-center text-slate-300" data-testid={`prod-img-${p.codigo}`}>
+                        <Boxes className="w-4 h-4" />
+                      </div>
+                    )}
+                  </td>
                   <td className="p-3">
                     <div className="flex gap-1 justify-end">
                       <Button size="icon" variant="ghost" onClick={() => openMovs(p)} title="Movimientos" data-testid={`mov-${p.codigo}`}><History className="w-4 h-4" /></Button>

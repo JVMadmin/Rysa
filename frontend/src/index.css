@@ -163,13 +163,15 @@ body {
 .invoice-letter .text-center { text-align: center; }
 
 @media print {
-  body * { visibility: hidden !important; }
-  #thermal-ticket, #thermal-ticket * { visibility: visible !important; }
-  #thermal-ticket {
-    position: absolute; left: 0; top: 0; width: 80mm; padding: 3mm;
+  html, body { height: auto !important; margin: 0 !important; padding: 0 !important; }
+  body > *:not(#thermal-print-clone) { display: none !important; }
+  #thermal-print-clone, #thermal-print-clone * { visibility: visible !important; }
+  #thermal-print-clone {
+    position: absolute; left: 0; top: 0; width: 80mm !important; max-width: 80mm !important;
+    margin: 0 !important; padding: 3mm;
     background: #fff; color: #000;
   }
-  @page { size: 80mm auto; margin: 0; }
+  @page { size: 80mm auto; margin: 0 !important; }
 }
 
 @media print {

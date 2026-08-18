@@ -93,6 +93,56 @@ def _money(v):
     except Exception:
         return "$0.00"
 
+def _num_a_letras(valor):
+    """Convierte un monto a letras en español (mxn). Ej: 1200 -> 'MIL DOSCIENTOS PESOS'."""
+    try:
+        valor = float(valor or 0)
+    except Exception:
+        return ""
+    signo = ""
+    if valor < 0:
+        valor = abs(valor); signo = "MENOS "
+    entero = int(valor)
+    deci = int(round((valor - entero) * 100))
+    unidades = ["", "UNO", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE",
+                "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISÉIS", "DIECISIETE",
+                "DIECIOCHO", "DIECINUEVE", "VEINTE"]
+    decenas = ["", "VEINTI", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"]
+    centenas = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS",
+                "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
+    def tres(n):
+        c = int(n // 100); r = int(n % 100)
+        s = ""
+        if c == 1 and r == 0: s += "CIEN"
+        elif c: s += centenas[c] + (" " if r else "")
+        if r:
+            if r <= 20: s += unidades[r]
+            elif r < 30: s += "VEINTI" + unidades[r - 20]
+            else:
+                s += decenas[r // 10]
+                if r % 10: s += " Y " + unidades[r % 10]
+        return s.strip()
+    if entero == 0:
+        txt = "CERO"
+    else:
+        partes = []
+        milesim = entero // 1000000
+        resto = entero % 1000000
+        if milesim:
+            if milesim == 1: partes.append("UN MILLÓN")
+            else: partes.append(tres(milesim) + " MILLONES")
+        millar = resto // 1000
+        res = resto % 1000
+        if millar:
+            if millar == 1: partes.append("MIL")
+            else: partes.append(tres(millar) + " MIL")
+        if res:
+            partes.append(tres(res))
+        txt = " ".join(partes)
+    txt = txt.replace("CIENTO PESOS", "CIEN PESOS")
+    deci_str = f"{deci:02d}"
+    return f"{signo}{txt} PESOS {deci_str}/100 M.N."
+
 
 def _elem_visible(el, default=True):
     try:
@@ -104,14 +154,20 @@ def _elem_visible(el, default=True):
 def _build_default_elements(tc, settings, sale):
     """Bloques por defecto: diseño de ticket limpio y completo (logo, datos, items, total, QR)."""
     els = []
+    full_addr = " ".join(filter(None, [
+        settings.get("direccion", ""),
+        settings.get("ciudad", ""),
+        settings.get("estado", ""),
+        settings.get("cp", ""),
+    ]))
     if settings.get("logo_url"):
         els.append({"tipo": "logo", "align": "center"})
         els.append({"tipo": "texto", "contenido": "RAYMUNDO GOMEZ DIAZ", "align": "center", "font_size": 8})
     els.append({"tipo": "empresa", "align": "center", "bold": True, "font_size": 11})
     if tc.get("mostrar_rfc", True) and settings.get("rfc"):
         els.append({"tipo": "campo", "contenido": f"RFC: {settings.get('rfc')}", "align": "center"})
-    if tc.get("mostrar_direccion", True) and settings.get("direccion"):
-        els.append({"tipo": "campo", "contenido": settings.get("direccion", ""), "align": "center"})
+    if tc.get("mostrar_direccion", True) and full_addr:
+        els.append({"tipo": "campo", "contenido": full_addr, "align": "center"})
     if tc.get("mostrar_telefono", True) and settings.get("telefono"):
         els.append({"tipo": "campo", "contenido": f"Tel: {settings.get('telefono')}", "align": "center"})
     if settings.get("correo"):
@@ -126,20 +182,28 @@ def _build_default_elements(tc, settings, sale):
     if sale.get("cliente_nombre"):
         els.append({"tipo": "cliente"})
     els.append({"tipo": "separador"})
+    els.append({"tipo": "deschead"})
     els.append({"tipo": "items"})
     els.append({"tipo": "separador"})
     incluye_iva = (settings or {}).get("precios_incluyen_iva", True)
-    if not incluye_iva:
+    if incluye_iva:
         els.append({"tipo": "subtotal"})
         els.append({"tipo": "iva"})
+    if sale.get("descuento_total", 0) or sale.get("descuento", 0):
+        els.append({"tipo": "descuento"})
     els.append({"tipo": "total", "align": "center"})
+    els.append({"tipo": "letras"})
     if sale.get("condicion") == "credito":
         els.append({"tipo": "credito"})
+    else:
+        els.append({"tipo": "recibido"})
+        els.append({"tipo": "cambio"})
     els.append({"tipo": "articulos"})
     if sale.get("vendedor_nombre"):
         els.append({"tipo": "atendio"})
     els.append({"tipo": "separador"})
     els.append({"tipo": "texto", "contenido": "VERIFIQUE SU COMPRA Y SU CAMBIO", "align": "center", "font_size": 8})
+    els.append({"tipo": "texto", "contenido": tc.get("pie", "¡Gracias por su compra!"), "align": "center", "font_size": 8})
     qr = tc.get("qr_contenido") or tc.get("qr_texto") or "{verificar}"
     if tc.get("mostrar_qr", True) is not False:
         els.append({"tipo": "qr", "contenido": qr, "qr_size": tc.get("qr_size", 18)})
@@ -208,21 +272,37 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
 
     def campos_items():
         nonlocal y
+        _apply_align(c, y, w, "DESCRIPCION", "center", 8, True)
+        y -= line_h
+        sep()
         for it in sale.get("items", []):
-            desc = str(it.get("descripcion", ""))[:34]
+            desc = str(it.get("descripcion", ""))[:31]
             _apply_align(c, y, w, desc, "left", 9 if size == "carta" else 7, False)
             y -= line_h
             cant = it.get("cantidad", 0)
             precio = it.get("precio", 0)
-            importe = it.get("importe", cant * precio)
-            _apply_align(c, y, w, f"  {cant} x {_money(precio)}          {_money(importe)}", "left", 7, False)
+            unidad = str(it.get("unidad", "PZA"))
+            importe = it.get("importe", cant * precio - float(it.get("descuento", 0) or 0))
+            desc_un = it.get("descuento", 0)
+            fe = f"  {int(cant)} {unidad}   {_money(precio)}  {_money(importe)}"
+            _apply_align(c, y, w, fe, "left", 7, False)
             y -= line_h
+            if float(desc_un or 0) > 0:
+                _apply_align(c, y, w, f"    Descuento -{_money(desc_un)}", "left", 7, False)
+                y -= line_h
 
     # Resolver variables de plantilla para texto/QR
     def fi(t):
         try:
+            full_addr = " ".join(filter(None, [
+                settings.get("direccion", ""),
+                settings.get("ciudad", ""),
+                settings.get("estado", ""),
+                settings.get("cp", ""),
+            ]))
             return (t or "").replace("{empresa}", empresa) \
                 .replace("{verificar}", verificar_url()) \
+                .replace("{direccion_completa}", full_addr) \
                 .replace("{cip}", "").replace("{folio}", sale.get("folio", "")) \
                 .replace("{cliente}", sale.get("cliente_nombre", "")) \
                 .replace("{total}", _money(sale.get("total"))) \
@@ -283,13 +363,28 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
                 total_art = sum(float(it.get("cantidad", 0) or 0) for it in items_data)
                 L(f"Artículos vendidos: {int(total_art)}", sz=fsz)
             elif tipo == "atendio":
-                L(f"Atendió: {sale.get('vendedor_nombre')}", sz=fsz)
+                L(f"Atendido por: {sale.get('vendedor_nombre')}", sz=fsz)
             elif tipo == "items":
                 campos_items()
+            elif tipo == "deschead":
+                _apply_align(c, y, w, "DESCRIPCION", "center", 8, True)
+                y -= line_h
             elif tipo == "subtotal":
                 L(f"Subtotal: {_money(sale.get('subtotal'))}", align=align, sz=fsz)
             elif tipo == "iva":
                 L(f"IVA: {_money(sale.get('iva_total'))}", align=align, sz=fsz)
+            elif tipo == "descuento":
+                L(f"Descuento: -{_money(sale.get('descuento', sale.get('descuento_total'))) }", align=align, sz=fsz)
+            elif tipo == "letras":
+                try:
+                    L(f"({_num_a_letras(sale.get('total'))})", align="center", bold=True, sz=fsz or 8)
+                except Exception:
+                    pass
+            elif tipo == "recibido":
+                pagado = sum(float(p.get("monto", 0) or 0) for p in (sale.get("pagos") or []))
+                L(f"Recibido: {_money(pagado)}", align=align, sz=fsz)
+            elif tipo == "cambio":
+                L(f"Cambio: {_money(sale.get('cambio'))}", align=align, sz=fsz)
             elif tipo == "total":
                 L(f"TOTAL: {_money(sale.get('total'))}", bold=True, align=align, sz=fsz or (12 if size == "carta" else 9))
             elif tipo == "credito":

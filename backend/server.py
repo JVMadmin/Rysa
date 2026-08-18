@@ -525,6 +525,7 @@ class SaleInput(BaseModel):
     lista_precios: int = 1
     tipo_venta: str = "directa"  # directa | cotizacion
     vendedor_id: Optional[str] = None
+    precios_incluyen_iva: bool = True      # suma el IVA sobre el precio neto
     idempotency_key: Optional[str] = None  # evita ventas duplicadas en POS
     # Override de inventario negativo (solo roles autorizados, con auditoría).
     allow_negative_inventory: bool = False
@@ -1658,24 +1659,23 @@ async def caja_historial(desde: Optional[str] = None, hasta: Optional[str] = Non
 # =========================================================================
 # VENTAS / POS
 # =========================================================================
-def calcular_venta(items: List[dict], descuento_global: float):
-    # Los precios que envía el POS YA incluyen IVA (precio_con_iva). Se extrae el
-    # IVA de cada línea en lugar de sumarlo encima, para coincidir con el ticket.
+def calcular_venta(items: List[dict], descuento_global: float, precios_incluyen_iva: bool = True):
+    # Los precios que envía el POS son NETOS (sin IVA, corresponde a lo guardado en
+    # la base de datos). Si `precios_incluyen_iva` está activo se SUMA el IVA sobre el
+    # neto; si no, se cobra únicamente el neto sin IVA.
     subtotal = 0.0   # neto (sin IVA)
     iva_total = 0.0
     desc_lineas = 0.0
     for it in items:
-        base = it["cantidad"] * it["precio"]          # con IVA
-        desc = it.get("descuento", 0.0)               # con IVA
-        bruto = base - desc                           # con IVA
-        tasa = it.get("iva_tasa", 16.0) / 100
-        neto = bruto / (1 + tasa) if (1 + tasa) else bruto
+        neto = it["cantidad"] * it["precio"] - it.get("descuento", 0.0)
         subtotal += neto
-        iva_total += bruto - neto
-        desc_lineas += desc
-    dg = min(max(descuento_global, 0.0), subtotal + iva_total)
+        desc_lineas += it.get("descuento", 0.0)
+        if precios_incluyen_iva:
+            tasa = it.get("iva_tasa", 16.0) / 100
+            iva_total += neto * tasa
+    dg = min(max(descuento_global, 0.0), subtotal)
     subtotal_final = subtotal - dg
-    total = max(0.0, round(subtotal_final + iva_total, 2))
+    total = max(0.0, round(subtotal_final + (iva_total if precios_incluyen_iva else 0.0), 2))
     return {"subtotal": round(subtotal_final, 2), "iva_total": round(iva_total, 2),
             "descuento_total": round(desc_lineas + dg, 2), "total": total}
 
@@ -1797,7 +1797,7 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
             permitir_neg = controles.get("permitir_inventario_negativo", False)
             if controlar and not permitir_neg and not override_inv and float(p.get("existencia", 0)) < it["cantidad"]:
                 raise HTTPException(400, f"Existencia insuficiente de {p['codigo']} (disp: {p.get('existencia',0)})")
-    totales = calcular_venta(items, data.descuento_global)
+    totales = calcular_venta(items, data.descuento_global, data.precios_incluyen_iva)
     total = totales["total"]
     pagos = [p.model_dump() for p in data.pagos]
     pagado = sum(p["monto"] for p in pagos)

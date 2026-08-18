@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { numeroALetras } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useCart } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ const METODOS = [
 ];
 
 const LISTAS_PCT_DEFAULT = [40, 30, 20, 15, 10];
+const UNIDADES_OPC = ["PZA", "PAQ", "KILO", "KG", "GR", "LT", "ML", "MTR", "CM", "CAJ", "BOT", "LATA", "DOC", "PAR", "ROLLO", "BULTO", "SERV"];
 
 // Precio de una lista concreta. Usa el precio guardado del producto; si la lista
 // no tiene precio configurado lo calcula aplicando el % de utilidad de la
@@ -56,9 +58,9 @@ const PRODUCT_EX_CLS = (ex) => {
 };
 
 const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold }) => {
-  const conIva = priceOf(p);
+  const neto = priceOf(p);
   const tasa = Number(p.iva_tasa || 16);
-  const sinIva = +(conIva / (1 + tasa / 100)).toFixed(2);
+  const conIva = +(neto * (1 + tasa / 100)).toFixed(2);
   return (
   <div className="relative">
     <button onClick={onAdd} data-testid={`pos-prod-${p.codigo}`}
@@ -68,8 +70,8 @@ const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold }) => {
       <div className="text-xs font-medium line-clamp-2 h-7">{p.descripcion}</div>
       <div className="flex items-center justify-between mt-0.5">
         <div>
-          <span className="font-display font-bold text-[#C1401E] text-xs">{money(conIva)}</span>
-          <span className="text-[9px] text-slate-400 ml-0.5">({money(sinIva)})</span>
+          <span className="font-display font-bold text-[#C1401E] text-xs">{money(neto)}</span>
+          <span className="text-[9px] text-slate-400 ml-0.5">({money(conIva)})</span>
         </div>
         <span className="flex items-center gap-0.5">
           {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="text-[9px] text-amber-600 border-amber-300 h-4 leading-none">{p.vendidas}</Badge>}
@@ -152,7 +154,15 @@ export default function POS({ windowId, windowLabel }) {
   const printThermal = useCallback(() => {
     injectPageSize("80mm auto");
     document.body.classList.remove("print-mode-invoice");
-    setTimeout(() => { window.print(); }, 50);
+    const src = document.getElementById("thermal-ticket");
+    let wrap = document.getElementById("thermal-print-clone");
+    if (!wrap) { wrap = document.createElement("div"); wrap.id = "thermal-print-clone"; document.body.appendChild(wrap); }
+    if (src) {
+      const clone = src.cloneNode(true);
+      wrap.innerHTML = "";
+      wrap.appendChild(clone);
+    }
+    setTimeout(() => { window.print(); }, 60);
   }, [injectPageSize]);
 
   const printInvoice = useCallback(() => {
@@ -365,6 +375,7 @@ export default function POS({ windowId, windowLabel }) {
   const updateQty = (id, d) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Math.max(0.001, +(i.cantidad + d).toFixed(3)) } : i)));
   const setQty = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Number(v) || 0 } : i)));
   const setLineDisc = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, descuento: Number(v) || 0 } : i)));
+  const setUnidad = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, unidad: v } : i)));
   const remove = (id) => setCart((c) => c.filter((i) => i.product_id !== id));
 
   const totals = useMemo(() => {
@@ -383,16 +394,19 @@ export default function POS({ windowId, windowLabel }) {
 
     const descGlobalTotal = Math.min(brutoTotal, +((descGlobalAmount || 0) + descPctAmount).toFixed(2));
 
+    // Los precios del carrito son NETOS (sin IVA, tal como se guardan en la BD).
+    // Si el toggle "Precios incluyen IVA" está activo se SUMA el IVA sobre el neto.
     let subtotal = 0, iva = 0;
     cart.forEach((i) => {
-      const base = i.cantidad * i.precio - (i.descuento || 0);
-      const neto = base / (1 + i.iva_tasa / 100);
-      subtotal += neto; iva += base - neto;
+      const neto = i.cantidad * i.precio - (i.descuento || 0);
+      subtotal += neto;
+      if (incluyeIva) iva += neto * (i.iva_tasa / 100);
     });
     const sub = subtotal - descGlobalTotal;
-    const total = Math.max(0, +(sub + iva).toFixed(2));
+    const granTotalIva = incluyeIva ? iva : 0;
+    const total = Math.max(0, +(sub + granTotalIva).toFixed(2));
     return { subtotal: +sub.toFixed(2), iva: +iva.toFixed(2), total, descPctAmount, descGlobalAmount, descGlobalTotal };
-  }, [cart, descGlobal, descPct, descMode]);
+  }, [cart, descGlobal, descPct, descMode, incluyeIva]);
 
   const pagado = pagos.reduce((s, p) => s + Number(p.monto || 0), 0);
   const cambio = Math.max(0, +(pagado - totals.total).toFixed(2));
@@ -457,6 +471,7 @@ export default function POS({ windowId, windowLabel }) {
         pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0) })) : [],
         lista_precios: Number(lista),
         tipo_venta: tipoVenta,
+        precios_incluyen_iva: incluyeIva,
         // Operador: el backend fuerza vendedor_id = usuario autenticado salvo que el
         // rol tenga el permiso de cambiar operador. Solo se envía si el usuario lo tiene.
         vendedor_id: can("venta.cambiar_operador") ? (vendedorId || user.id) : null,
@@ -594,42 +609,70 @@ export default function POS({ windowId, windowLabel }) {
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+          <div className="flex-1 overflow-auto">
             {cart.length === 0 && <div className="p-8 text-center text-slate-300 text-sm">Carrito vacío</div>}
-            {cart.map((i) => {
-              const tasa = Number(i.iva_tasa || 16) / 100;
-              const linBruto = i.cantidad * i.precio - (i.descuento || 0);
-              const uniSin = linBruto ? +(i.precio / (1 + tasa)).toFixed(2) : 0;
-              const uniIva = +(i.precio - uniSin).toFixed(2);
-              return (
-              <div key={i.product_id} onClick={() => setSelected(i.product_id)}
-                className={`p-1 cursor-pointer ${selected === i.product_id ? "bg-[#C1401E]/[0.035] ring-1 ring-inset ring-[#C1401E]/[0.18]" : ""}`} data-testid={`cart-item-${i.codigo}`}>
-                <div className="flex justify-between gap-1">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-medium truncate">{i.descripcion}</div>
-                    <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
-                      className="text-[10px] text-slate-400 hover:text-[#C1401E] flex items-center gap-1" data-testid={`cart-price-${i.codigo}`}>
-                      {i.codigo} · <span className="underline decoration-dotted">{money(i.precio)}</span> c/u <Tag className="w-2.5 h-2.5" />
-                    </button>
-                    <div className="text-[10px] text-slate-400 tabular-nums" data-testid={`cart-neto-${i.codigo}`}>
-                      Sin IVA {money(uniSin)} · IVA {money(uniIva)}
-                    </div>
-                    {selected === i.product_id && <kbd className="text-[8px] bg-slate-100 px-1 py-0.5 rounded text-slate-400">F6</kbd>}
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600"><Trash2 className="w-3 h-3" /></button>
-                </div>
-                <div className="flex items-center gap-1 mt-0.5" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center border border-slate-200 rounded">
-                    <button onClick={() => updateQty(i.product_id, -1)} className="px-1.5 py-0.5 hover:bg-slate-100"><Minus className="w-2.5 h-2.5" /></button>
-                    <Input value={i.cantidad} onChange={(e) => setQty(i.product_id, e.target.value)} className="w-12 h-6 border-0 text-center p-0 text-xs" data-testid={`cart-qty-${i.codigo}`} />
-                    <button onClick={() => updateQty(i.product_id, 1)} className="px-1.5 py-0.5 hover:bg-slate-100"><Plus className="w-2.5 h-2.5" /></button>
-                  </div>
-                  <Input type="number" value={i.descuento} onChange={(e) => setLineDisc(i.product_id, e.target.value)} placeholder="Desc $" className="w-16 h-6 text-xs" title="Descuento" />
-                  <span className="ml-auto text-xs font-semibold tabular-nums">{money(linBruto)}</span>
-                </div>
-              </div>
-              );
-            })}
+            {cart.length > 0 && (
+              <table className="w-full text-xs border-collapse" data-testid="cart-table">
+                <thead className="sticky top-0 bg-slate-50 z-10">
+                  <tr className="text-left text-[10px] uppercase tracking-wide text-slate-500">
+                    <th className="px-1.5 py-1.5 font-semibold">Código</th>
+                    <th className="px-1.5 py-1.5 font-semibold">Cant.</th>
+                    <th className="px-1.5 py-1.5 font-semibold">Unidad</th>
+                    <th className="px-1.5 py-1.5 font-semibold">Descripción</th>
+                    <th className="px-1.5 py-1.5 font-semibold text-right">IVA %</th>
+                    <th className="px-1.5 py-1.5 font-semibold text-right">Precio</th>
+                    <th className="px-1.5 py-1.5 font-semibold text-right">Importe</th>
+                    <th className="px-1.5 py-1.5 font-semibold text-center">+/-</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {cart.map((i) => {
+                    const importe = +(i.cantidad * i.precio).toFixed(2);
+                    return (
+                      <tr key={i.product_id} onClick={() => setSelected(i.product_id)}
+                        className={`cursor-pointer align-middle ${selected === i.product_id ? "bg-[#C1401E]/[0.04]" : "hover:bg-slate-50"}`}
+                        data-testid={`cart-item-${i.codigo}`}>
+                        <td className="px-1.5 py-1 font-mono text-[10px] text-slate-500 whitespace-nowrap">{i.codigo}</td>
+                        <td className="px-1.5 py-1">
+                          <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => updateQty(i.product_id, -1)} className="px-1 py-0.5 hover:bg-slate-100 rounded"><Minus className="w-3 h-3" /></button>
+                            <Input value={i.cantidad} onChange={(e) => setQty(i.product_id, e.target.value)}
+                              inputMode="decimal" type="number" step="any" min="0"
+                              className="w-14 h-6 border-0 text-center p-0 text-xs" data-testid={`cart-qty-${i.codigo}`} />
+                            <button onClick={() => updateQty(i.product_id, 1)} className="px-1 py-0.5 hover:bg-slate-100 rounded"><Plus className="w-3 h-3" /></button>
+                          </div>
+                        </td>
+                        <td className="px-1.5 py-1" onClick={(e) => e.stopPropagation()}>
+                          <Input value={i.unidad} onChange={(e) => setUnidad(i.product_id, e.target.value)}
+                            list="pos-unidades" className="w-16 h-6 p-0 text-center text-xs" data-testid={`cart-unidad-${i.codigo}`} />
+                          <datalist id="pos-unidades">
+                            {UNIDADES_OPC.map((u) => <option key={u} value={u} />)}
+                          </datalist>
+                        </td>
+                        <td className="px-1.5 py-1 text-[11px] text-slate-700 min-w-[130px]">
+                          <div className="truncate max-w-[180px]">{i.descripcion}</div>
+                          {i.descuento > 0 && <div className="text-[9px] text-[#C1401E]">Desc -{money(i.descuento)}</div>}
+                        </td>
+                        <td className="px-1.5 py-1 text-right tabular-nums text-slate-500 whitespace-nowrap">{i.iva_tasa}%</td>
+                        <td className="px-1.5 py-1 text-right tabular-nums whitespace-nowrap">
+                          <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
+                            className="underline decoration-dotted hover:text-[#C1401E]" data-testid={`cart-price-${i.codigo}`}>
+                            {money(i.precio)}
+                          </button>
+                        </td>
+                        <td className="px-1.5 py-1 text-right font-semibold tabular-nums whitespace-nowrap">
+                          {!(i.descuento > 0) && money(importe)}
+                          {i.descuento > 0 && <span className="line-through text-slate-400">{money(importe)}</span>}
+                        </td>
+                        <td className="px-1.5 py-1 text-center whitespace-nowrap">
+                          <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600" data-testid={`cart-remove-${i.codigo}`}><Trash2 className="w-3.5 h-3.5" /></button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
           </div>
 
           <div className="p-3 border-t border-slate-200 space-y-2">
@@ -661,8 +704,8 @@ export default function POS({ windowId, windowLabel }) {
               </button>
             </div>
             <div className="text-sm space-y-0.5">
-              {!incluyeIva && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>}
-              {!incluyeIva && <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>}
+              {incluyeIva && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>}
+              {incluyeIva && <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>}
               {totals.descGlobalAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}</span><span>-{money(totals.descGlobalAmount)}</span></div>}
               {totals.descPctAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
               <div className="flex justify-between font-display text-2xl font-black pt-1"><span>Total</span><span data-testid="pos-total">{money(totals.total)}</span></div>
@@ -921,8 +964,7 @@ export default function POS({ windowId, windowLabel }) {
                   <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" className="h-12 mx-auto mb-1 object-contain" />
                   <div className="font-bold text-[11px]">RAYMUNDO GOMEZ DIAZ</div>
                   <div className="font-bold text-[14px]">{settings.empresa_nombre || "Grupo RYSA"}</div>
-                  {settings.direccion && <div>{settings.direccion}</div>}
-                  {(settings.ciudad || settings.estado) && <div>{[settings.ciudad, settings.estado].filter(Boolean).join(", ")}</div>}
+                  {[settings.direccion, [settings.ciudad, settings.estado, settings.cp].filter(Boolean).join(", ")].filter(Boolean).map((l, i) => <div key={i}>{l}</div>)}
                   {settings.telefono && <div>Tel: {settings.telefono}</div>}
                   {settings.rfc && <div>RFC: {settings.rfc}</div>}
                 </div>
@@ -930,22 +972,35 @@ export default function POS({ windowId, windowLabel }) {
                 <div>{ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FOLIO"}: {ticket.folio}</div>
                 <div>Fecha: {ticket.fecha?.slice(0, 16).replace("T", " ")}</div>
                 <div>Cliente: {ticket.cliente_nombre}</div>
-                <div>Atendió: {ticket.vendedor_nombre}</div>
                 <div className="border-t border-dashed border-black my-1" />
-                <table className="w-full">
-                  <tbody>
-                    {ticket.items.map((i, k) => (
-                      <tr key={k}><td className="align-top">{i.cantidad} x {i.descripcion}<br /><span className="text-[10px]">{money(i.precio)} c/u</span></td><td className="text-right align-top">{money(i.cantidad * i.precio - (i.descuento || 0))}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="text-center font-bold text-[11px]">DESCRIPCION</div>
+                <div className="border-t border-t-2 border-black my-1" />
+                {ticket.items.map((i, k) => {
+                  const importe = i.cantidad * i.precio - (i.descuento || 0);
+                  const descuento = i.descuento || 0;
+                  return (
+                    <div key={k}>
+                      <div>{i.descripcion}</div>
+                      <div className="flex justify-between">
+                        <span className="whitespace-pre">{String(i.cantidad).padEnd(2)}{i.unidad}</span>
+                        <span>{money(i.cantidad * i.precio)}</span>
+                        <span>{money(importe)}</span>
+                      </div>
+                      {descuento > 0 && <div className="flex justify-between text-[11px] text-slate-600"><span>Descuento</span><span>-{money(descuento)}</span></div>}
+                    </div>
+                  );
+                })}
                 <div className="border-t border-dashed border-black my-1" />
-                {!incluyeIva && <div className="flex justify-between"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>}
-                {!incluyeIva && <div className="flex justify-between"><span>IVA</span><span>{money(ticket.iva_total)}</span></div>}
-                <div className="flex justify-between font-bold text-[14px]"><span>TOTAL</span><span>{money(ticket.total)}</span></div>
-                {incluyeIva && <div className="text-center text-[10px]">Precios con IVA incluido</div>}
-                {ticket.tipo_venta === "directa" && ticket.condicion === "contado" && (<><div className="flex justify-between mt-1"><span>Pagado</span><span>{money((ticket.pagos || []).reduce((s, p) => s + p.monto, 0))}</span></div><div className="flex justify-between"><span>Cambio</span><span>{money(ticket.cambio)}</span></div></>)}
+                {incluyeIva && <div className="flex justify-between"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>}
+                {incluyeIva && <div className="flex justify-between"><span>IVA</span><span>{money(ticket.iva_total)}</span></div>}
+                {ticket.descuento_total > 0 && <div className="flex justify-between"><span>Descuento</span><span>-{money(ticket.descuento_total)}</span></div>}
+                <div className="flex justify-between font-bold text-[14px]"><span>Total a pagar</span><span>{money(ticket.total)}</span></div>
+                <div className="text-center font-bold text-[10px]">({numeroALetras(ticket.total)})</div>
+                {ticket.tipo_venta === "directa" && ticket.condicion === "contado" && (<><div className="flex justify-between mt-1"><span>Recibido</span><span>{money((ticket.pagos || []).reduce((s, p) => s + p.monto, 0))}</span></div><div className="flex justify-between"><span>Cambio</span><span>{money(ticket.cambio)}</span></div></>)}
                 {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CRÉDITO ** Saldo: {money(ticket.saldo)}</div>}
+                <div className="flex justify-between"><span>Articulos vendidos</span><span>{ticket.items.reduce((s, i) => s + Number(i.cantidad || 0), 0)}</span></div>
+                <div className="flex justify-between"><span>Atendido por</span><span>{ticket.vendedor_nombre}</span></div>
+                <div className="text-center font-bold mt-1">Verifique su compra y cambio</div>
                 <div className="border-t border-dashed border-black my-1" />
                 {ticket.id && (
                   <div className="text-center">
@@ -1035,16 +1090,19 @@ export default function POS({ windowId, windowLabel }) {
                 {/* Totales */}
                 <div className="flex justify-end mt-3" style={{ fontSize: "10pt" }}>
                   <div style={{ width: 250 }}>
-                    {!incluyeIva && (
+                    {incluyeIva && (
                       <div className="flex justify-between py-1"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>
                     )}
-                    {!incluyeIva && (
+                    {incluyeIva && (
                       <div className="flex justify-between py-1"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(ticket.iva_total)}</span></div>
+                    )}
+                    {ticket.descuento_total > 0 && (
+                      <div className="flex justify-between py-1"><span>Descuento</span><span>-{money(ticket.descuento_total)}</span></div>
                     )}
                     <div className="flex justify-between py-1" style={{ fontWeight: 700, fontSize: "12pt", color: "#C1401E", borderTop: "2px solid #C1401E" }}>
                       <span>TOTAL</span><span>{money(ticket.total)}</span>
                     </div>
-                    {incluyeIva && <div style={{ fontSize: "8pt", color: "#94a3b8", textAlign: "right" }}>IVA incluido</div>}
+                    {!incluyeIva && <div style={{ fontSize: "8pt", color: "#94a3b8", textAlign: "right" }}>Precios sin IVA</div>}
                     {ticket.condicion === "credito" && (
                       <div style={{ fontSize: "9pt", color: "#dc2626", textAlign: "right", marginTop: 4 }}>
                         Saldo pendiente: {money(ticket.saldo)}
