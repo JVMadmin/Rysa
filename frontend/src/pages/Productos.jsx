@@ -60,6 +60,7 @@ export default function Productos() {
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [nonce, setNonce] = useState(0);
+  const [stockResumen, setStockResumen] = useState(null);
   const pageSize = 50;
   const [sort, setSort] = useState({ key: "", dir: "asc" });
   const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
@@ -91,10 +92,24 @@ export default function Productos() {
     setRows(res.data);
     setTotal(Number(res.headers["x-total-count"] ?? res.data.length));
     setLoading(false);
+    loadStockResumen();
+  };
+  const loadStockResumen = async () => {
+    try {
+      const [baja, sin] = await Promise.all([
+        api.get("/products", { params: { filtro: "bajo_stock", limit: 1 } }),
+        api.get("/products", { params: { filtro: "sin_existencia", limit: 1 } }),
+      ]);
+      setStockResumen({
+        bajo: Number(baja.headers["x-total-count"] ?? baja.data.length),
+        sin: Number(sin.headers["x-total-count"] ?? sin.data.length),
+      });
+    } catch {}
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [estado, filtro, categoria, page, nonce]);
   useEffect(() => {
     api.get("/categories").then(({ data }) => setCategorias(data)).catch(() => {});
+    loadStockResumen();
   }, []);
   const doSearch = () => { setPage(0); setNonce((n) => n + 1); };
 
@@ -123,6 +138,7 @@ export default function Productos() {
       setMovForm({ tipo: "entrada", cantidad: "", costo: movProd.costo ? String(movProd.costo) : "", documento: "", motivo: "", observaciones: "" });
       const { data } = await api.get(`/products/${movProd.id}/movimientos`);
       setMovs(data);
+      if (data.length) setMovProd((p) => (p ? { ...p, existencia: data[data.length - 1].existencia_resultante } : p));
       load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setSavingMov(false); }
@@ -260,6 +276,23 @@ export default function Productos() {
         </Select>
         <Button variant="outline" onClick={doSearch}><Search className="w-4 h-4" /></Button>
       </div>
+
+      {/* Alertas de stock con acceso directo al filtro */}
+      {stockResumen && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="stock-resumen">
+          <button onClick={() => { setFiltro(stockResumen.sin > 0 ? "sin_existencia" : filtro); setPage(0); }}
+            className={`flex items-center gap-1.5 px-3 h-8 rounded-md text-xs font-medium border transition-colors ${stockResumen.sin > 0 ? (filtro === "sin_existencia" ? "border-red-500 bg-red-50 text-red-700" : "border-red-200 text-red-600 hover:bg-red-50") : "border-slate-200 text-slate-400"}`} data-testid="chip-sin-existencia">
+            <span className="w-2 h-2 rounded-full bg-red-500" /> {stockResumen.sin} sin existencia
+          </button>
+          <button onClick={() => { setFiltro(stockResumen.bajo > 0 ? "bajo_stock" : filtro); setPage(0); }}
+            className={`flex items-center gap-1.5 px-3 h-8 rounded-md text-xs font-medium border transition-colors ${stockResumen.bajo > 0 ? (filtro === "bajo_stock" ? "border-amber-500 bg-amber-50 text-amber-700" : "border-amber-200 text-amber-600 hover:bg-amber-50") : "border-slate-200 text-slate-400"}`} data-testid="chip-bajo-stock">
+            <span className="w-2 h-2 rounded-full bg-amber-500" /> {stockResumen.bajo} bajo stock
+          </button>
+          {filtro !== "all" && (
+            <Button variant="ghost" size="sm" onClick={() => { setFiltro("all"); setPage(0); }} data-testid="chip-limpiar">Limpiar filtro</Button>
+          )}
+        </div>
+      )}
 
       <div className="card-soft">
         <TableScroller testid="productos-scroller">

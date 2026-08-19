@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
   UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3, Smartphone, Bug,
-  Search, ChevronRight,
+  Search, ChevronRight, MapPinned, Radar, Route as RouteIcon,
 } from "lucide-react";
 import {
   Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
@@ -22,6 +22,9 @@ const NAV = [
   { to: "/app/productos", label: "Productos", icon: Package },
   { to: "/app/categorias", label: "Categorías", icon: Tags },
   { to: "/app/clientes", label: "Clientes", icon: Users },
+  { to: "/app/visitas", label: "Visitas Comerciales", icon: MapPinned, perm: "visita.ver" },
+  { to: "/app/mi-ruta", label: "Mi Ruta", icon: RouteIcon, perm: "visita.ver" },
+  { to: "/app/supervision", label: "Supervisión Comercial", icon: Radar, perm: "supervision.ver" },
   { to: "/app/cxc", label: "Cuentas por Cobrar", icon: HandCoins, perm: "cxc.ver" },
   { to: "/app/caja", label: "Caja", icon: Wallet, perm: "caja.ver" },
   { to: "/app/usuarios", label: "Usuarios", icon: UserCog, perm: "usuarios.ver" },

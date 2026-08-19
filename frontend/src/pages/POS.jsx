@@ -1,9 +1,9 @@
-import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback, useContext } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { numeroALetras } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
-import { useCart } from "@/context/CartContext";
+import { useCart, CartContext } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -91,6 +91,7 @@ export default function POS({ windowId, windowLabel }) {
   const location = useLocation();
   const nav = useNavigate();
   const { user, can } = useAuth();
+  const { clearCartState } = useContext(CartContext);
   const {
     cart, setCart,
     descGlobal, setDescGlobal,
@@ -145,6 +146,8 @@ export default function POS({ windowId, windowLabel }) {
   const [abono, setAbono] = useState({ monto: "", metodo: "efectivo", referencia: "" });
   const [abonoSaving, setAbonoSaving] = useState(false);
   const [printMode, setPrintMode] = useState("thermal"); // thermal | invoice
+  const [sucursales, setSucursales] = useState([]);
+  const incluyeIvaDefault = useRef(true); // valor de settings.precios_incluyen_iva
 
   const injectPageSize = useCallback((size) => {
     let el = document.getElementById("print-page-size");
@@ -173,6 +176,10 @@ export default function POS({ windowId, windowLabel }) {
   }, [injectPageSize]);
   const condicion = formaPago === "credito" ? "credito" : "contado";
   const clienteSel = useMemo(() => clients.find((c) => c.id === clienteId) || null, [clients, clienteId]);
+  // Datos frescos del cliente del ticket impreso (RFC, dirección, teléfono, razón social).
+  const ticketCliente = useMemo(() => (ticket ? clients.find((c) => c.id === ticket.cliente_id) || null : null), [ticket, clients]);
+  // Nombre de la sucursal donde se realizó la venta (por sucursal_id del ticket).
+  const ticketSucursal = useMemo(() => (ticket ? sucursales.find((s) => s.id === ticket.sucursal_id) || null : null), [ticket, sucursales]);
   const credInfo = useMemo(() => {
     if (!clienteSel || clienteSel.codigo === "PUBLICO") return null;
     const lim = Number(clienteSel.limite_credito || 0), sal = Number(clienteSel.saldo || 0);
@@ -191,7 +198,8 @@ export default function POS({ windowId, windowLabel }) {
       if (pub) { setPubClientId(pub.id); if (!clienteId) setClienteId(pub.id); }
     });
     api.get("/vendedores").then((r) => setVendedores(r.data));
-    api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); if (r.data?.listas_precios_pct?.length) setListasPct(r.data.listas_precios_pct); if (r.data && r.data.precios_incluyen_iva !== undefined) setIncluyeIva(!!r.data.precios_incluyen_iva); });
+    api.get("/sucursales").then((r) => setSucursales(r.data || [])).catch(() => {});
+    api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); if (r.data?.listas_precios_pct?.length) setListasPct(r.data.listas_precios_pct); if (r.data && r.data.precios_incluyen_iva !== undefined) { setIncluyeIva(!!r.data.precios_incluyen_iva); incluyeIvaDefault.current = !!r.data.precios_incluyen_iva; } });
     loadSuspended();
     refreshFolio();
   }, []);
@@ -463,6 +471,35 @@ export default function POS({ windowId, windowLabel }) {
     setPayOpen(true);
   };
 
+  // Reset completo del POS: la venta siguiente NO debe heredar nada de la
+  // anterior (cliente Público General, carrito vacío, forma de pago contado,
+  // tipo de venta directa, lista 1, sin descuentos ni notas ni modales).
+  const resetPos = useCallback(() => {
+    // Elimina por completo el estado persistente del carrito de esta ventana.
+    clearCartState(windowId);
+    // Estados locales temporales: modales, selecciones y filtros del catálogo.
+    setIncluyeIva(incluyeIvaDefault.current);
+    setClientQuery("");
+    setClientOpen(false);
+    setLinePrice(null);
+    setSelProd(null);
+    setLibreVal("");
+    setPayOpen(false);
+    setInvOverride(null);
+    setInvReason("");
+    setVista("todos");
+    setCategoriaSel("");
+    setQ(""); qRef.current = ""; setResults([]);
+    setSelected(null);
+    setAbonoCli(null);
+    setAbono({ monto: "", metodo: "efectivo", referencia: "" });
+    setPrintMode("thermal");
+    setTicket(null);
+    // Cliente vuelve a Público General (el resto lo restaura CartContext).
+    if (pubClientId) setClienteId(pubClientId);
+    refreshFolio();
+  }, [windowId, clearCartState, pubClientId, refreshFolio, setClienteId]);
+
   const confirmar = async () => {
     try {
       const payload = {
@@ -482,20 +519,19 @@ export default function POS({ windowId, windowLabel }) {
         override_reason: invReason || null,
       };
       const { data } = await api.post("/sales", payload);
+      // Reset completo: la siguiente venta comienza limpia (Público General,
+      // carrito vacío, contado, directa, sin descuentos ni modales abiertos).
+      resetPos();
       setTicket(data);
       setWaPhone(clienteSel?.whatsapp || clienteSel?.telefono || clienteSel?.celular || "");
       toast.success(`${tipoVenta === "cotizacion" ? "Cotización" : "Venta"} ${data.folio} registrada`);
-      setCart([]); setDescGlobal(0); setDescPct(0); setPayOpen(false); setPagos([{ metodo: "efectivo", monto: "" }]); setSelected(null);
-      // Tras finalizar la venta el cliente vuelve a Público General.
-      if (pubClientId) { setClienteId(pubClientId); setClientQuery(""); }
-      refreshFolio();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   const suspender = async () => {
     if (cart.length === 0) return toast.error("Nada que suspender");
     await api.post("/sales/suspend", { cliente_id: clienteId, items: cart, descuento_global: totals.descGlobalAmount, condicion, pagos: [], lista_precios: Number(lista), tipo_venta: tipoVenta });
-    toast.success("Venta suspendida"); setCart([]); setDescGlobal(0); loadSuspended();
+    toast.success("Venta suspendida"); resetPos(); loadSuspended();
   };
   const recuperar = async (s) => { setCart(s.payload.items); setDescGlobal(s.payload.descuento_global || 0); setClienteId(s.payload.cliente_id || clienteId); await api.delete(`/sales-suspended/${s.id}`); setSuspOpen(false); loadSuspended(); toast.info("Venta recuperada"); };
 
@@ -971,12 +1007,14 @@ export default function POS({ windowId, windowLabel }) {
               <div id="thermal-ticket" className="thermal font-mono text-[12px] text-black bg-white p-2 mx-auto">
                 <div className="text-center">
                   <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" className="h-12 mx-auto mb-1 object-contain" />
-                  <div className="font-bold text-[11px]">RAYMUNDO GOMEZ DIAZ</div>
+                  <div className="font-bold text-[11px]">{settings.razon_social || "RAYMUNDO GOMEZ DIAZ"}</div>
                   <div className="font-bold text-[14px]">{settings.empresa_nombre || "Grupo RYSA"}</div>
-                  {[settings.direccion, [settings.ciudad, settings.estado, settings.cp].filter(Boolean).join(", ")].filter(Boolean).map((l, i) => <div key={i}>{l}</div>)}
-                  {settings.telefono && <div>Tel: {settings.telefono}</div>}
-                  {settings.rfc && <div>RFC: {settings.rfc}</div>}
+                  {settings.ticket_config?.mostrar_direccion !== false && [settings.direccion, [settings.ciudad, settings.estado, settings.cp].filter(Boolean).join(", ")].filter(Boolean).map((l, i) => <div key={i}>{l}</div>)}
+                  {settings.ticket_config?.mostrar_telefono !== false && settings.telefono && <div>Tel: {settings.telefono}</div>}
+                  {settings.ticket_config?.mostrar_rfc !== false && settings.rfc && <div>RFC: {settings.rfc}</div>}
+                  {ticketSucursal && <div>{ticketSucursal.nombre}</div>}
                 </div>
+                {settings.ticket_config?.encabezado && <div className="text-center text-[11px]">{settings.ticket_config.encabezado}</div>}
                 <div className="border-t border-dashed border-black my-1" />
                 <div>{ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FOLIO"}: {ticket.folio}</div>
                 <div>Fecha: {ticket.fecha?.slice(0, 16).replace("T", " ")}</div>
@@ -1019,7 +1057,7 @@ export default function POS({ windowId, windowLabel }) {
                     <div className="text-[9px] text-slate-500">{window.location.origin}/verificar/{ticket.id}</div>
                   </div>
                 )}
-                <div className="text-center text-[11px]">¡Gracias por su compra!</div>
+                <div className="text-center text-[11px]">{settings.ticket_config?.pie || "¡Gracias por su compra!"}</div>
               </div>
               )}
 
@@ -1033,12 +1071,13 @@ export default function POS({ windowId, windowLabel }) {
                   </div>
                   <div className="text-right" style={{ fontSize: "9pt", color: "#475569" }}>
                     <div style={{ fontSize: "14pt", fontWeight: 700, color: "#C1401E" }}>{settings.empresa_nombre || "Grupo RYSA"}</div>
-                    <div>RAYMUNDO GOMEZ DIAZ</div>
+                    <div>{settings.razon_social || "RAYMUNDO GOMEZ DIAZ"}</div>
                     {settings.rfc && <div>RFC: {settings.rfc}</div>}
                     {settings.direccion && <div>{settings.direccion}</div>}
                     {[settings.ciudad, settings.estado, settings.cp].filter(Boolean).join(", ")}
                     {settings.telefono && <div>Tel: {settings.telefono}</div>}
                     {settings.correo && <div>{settings.correo}</div>}
+                    {ticketSucursal && <div style={{ fontWeight: 600, marginTop: 2 }}>Sucursal: {ticketSucursal.nombre}{ticketSucursal.codigo ? ` (${ticketSucursal.codigo})` : ""}</div>}
                   </div>
                 </div>
 
@@ -1057,12 +1096,18 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="flex justify-between mb-4" style={{ fontSize: "9pt" }}>
                   <div>
                     <strong>Cliente:</strong> {ticket.cliente_nombre}<br />
+                    {ticketCliente?.rfc && <><strong>RFC:</strong> {ticketCliente.rfc}<br /></>}
+                    {ticketCliente?.razon_social && ticketCliente.razon_social !== ticket.cliente_nombre && <><strong>Razón social:</strong> {ticketCliente.razon_social}<br /></>}
+                    {ticketCliente?.direccion && <><strong>Dirección:</strong> {ticketCliente.direccion}{ticketCliente.ciudad ? `, ${ticketCliente.ciudad}` : ""}<br /></>}
+                    {(ticketCliente?.telefono || ticketCliente?.whatsapp) && <><strong>Tel:</strong> {ticketCliente.telefono || ticketCliente.whatsapp}<br /></>}
                     <strong>Atendió:</strong> {ticket.vendedor_nombre}<br />
-                    {ticket.condicion === "credito" && <><strong>Condición:</strong> Crédito<br /></>}
+                    {ticketSucursal && <><strong>Sucursal:</strong> {ticketSucursal.nombre}<br /></>}
                   </div>
                   <div className="text-right">
                     <strong>Fecha:</strong> {ticket.fecha?.slice(0, 16).replace("T", " ")}<br />
-                    <strong>Vencimiento:</strong> {ticket.fecha?.slice(0, 10)}<br />
+                    <strong>Folio:</strong> {ticket.folio}<br />
+                    <strong>Condición:</strong> {ticket.condicion === "credito" ? "Crédito" : "Contado"}<br />
+                    {ticket.condicion === "credito" && <><strong>Vencimiento:</strong> {ticket.fecha?.slice(0, 10)}<br /></>}
                   </div>
                 </div>
 
@@ -1070,32 +1115,44 @@ export default function POS({ windowId, windowLabel }) {
                 <table>
                   <thead>
                     <tr>
-                      <th style={{ width: "12%" }}>Código</th>
+                      <th style={{ width: "11%" }}>Código</th>
                       <th>Descripción</th>
-                      <th className="text-right" style={{ width: "10%" }}>Cant.</th>
-                      <th className="text-right" style={{ width: "15%" }}>Precio</th>
-                      <th className="text-right" style={{ width: "10%" }}>IVA</th>
-                      <th className="text-right" style={{ width: "13%" }}>Descuento</th>
-                      <th className="text-right" style={{ width: "15%" }}>Importe</th>
+                      <th style={{ width: "6%" }}>Und.</th>
+                      <th className="text-right" style={{ width: "8%" }}>Cant.</th>
+                      <th className="text-right" style={{ width: "13%" }}>Precio</th>
+                      <th className="text-right" style={{ width: "11%" }}>IVA</th>
+                      <th className="text-right" style={{ width: "11%" }}>Desc.</th>
+                      <th className="text-right" style={{ width: "13%" }}>Importe</th>
                     </tr>
                   </thead>
                   <tbody>
                     {ticket.items.map((i, k) => {
-                      const linBruto = i.cantidad * i.precio - (i.descuento || 0);
+                      const linImporte = i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0));
+                      const linIva = i.iva_linea ?? (incluyeIva ? linImporte * ((i.iva_tasa || 16) / 100) : 0);
+                      const uniPrecio = i.precio_bruto ?? i.precio;
                       return (
                         <tr key={k}>
                           <td style={{ fontSize: "8pt" }}>{i.codigo}</td>
                           <td>{i.descripcion}{i.comentario ? <><br /><span style={{ fontSize: "7.5pt", color: "#C1401E" }}>• {i.comentario}</span></> : null}</td>
+                          <td>{i.unidad}</td>
                           <td className="text-right">{i.cantidad}</td>
-                          <td className="text-right">{money(i.precio)}</td>
-                          <td className="text-right">{i.iva_tasa}%</td>
+                          <td className="text-right">{money(uniPrecio)}</td>
+                          <td className="text-right">{i.iva_tasa ? `${money(linIva)} (${i.iva_tasa}%)` : "-"}</td>
                           <td className="text-right">{i.descuento ? money(i.descuento) : "-"}</td>
-                          <td className="text-right" style={{ fontWeight: 600 }}>{money(linBruto)}</td>
+                          <td className="text-right" style={{ fontWeight: 600 }}>{money(linImporte)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+
+                {/* Forma de pago */}
+                <div className="flex justify-between mt-2" style={{ fontSize: "9pt", color: "#475569" }}>
+                  <span>
+                    <strong>Forma de pago:</strong> {(ticket.pagos || []).map((p) => `${({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito" })[p.metodo] || p.metodo}${p.monto ? ` ${money(p.monto)}` : ""}`).join(" + ") || (ticket.condicion === "credito" ? "Crédito" : "Contado")}
+                  </span>
+                  {ticket.cambio > 0 && <span><strong>Cambio:</strong> {money(ticket.cambio)}</span>}
+                </div>
 
                 {/* Totales */}
                 <div className="flex justify-end mt-3" style={{ fontSize: "10pt" }}>

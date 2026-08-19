@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, formatApiError, money } from "@/lib/api";
+import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,7 @@ export default function Ventas() {
   const [factClienteOpen, setFactClienteOpen] = useState(false);
   const [factBilling, setFactBilling] = useState({ rfc: "", razon_social: "", cp: "", reg_fiscal: "", uso_cfdi: "", direccion: "" });
   const [clientes, setClientes] = useState([]);
+  const [sucursales, setSucursales] = useState([]);
   const [busy, setBusy] = useState("");
   const [sel, setSel] = useState([]);
   const [sort, setSort] = useState({ key: "fecha", dir: "desc" });
@@ -85,12 +86,20 @@ export default function Ventas() {
   useEffect(() => {
     api.get("/vendedores").then((r) => setVendedores(r.data)).catch(() => {});
     api.get("/clients").then((r) => setClientes(r.data)).catch(() => {});
+    api.get("/sucursales").then((r) => setSucursales(r.data || [])).catch(() => {});
   }, []);
 
   const cancelar = async () => {
     if (!motivo.trim()) return toast.error("Indica el motivo");
     try { await api.post(`/sales/${cancelSale.id}/cancelar`, { motivo }); toast.success("Venta cancelada y revertida"); setCancelSale(null); setMotivo(""); load(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const reimprimir = async (s) => {
+    try {
+      const { data } = await api.post(`/sales/${s.id}/ticket-pdf`);
+      window.open(fileUrl(data.url), "_blank");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   const irRemitir = (s, cancelarOriginal) => {
@@ -176,7 +185,7 @@ export default function Ventas() {
           </Select>
           <Select value={estado} onValueChange={setEstado}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="all">Todos estados</SelectItem><SelectItem value="confirmada">Confirmadas</SelectItem><SelectItem value="cancelada">Canceladas</SelectItem></SelectContent>
+            <SelectContent><SelectItem value="all">Todos estados</SelectItem><SelectItem value="confirmada">Confirmadas</SelectItem><SelectItem value="cancelada">Canceladas</SelectItem><SelectItem value="cotizacion">Cotizaciones</SelectItem></SelectContent>
           </Select>
           <div className="relative flex-1 min-w-[180px]">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -210,7 +219,7 @@ export default function Ventas() {
               return (
               <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`venta-row-${s.folio}`}>
                 <td className="p-3">{can("venta.facturar") && facturable ? <input type="checkbox" checked={sel.includes(s.id)} onChange={() => toggleSel(s.id)} data-testid={`sel-${s.folio}`} /> : null}</td>
-                <td className="p-3"><Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge></td>
+                <td className="p-3"><Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : s.estado === "cotizacion" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge></td>
                 <td className="p-3 font-medium text-[#C1401E]">{s.folio}</td>
                 <td className="p-3 text-slate-500">{s.fecha?.slice(0, 10)} {s.hora}</td>
                 <td className="p-3">{s.cliente_nombre}</td>
@@ -240,15 +249,36 @@ export default function Ventas() {
           {detalle && (
             <div className="text-sm">
               <div className="text-slate-500 mb-2">{detalle.fecha?.slice(0, 16).replace("T", " ")} · Cliente: {detalle.cliente_nombre} · Vendedor: {detalle.vendedor_nombre || detalle.usuario_nombre}</div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-slate-600">
+                <span>Condición: <b>{detalle.condicion === "credito" ? "Crédito" : "Contado"}</b></span>
+                {sucursales.find((x) => x.id === detalle.sucursal_id)?.nombre && <span>Sucursal: <b>{sucursales.find((x) => x.id === detalle.sucursal_id).nombre}</b></span>}
+                {(detalle.pagos || []).length > 0 && <span>Pago: <b>{(detalle.pagos || []).map((p) => ({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito" })[p.metodo] || p.metodo).join(" + ")}</b></span>}
+                {detalle.tipo_venta === "cotizacion" && <span className="text-amber-700"><b>Cotización</b></span>}
+              </div>
               <table className="w-full mb-3">
-                <thead><tr className="text-xs text-slate-400 text-left"><th>Cant</th><th>Producto</th><th className="text-right">Importe</th></tr></thead>
-                <tbody>{detalle.items.map((i, k) => <tr key={k} className="border-t border-slate-100"><td className="py-1">{i.cantidad}</td><td className="py-1">{i.descripcion}</td><td className="py-1 text-right">{money(i.cantidad * i.precio - (i.descuento || 0))}</td></tr>)}</tbody>
+                <thead><tr className="text-xs text-slate-400 text-left"><th>Cant</th><th>Und.</th><th>Producto</th><th className="text-right">Precio</th><th className="text-right">Desc.</th><th className="text-right">Importe</th></tr></thead>
+                <tbody>{detalle.items.map((i, k) => (
+                  <tr key={k} className="border-t border-slate-100">
+                    <td className="py-1">{i.cantidad}</td>
+                    <td className="py-1 text-slate-400">{i.unidad || "—"}</td>
+                    <td className="py-1">{i.descripcion}{i.comentario ? <span className="text-xs text-slate-400"> · {i.comentario}</span> : null}</td>
+                    <td className="py-1 text-right tabular-nums">{money(i.precio_bruto ?? i.precio)}</td>
+                    <td className="py-1 text-right tabular-nums text-slate-400">{i.descuento ? money(i.descuento) : "—"}</td>
+                    <td className="py-1 text-right font-medium tabular-nums">{money(i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0)))}</td>
+                  </tr>
+                ))}</tbody>
               </table>
-              <div className="flex justify-between font-bold text-lg"><span>Total</span><span>{money(detalle.total)}</span></div>
+              <div className="space-y-1 text-sm">
+                {detalle.descuento_total > 0 && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(detalle.subtotal)}</span></div>}
+                {detalle.iva_total > 0 && <div className="flex justify-between text-slate-500"><span>IVA</span><span>{money(detalle.iva_total)}</span></div>}
+                {detalle.descuento_total > 0 && <div className="flex justify-between text-slate-500"><span>Descuento</span><span>-{money(detalle.descuento_total)}</span></div>}
+                <div className="flex justify-between font-bold text-lg pt-1 border-t border-slate-200"><span>Total</span><span>{money(detalle.total)}</span></div>
+              </div>
+              {detalle.cambio > 0 && <div className="flex justify-end text-xs text-slate-500 mt-1">Cambio: {money(detalle.cambio)}</div>}
               {detalle.cancelacion && <div className="mt-3 p-2 bg-red-50 text-red-700 rounded text-xs">Cancelada por {detalle.cancelacion.usuario}: {detalle.cancelacion.motivo}</div>}
             </div>
           )}
-          <DialogFooter><Button variant="outline" onClick={() => window.print()}><Printer className="w-4 h-4 mr-1" /> Reimprimir</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => reimprimir(detalle)}><Printer className="w-4 h-4 mr-1" /> Reimprimir PDF</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

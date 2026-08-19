@@ -157,19 +157,35 @@ export default function Caja() {
           <div className="card-soft overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-                <th className="p-3">Hora</th><th className="p-3">Tipo</th><th className="p-3">Concepto</th><th className="p-3">Ref</th><th className="p-3 text-right">Monto</th>
+                <th className="p-3">Hora</th><th className="p-3">Tipo</th><th className="p-3">Concepto</th><th className="p-3">Ref</th><th className="p-3 text-right">Entrada</th><th className="p-3 text-right">Salida</th><th className="p-3 text-right">Saldo</th>
               </tr></thead>
               <tbody>
-                {(data.movimientos || []).map((m) => (
-                  <tr key={m.id} className="border-t border-slate-100">
-                    <td className="p-3 text-slate-500">{m.fecha?.slice(11, 16)}</td>
-                    <td className="p-3"><Badge variant="outline">{m.tipo}</Badge></td>
-                    <td className="p-3">{m.concepto}</td><td className="p-3 text-slate-500">{m.referencia}</td>
-                    <td className={`p-3 text-right font-semibold ${["retiro", "gasto", "devolucion"].includes(m.tipo) ? "text-red-600" : "text-green-600"}`}>{money(m.monto)}</td>
-                  </tr>
-                ))}
-                {(data.movimientos || []).length === 0 && <tr><td colSpan={5} className="p-6 text-center text-slate-400">Sin movimientos aún.</td></tr>}
+                {(data.movimientos || []).map((m, i) => {
+                  const en = ["venta", "entrada"].includes(m.tipo) ? Number(m.monto) : 0;
+                  const sa = ["retiro", "gasto", "devolucion"].includes(m.tipo) ? Number(m.monto) : 0;
+                  const saldo = Number(res.fondo_inicial) + data.movimientos.slice(0, i + 1).reduce((acc, x) => acc + (["venta", "entrada"].includes(x.tipo) ? Number(x.monto) : 0) - (["retiro", "gasto", "devolucion"].includes(x.tipo) ? Number(x.monto) : 0), 0);
+                  return (
+                    <tr key={m.id} className="border-t border-slate-100">
+                      <td className="p-3 text-slate-500">{m.fecha?.slice(11, 16)}</td>
+                      <td className="p-3"><Badge variant="outline">{m.tipo}</Badge></td>
+                      <td className="p-3">{m.concepto}</td><td className="p-3 text-slate-500">{m.referencia}</td>
+                      <td className={`p-3 text-right font-semibold ${en > 0 ? "text-green-600" : "text-slate-300"}`}>{en > 0 ? money(en) : "—"}</td>
+                      <td className={`p-3 text-right font-semibold ${sa > 0 ? "text-red-600" : "text-slate-300"}`}>{sa > 0 ? money(sa) : "—"}</td>
+                      <td className="p-3 text-right font-medium tabular-nums">{money(saldo)}</td>
+                    </tr>
+                  );
+                })}
+                {(data.movimientos || []).length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">Sin movimientos aún.</td></tr>}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 font-semibold">
+                  <td className="p-3" colSpan={2}>Totales</td>
+                  <td className="p-3" colSpan={2}></td>
+                  <td className="p-3 text-right text-green-600">{money(res.ventas_efectivo + res.entradas)}</td>
+                  <td className="p-3 text-right text-red-600">{money(res.retiros + res.devoluciones)}</td>
+                  <td className="p-3 text-right text-[#C1401E]">{money(res.efectivo_esperado)}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </>
@@ -298,6 +314,24 @@ export default function Caja() {
                 <div className="flex justify-between"><span>Efectivo contado</span><span>{money(detCaja.cierre.efectivo_contado)}</span></div>
                 <div className="flex justify-between border-t pt-2 font-bold"><span>Diferencia</span><span className={detCaja.cierre.diferencia < 0 ? "text-red-600" : "text-green-600"}>{money(detCaja.cierre.diferencia)}</span></div>
               </>}
+              {detCaja.movimientos?.length > 0 && (
+                <div className="mt-4 border-t border-slate-100 pt-3">
+                  <div className="flex justify-between font-semibold border-b border-slate-200 pb-1 mb-1"><span>Movimientos</span><span>Saldo</span></div>
+                  <div className="max-h-56 overflow-y-auto">
+                    {(detCaja.movimientos || []).map((m, i) => {
+                      const en = ["venta", "entrada"].includes(m.tipo) ? Number(m.monto) : 0;
+                      const sa = ["retiro", "gasto", "devolucion"].includes(m.tipo) ? Number(m.monto) : 0;
+                      const saldo = Number(detCaja.fondo_inicial || 0) + detCaja.movimientos.slice(0, i + 1).reduce((acc, x) => acc + (["venta", "entrada"].includes(x.tipo) ? Number(x.monto) : 0) - (["retiro", "gasto", "devolucion"].includes(x.tipo) ? Number(x.monto) : 0), 0);
+                      return (
+                        <div key={m.id} className="flex justify-between py-1 text-xs text-slate-600 border-b border-slate-50">
+                          <span className="truncate pr-2">{m.fecha?.slice(11, 16)} · {m.tipo} · {m.concepto}</span>
+                          <span className={`whitespace-nowrap tabular-nums ${en > 0 ? "text-green-600" : sa > 0 ? "text-red-600" : "text-slate-400"}`}>{en > 0 ? `+${money(en)}` : sa > 0 ? `-${money(sa)}` : "—"} · {money(saldo)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter><Button variant="outline" onClick={() => setDetCaja(null)}>Cerrar</Button></DialogFooter>

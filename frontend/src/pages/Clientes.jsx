@@ -12,7 +12,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { TableScroller } from "@/components/TableScroller";
 import { toast } from "sonner";
-import { Plus, Search, Download, Upload, Pencil, Loader2, Users, FileDown, CheckCircle2, AlertTriangle, RefreshCw, X, ArrowUp, ArrowDown, ArrowUpDown, EyeOff, Eye, ChevronLeft, ChevronRight } from "lucide-react";
+import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { Plus, Search, Download, Upload, Pencil, Loader2, Users, FileDown, CheckCircle2, AlertTriangle, RefreshCw, X, ArrowUp, ArrowDown, ArrowUpDown, EyeOff, Eye, ChevronLeft, ChevronRight, MapPin, Crosshair } from "lucide-react";
+
+const MAP_THEME = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const pinIcon = (bg) =>
+  L.divIcon({
+    className: "rysa-map-dot",
+    html: `<div style="width:16px;height:16px;border-radius:50%;background:${bg};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.45)"></div>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  });
+
+// Componente interno: pone el marcador donde el usuario haga clic y devuelve coords.
+const MapClickPicker = ({ onPick }) => {
+  useMapEvents({
+    click(e) {
+      onPick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+};
 
 const blank = () => ({
   codigo: "", nombre: "", razon_social: "", status: "", estado: "activo", tipo: "publico",
@@ -22,6 +44,7 @@ const blank = () => ({
   direccion: "", numero_exterior: "", numero_interior: "", colonia: "", ciudad_edo: "",
   localidad: "", ciudad: "", estado_geo: "", pais: "México", cp: "", referencias: "",
   rfc: "", reg_fiscal: "", uso_cfdi: "", resfiscal: "", nregidtrib: "",
+  latitud: null, longitud: null,
   vendedor: "", almacen: "", precio_venta: 1, lista_precios: 1, condicion_pago: "contado",
   descuento_permanente: 0,
   credito_autorizado: false, limite_credito: 0, lim_descuento: 0, dias_credito: 0, saldo: 0, venta_credito: 0,
@@ -88,6 +111,7 @@ export default function Clientes() {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
   const [hideEmpty, setHideEmpty] = useState(false);
+  const [locBusy, setLocBusy] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -102,6 +126,30 @@ export default function Clientes() {
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const openNew = () => { setF(blank()); setEditId(null); setOpen(true); };
   const openEdit = (c) => { setF({ ...blank(), ...c }); setEditId(c.id); setOpen(true); };
+
+  // Ubicación del negocio: geolocalización del dispositivo, geocodificación o clic en mapa.
+  const setPos = (la, ln) => { if (Number.isFinite(+la) && Number.isFinite(+ln)) { set("latitud", +la.toFixed(6)); set("longitud", +ln.toFixed(6)); } };
+  const usarMiUbicacion = () => {
+    if (!navigator.geolocation) return toast.error("Geolocalización no soportada en este navegador");
+    setLocBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setPos(pos.coords.latitude, pos.coords.longitude); setLocBusy(false); toast.success("Ubicación actual asignada al negocio"); },
+      () => { setLocBusy(false); toast.error("No se pudo obtener la ubicación. Revisa los permisos."); },
+      { enableHighAccuracy: true, timeout: 12000 }
+    );
+  };
+  const geocodificar = async () => {
+    const dir = f.direccion || "";
+    if (!dir.trim()) return toast.error("Escribe la dirección (pestaña Dirección) antes de buscar");
+    setLocBusy(true);
+    try {
+      const q = [dir, f.colonia, f.ciudad, f.estado_geo, f.pais].filter(Boolean).join(", ");
+      const { data } = await api.get("https://nominatim.openstreetmap.org/search", { params: { q, format: "json", limit: 1 } });
+      if (data && data[0]) { setPos(data[0].lat, data[0].lon); toast.success("Coordenadas obtenidas desde la dirección"); }
+      else toast.error("No se encontró la dirección");
+    } catch { toast.error("No se pudo geocodificar la dirección"); }
+    finally { setLocBusy(false); }
+  };
 
   const save = async () => {
     if (!f.codigo.trim()) return toast.error("La CLAVE es obligatoria");
@@ -352,6 +400,7 @@ export default function Clientes() {
               <TabsTrigger value="general" data-testid="tab-general">General</TabsTrigger>
               <TabsTrigger value="contacto" data-testid="tab-contacto">Contacto</TabsTrigger>
               <TabsTrigger value="direccion" data-testid="tab-direccion">Dirección</TabsTrigger>
+              <TabsTrigger value="ubicacion" data-testid="tab-ubicacion">Ubicación (mapa)</TabsTrigger>
               <TabsTrigger value="fiscal" data-testid="tab-fiscal">Fiscales</TabsTrigger>
               <TabsTrigger value="comercial" data-testid="tab-comercial">Comercial</TabsTrigger>
               <TabsTrigger value="credito" data-testid="tab-credito">Crédito</TabsTrigger>
@@ -402,6 +451,35 @@ export default function Clientes() {
               {I("Código postal", "cp")}
               <div className="col-span-2 md:col-span-3"><Label className="text-xs uppercase tracking-wider text-slate-500">Referencia</Label>
                 <Textarea value={f.referencias} onChange={(e) => set("referencias", e.target.value)} className="mt-1" data-testid="cli-referencias" /></div>
+            </TabsContent>
+
+            <TabsContent value="ubicacion" className="pt-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {I("Latitud", "latitud", "number")}
+                {I("Longitud", "longitud", "number")}
+                <div className="flex items-end"><Button variant="outline" onClick={usarMiUbicacion} disabled={locBusy} className="w-full" data-testid="cli-geo">
+                  {locBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Crosshair className="w-4 h-4 mr-1" />} Usar mi ubicación</Button></div>
+                <div className="flex items-end"><Button variant="outline" onClick={geocodificar} disabled={locBusy} className="w-full" data-testid="cli-geo-dir">
+                  <MapPin className="w-4 h-4 mr-1" /> De la dirección</Button></div>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2">Haz clic en el mapa para fijar la ubicación del negocio, o usa tu ubicación / la dirección.</p>
+              <div className="h-72 rounded-lg overflow-hidden border border-slate-200 mt-2">
+                <MapContainer
+                  center={[f.latitud ?? 20.59, f.longitud ?? -100.39]}
+                  zoom={f.latitud ? 15 : 6}
+                  style={{ height: "100%", width: "100%" }}
+                  data-testid="cli-mapa"
+                >
+                  <TileLayer url={MAP_THEME} attribution="&copy; OpenStreetMap" />
+                  <MapClickPicker onPick={setPos} />
+                  {Number.isFinite(Number(f.latitud)) && Number.isFinite(Number(f.longitud)) && Number(f.latitud) !== 0 && Number(f.longitud) !== 0 && (
+                    <Marker position={[f.latitud, f.longitud]} icon={pinIcon("#C1401E")} />
+                  )}
+                </MapContainer>
+              </div>
+              {(Number.isFinite(Number(f.latitud)) && Number.isFinite(Number(f.longitud)) && (f.latitud != null) && (f.longitud != null)) && (
+                <p className="text-xs text-emerald-700 mt-2 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" /> Ubicación registrada: {f.latitud}, {f.longitud}</p>
+              )}
             </TabsContent>
 
             <TabsContent value="fiscal" className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-2">

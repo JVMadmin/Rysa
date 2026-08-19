@@ -43,6 +43,7 @@ export default function Reportes() {
   const [vendedor, setVendedor] = useState("");
   const [categoria, setCategoria] = useState("");
   const [tipo, setTipo] = useState("");
+  const [tipos, setTipos] = useState([]);
   const [cliente, setCliente] = useState("");
   const [sucursal, setSucursal] = useState("");
   const [condicion, setCondicion] = useState("");
@@ -94,13 +95,16 @@ export default function Reportes() {
       condicion: condicion || undefined,
     } });
     setData(data); setLoading(false);
+    // Clasificaciones distintas del periodo (filtro "tipo").
+    setTipos([...new Set((data.productos || []).map((p) => p.clasificacion).filter(Boolean))].sort());
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [group]);
 
   useEffect(() => {
     if (data && data.productos) {
-      const key = orden === "cantidad" ? "cantidad" : orden === "ingreso" ? "ingreso" : orden === "margen" ? "margen" : "utilidad";
-      const newData = { ...data, productos: [...data.productos].sort((a, b) => b[key] - a[key]) };
+      const key = ["cantidad", "ingreso", "margen"].includes(orden) ? orden : "utilidad";
+      const asc = orden === "perdida";
+      const newData = { ...data, productos: [...data.productos].sort((a, b) => asc ? a[key] - b[key] : b[key] - a[key]) };
       setData(newData);
     }
   }, [orden]);
@@ -121,6 +125,9 @@ export default function Reportes() {
 
   const t = data?.totales || {};
   const prods = data?.productos || [];
+  // Productos vendidos por debajo del costo (pérdida) en el periodo.
+  const conPerdida = prods.filter((p) => p.utilidad < 0);
+  const perdidaTotal = conPerdida.reduce((s, p) => s + p.utilidad, 0);
 
   // --- Inventario valorizado ---
   const loadInventario = async () => {
@@ -196,6 +203,10 @@ export default function Reportes() {
               <option value="">Todas las categorías</option>
               {categorias.map((c) => <option key={c.nombre} value={c.nombre}>{c.nombre}</option>)}
             </select>
+            <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm" data-testid="rep-filtro-tipo">
+              <option value="">Todas las clasificaciones</option>
+              {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
             <select value={cliente} onChange={(e) => setCliente(e.target.value)} className="h-9 border border-slate-200 rounded-md px-2 text-sm" data-testid="rep-filtro-cliente">
               <option value="">Todos los clientes</option>
               {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
@@ -239,6 +250,16 @@ export default function Reportes() {
                 <Card label="Margen" value={`${t.margen || 0}%`} icon={Percent} cls="text-[#C1401E]" testid="rep-margen" />
                 <Card label="Tickets" value={t.tickets || 0} icon={BarChart3} cls="text-slate-500" testid="rep-tickets" />
               </div>
+              )}
+
+              {conPerdida.length > 0 && (
+                <div className="card-soft p-3 border border-red-200 bg-red-50/60 flex flex-wrap items-center justify-between gap-2" data-testid="rep-perdidas">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Package className="w-4 h-4 text-red-500" />
+                    <span className="font-semibold text-red-700">{conPerdida.length} producto{conPerdida.length === 1 ? "" : "s"} vendidos por debajo del costo</span>
+                  </div>
+                  <span className="text-sm font-bold text-red-600">Pérdida en el periodo: {money(perdidaTotal)}</span>
+                </div>
               )}
 
               {secciones.has("grafica") && (
@@ -339,6 +360,7 @@ export default function Reportes() {
                     <option value="cantidad">Ordenar por cantidad</option>
                     <option value="ingreso">Ordenar por ingreso</option>
                     <option value="margen">Ordenar por margen</option>
+                    <option value="perdida">Ordenar por pérdida (peor primero)</option>
                   </select>
                 </div>
                 <table className="w-full text-sm">
@@ -360,7 +382,7 @@ export default function Reportes() {
                         <td className="p-3 text-right tabular-nums">{money(p.iva)}</td>
                         <td className="p-3 text-right tabular-nums">{money(p.ingreso)}</td>
                         <td className="p-3 text-right text-slate-500 tabular-nums">{money(p.costo)}</td>
-                        <td className="p-3 text-right font-semibold text-emerald-700 tabular-nums">{money(p.utilidad)}</td>
+                        <td className={`p-3 text-right font-semibold tabular-nums ${p.utilidad < 0 ? "text-red-600" : "text-emerald-700"}`}>{money(p.utilidad)}</td>
                         <td className="p-3 text-center"><Badge className={p.margen >= 20 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{p.margen}%</Badge></td>
                       </tr>
                     ))}

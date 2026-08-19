@@ -20,6 +20,9 @@ import POS from "@/pages/POS";
 import MultiPos from "@/pages/MultiPos";
 import Recargas from "@/pages/Recargas";
 import Ventas from "@/pages/Ventas";
+import Visitas from "@/pages/Visitas";
+import Supervision from "@/pages/Supervision";
+import MiRuta from "@/pages/MiRuta";
 import Usuarios from "@/pages/Usuarios";
 import Auditoria from "@/pages/Auditoria";
 import Configuracion from "@/pages/Configuracion";
@@ -48,6 +51,9 @@ function App() {
             <Route path="/app/pos" element={<MultiPos />} />
             <Route path="/app/recargas" element={<Recargas />} />
             <Route path="/app/ventas" element={<Ventas />} />
+            <Route path="/app/visitas" element={<Visitas />} />
+            <Route path="/app/supervision" element={<Supervision />} />
+            <Route path="/app/mi-ruta" element={<MiRuta />} />
             <Route path="/app/usuarios" element={<Usuarios />} />
             <Route path="/app/configuracion" element={<Configuracion />} />
             <Route path="/app/auditoria" element={<Auditoria />} />

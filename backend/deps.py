@@ -115,10 +115,22 @@ ROLE_PERMISSIONS = {
     },
     "vendedor": {
         "venta.crear", "venta.descuento", "cliente.crear", "cliente.editar",
-        "exportar",
+        "exportar", "visita.crear", "visita.editar", "visita.ver",
     },
     "cajero": {
         "venta.crear", "exportar",
+    },
+    # Supervisor/Gerente comercial: monitoreo de vendedores de campo,
+    # cartera, CxC, actividad, mapa y autorizaciones comerciales.
+    "supervisor": {
+        "venta.crear", "venta.cancelar", "venta.descuento", "venta.ver_todas",
+        "venta.facturar", "venta.cambiar_operador",
+        "cliente.crear", "cliente.editar", "cliente.baja",
+        "reportes.ver", "reportes.global", "exportar", "importar",
+        "cxc.ver", "caja.entrada", "credito.autorizar",
+        "visita.crear", "visita.editar", "visita.ver", "visita.cancelar",
+        "supervision.ver", "supervision.mapa", "supervision.cartera",
+        "supervision.cxc", "supervision.actividad",
     },
 }
 
@@ -167,6 +179,15 @@ MODULES = {
     "configuracion": {
         "label": "Configuración",
         "perms": {"config"},
+    },
+    "visitas": {
+        "label": "Visitas comerciales",
+        "perms": {"visita.crear", "visita.editar", "visita.ver", "visita.cancelar"},
+    },
+    "supervision": {
+        "label": "Centro de Supervisión Comercial",
+        "perms": {"supervision.ver", "supervision.mapa", "supervision.cartera",
+                  "supervision.cxc", "supervision.actividad"},
     },
 }
 

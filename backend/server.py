@@ -449,11 +449,16 @@ class ClientInput(BaseModel):
     resfiscal: Optional[str] = ""           # RESFISCAL
     nregidtrib: Optional[str] = ""          # NREGIDTRIB
     # --- Comercial ---
-    vendedor: Optional[str] = ""            # VENDEDOR
+    vendedor: Optional[str] = ""            # VENDEDOR (legacy, texto)
+    vendedor_id: Optional[str] = ""         # id del usuario vendedor asignado
     almacen: Optional[str] = ""             # ALMACEN
     precio_venta: Optional[int] = 1         # PRECIOVTA (lista de precios)
     lista_precios: int = 1                  # compat POS
     condicion_pago: str = "contado"
+    # --- Geolocalización (campo / mapa) ---
+    latitud: Optional[float] = None
+    longitud: Optional[float] = None
+    proxima_visita: Optional[str] = ""      # fecha ISO próxima visita programada
     # --- Crédito ---
     credito_autorizado: bool = False        # CREDITO
     limite_credito: float = 0.0             # LIMCREDITO
@@ -565,6 +570,7 @@ class SucursalItem(BaseModel):
 
 class SettingsInput(BaseModel):
     empresa_nombre: str = "Grupo RYSA"
+    razon_social: Optional[str] = ""
     rfc: Optional[str] = ""
     telefono: Optional[str] = ""
     correo: Optional[str] = ""
@@ -1396,6 +1402,18 @@ def normalize_client_doc(doc: dict) -> dict:
         doc["telefono"] = doc.get("tel_oficina") or doc.get("tel_residencia") or ""
     if not doc.get("correo") and doc.get("correos"):
         doc["correo"] = str(doc["correos"]).split(",")[0].split(";")[0].strip()
+    # Coordenadas: solo se conservan si son numéricas válidas (mapas/visitas).
+    for f in ("latitud", "longitud"):
+        v = doc.get(f)
+        if v in (None, ""):
+            doc[f] = None
+            continue
+        try:
+            doc[f] = float(v)
+        except (TypeError, ValueError):
+            doc[f] = None
+    if doc.get("vendedor_id") in (None, ""):
+        doc.pop("vendedor_id", None)
     return doc
 
 def parse_client_row(row: dict):
@@ -1491,6 +1509,11 @@ async def create_client(data: ClientInput, user: dict = Depends(require_permissi
     if await db.clients.find_one({"codigo": codigo}):
         raise HTTPException(400, f"La CLAVE '{codigo}' ya existe")
     doc = normalize_client_doc(data.model_dump())
+    # Un vendedor registra el cliente bajo su propia cartera en campo.
+    if not doc.get("vendedor_id") and user.get("role") in ("vendedor", "supervisor"):
+        doc["vendedor_id"] = user["id"]
+    if not doc.get("vendedor") and doc.get("vendedor_id"):
+        doc["vendedor"] = user.get("name", "")
     doc["codigo"] = codigo
     doc["id"] = uid()
     doc["saldo"] = float(data.saldo or 0.0)
@@ -1721,6 +1744,10 @@ async def caja_historial(desde: Optional[str] = None, hasta: Optional[str] = Non
     h = hasta[:10] if hasta else None
     if d or h:
         cajas = [c for c in cajas if (not d or (c.get("fecha_apertura", "")[:10] >= d)) and (not h or (c.get("fecha_apertura", "")[:10] <= h))]
+    # Movimientos de cada corte (ledger detallado del día).
+    for c in cajas:
+        movs = await db.caja_movimientos.find({"caja_id": c["id"]}, {"_id": 0}).sort("fecha", 1).to_list(1000)
+        c["movimientos"] = movs
     return cajas
 
 # =========================================================================
@@ -4074,6 +4101,10 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 app.include_router(api)
+
+# Módulo de operación en campo: vendedores, visitas, ubicaciones y supervisión.
+import field_ops  # noqa: E402
+app.include_router(field_ops.router)
 
 # Configuración dinámica de CORS
 env = os.environ.get("ENVIRONMENT", "development").lower()

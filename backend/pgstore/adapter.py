@@ -23,14 +23,15 @@ KNOWN_COLLECTIONS = [
     "users", "products", "clients", "sales", "cajas", "caja_movimientos",
     "inventory_movements", "audit_logs", "refresh_tokens", "login_attempts",
     "files", "settings", "categories", "suspended_sales", "cfdi_documents",
-    "pac_config", "abonos", "counters", "sucursales", "price_lists",
-    "mensajes", "plantillas", "favorites",
+    "pac_config",     "abonos", "counters", "sucursales", "price_lists",
+    "mensajes", "plantillas", "favorites", "visits", "seller_locations",
+    "sales_routes", "route_stops",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.
 TYPED_COLUMNS = {
     "sales": ["subtotal", "iva_total", "descuento_total", "total", "cambio", "saldo"],
-    "clients": ["saldo", "limite_credito"],
+    "clients": ["saldo", "limite_credito", "latitud", "longitud"],
     "products": ["costo", "existencia", "stock_minimo", "vendidas",
                  "precio_sin_iva", "precio_con_iva", "utilidad", "margen"],
     "cajas": ["fondo_inicial"],
