@@ -319,6 +319,20 @@ class TestExcel:
         assert r2.json()["creados"] + r2.json()["actualizados"] >= 1
 
 
+# ---------- REPORTES / EXPORT PDF ----------
+class TestReportPdf:
+    def test_export_reporte_pdf(self, admin_client):
+        r = admin_client.get(f"{API}/reports/ventas/export?fmt=pdf")
+        assert r.status_code == 200, r.text
+        assert "application/pdf" in r.headers.get("content-type", "")
+        assert r.content[:4] == b"%PDF"
+
+    def test_export_reporte_pdf_con_ventas(self, admin_client):
+        r = admin_client.get(f"{API}/reports/ventas/export?fmt=pdf&desde=2020-01-01&hasta=2030-12-31")
+        assert r.status_code == 200, r.text
+        assert r.content[:4] == b"%PDF"
+
+
 # ---------- AUDITORIA ----------
 class TestAudit:
     def test_audit_records_actions(self, admin_client):

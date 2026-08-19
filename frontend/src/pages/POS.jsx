@@ -111,6 +111,7 @@ export default function POS({ windowId, windowLabel }) {
   const [incluyeIva, setIncluyeIva] = useState(true);
   const [clientQuery, setClientQuery] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
+  const [pubClientId, setPubClientId] = useState("");
   const [linePrice, setLinePrice] = useState(null);
   const [selProd, setSelProd] = useState(null);
   const [libreVal, setLibreVal] = useState("");
@@ -187,7 +188,7 @@ export default function POS({ windowId, windowLabel }) {
     api.get("/clients", { params: { estado: "activo" } }).then((r) => {
       setClients(r.data);
       const pub = r.data.find((c) => c.codigo === "PUBLICO");
-      if (pub && !clienteId) setClienteId(pub.id);
+      if (pub) { setPubClientId(pub.id); if (!clienteId) setClienteId(pub.id); }
     });
     api.get("/vendedores").then((r) => setVendedores(r.data));
     api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); if (r.data?.listas_precios_pct?.length) setListasPct(r.data.listas_precios_pct); if (r.data && r.data.precios_incluyen_iva !== undefined) setIncluyeIva(!!r.data.precios_incluyen_iva); });
@@ -319,7 +320,7 @@ export default function POS({ windowId, windowLabel }) {
     setCart((c) => {
       const ex = c.find((i) => i.product_id === p.id);
       if (ex) return c.map((i) => (i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i));
-      return [...c, { product_id: p.id, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || "PZA", precio: priceOf(p), iva_tasa: p.iva_tasa || 16, costo: Number(p.costo ?? 0), descuento: 0, precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
+      return [...c, { product_id: p.id, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || "PZA", precio: priceOf(p), iva_tasa: p.iva_tasa || 16, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
     });
     setSelected(p.id);
     setQ(""); qRef.current = ""; setResults([]);
@@ -333,7 +334,7 @@ export default function POS({ windowId, windowLabel }) {
     setCart((c) => {
       const ex = c.find((i) => i.product_id === pid);
       if (ex) return c.map((i) => (i.product_id === pid ? { ...i, precio: Number(precio) || 0 } : i));
-      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa || 16, costo: Number(p.costo ?? 0), descuento: 0, precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
+      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa || 16, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
     });
     setSelected(pid);
     setQ(""); qRef.current = ""; setResults([]);
@@ -375,6 +376,7 @@ export default function POS({ windowId, windowLabel }) {
   const updateQty = (id, d) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Math.max(0.001, +(i.cantidad + d).toFixed(3)) } : i)));
   const setQty = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Number(v) || 0 } : i)));
   const setLineDisc = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, descuento: Number(v) || 0 } : i)));
+  const setLineComentario = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, comentario: v } : i)));
   const setUnidad = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, unidad: v } : i)));
   const remove = (id) => setCart((c) => c.filter((i) => i.product_id !== id));
 
@@ -465,7 +467,7 @@ export default function POS({ windowId, windowLabel }) {
     try {
       const payload = {
         cliente_id: clienteId || null,
-        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", precio: Number(i.precio) || 0, iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0) })),
+        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", precio: Number(i.precio) || 0, iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
         descuento_global: totals.descGlobalTotal,
         condicion,
         pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0) })) : [],
@@ -483,7 +485,9 @@ export default function POS({ windowId, windowLabel }) {
       setTicket(data);
       setWaPhone(clienteSel?.whatsapp || clienteSel?.telefono || clienteSel?.celular || "");
       toast.success(`${tipoVenta === "cotizacion" ? "Cotización" : "Venta"} ${data.folio} registrada`);
-      setCart([]); setDescGlobal(0); setPayOpen(false); setPagos([{ metodo: "efectivo", monto: "" }]); setSelected(null);
+      setCart([]); setDescGlobal(0); setDescPct(0); setPayOpen(false); setPagos([{ metodo: "efectivo", monto: "" }]); setSelected(null);
+      // Tras finalizar la venta el cliente vuelve a Público General.
+      if (pubClientId) { setClienteId(pubClientId); setClientQuery(""); }
       refreshFolio();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
@@ -622,6 +626,7 @@ export default function POS({ windowId, windowLabel }) {
                     <th className="px-1.5 py-1.5 font-semibold text-right">IVA %</th>
                     <th className="px-1.5 py-1.5 font-semibold text-right">Precio</th>
                     <th className="px-1.5 py-1.5 font-semibold text-right">Importe</th>
+                    <th className="px-1.5 py-1.5 font-semibold text-center">Comentario</th>
                     <th className="px-1.5 py-1.5 font-semibold text-center">+/-</th>
                   </tr>
                 </thead>
@@ -663,6 +668,10 @@ export default function POS({ windowId, windowLabel }) {
                         <td className="px-1.5 py-1 text-right font-semibold tabular-nums whitespace-nowrap">
                           {!(i.descuento > 0) && money(importe)}
                           {i.descuento > 0 && <span className="line-through text-slate-400">{money(importe)}</span>}
+                        </td>
+                        <td className="px-1.5 py-1" onClick={(e) => e.stopPropagation()}>
+                          <Input value={i.comentario || ""} onChange={(e) => setLineComentario(i.product_id, e.target.value)}
+                            placeholder="…" className="w-24 h-6 p-0 text-[11px] justify-self-end" data-testid={`cart-comentario-${i.codigo}`} />
                         </td>
                         <td className="px-1.5 py-1 text-center whitespace-nowrap">
                           <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600" data-testid={`cart-remove-${i.codigo}`}><Trash2 className="w-3.5 h-3.5" /></button>
@@ -981,6 +990,7 @@ export default function POS({ windowId, windowLabel }) {
                   return (
                     <div key={k}>
                       <div>{i.descripcion}</div>
+                      {i.comentario && <div className="text-[11px] text-slate-600">• {i.comentario}</div>}
                       <div className="flex justify-between">
                         <span className="whitespace-pre">{String(i.cantidad).padEnd(2)}{i.unidad}</span>
                         <span>{money(i.cantidad * i.precio)}</span>
@@ -1075,7 +1085,7 @@ export default function POS({ windowId, windowLabel }) {
                       return (
                         <tr key={k}>
                           <td style={{ fontSize: "8pt" }}>{i.codigo}</td>
-                          <td>{i.descripcion}</td>
+                          <td>{i.descripcion}{i.comentario ? <><br /><span style={{ fontSize: "7.5pt", color: "#C1401E" }}>• {i.comentario}</span></> : null}</td>
                           <td className="text-right">{i.cantidad}</td>
                           <td className="text-right">{money(i.precio)}</td>
                           <td className="text-right">{i.iva_tasa}%</td>

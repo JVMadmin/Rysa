@@ -31,7 +31,8 @@ KNOWN_COLLECTIONS = [
 TYPED_COLUMNS = {
     "sales": ["subtotal", "iva_total", "descuento_total", "total", "cambio", "saldo"],
     "clients": ["saldo", "limite_credito"],
-    "products": ["costo", "existencia", "stock_minimo", "vendidas"],
+    "products": ["costo", "existencia", "stock_minimo", "vendidas",
+                 "precio_sin_iva", "precio_con_iva", "utilidad", "margen"],
     "cajas": ["fondo_inicial"],
     "caja_movimientos": ["monto"],
     "inventory_movements": ["entrada", "salida", "existencia_anterior", "existencia_resultante", "costo"],

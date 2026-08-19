@@ -175,10 +175,13 @@ def _build_default_elements(tc, settings, sale):
     if tc.get("encabezado"):
         els.append({"tipo": "texto", "contenido": tc.get("encabezado"), "align": "center"})
     els.append({"tipo": "separador"})
+    if sale.get("serie"):
+        els.append({"tipo": "campo", "contenido": f"Serie: {sale.get('serie')}", "align": "center"})
     if sale.get("folio"):
         els.append({"tipo": "folio"})
     if sale.get("fecha"):
         els.append({"tipo": "fecha"})
+        els.append({"tipo": "hora"})
     if sale.get("cliente_nombre"):
         els.append({"tipo": "cliente"})
     els.append({"tipo": "separador"})
@@ -282,7 +285,7 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
             cant = it.get("cantidad", 0)
             precio = it.get("precio", 0)
             unidad = str(it.get("unidad", "PZA"))
-            importe = it.get("importe", cant * precio - float(it.get("descuento", 0) or 0))
+            importe = it.get("importe", it.get("importe_bruto", cant * precio - float(it.get("descuento", 0) or 0)))
             desc_un = it.get("descuento", 0)
             fe = f"  {int(cant)} {unidad}   {_money(precio)}  {_money(importe)}"
             _apply_align(c, y, w, fe, "left", 7, False)
@@ -290,6 +293,11 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
             if float(desc_un or 0) > 0:
                 _apply_align(c, y, w, f"    Descuento -{_money(desc_un)}", "left", 7, False)
                 y -= line_h
+            comentario = str(it.get("comentario", "") or "").strip()
+            if comentario:
+                for linea in comentario.splitlines():
+                    _apply_align(c, y, w, f"    * {linea[:36]}", "left", 7, False)
+                    y -= line_h
 
     # Resolver variables de plantilla para texto/QR
     def fi(t):
@@ -356,6 +364,8 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
                 L(f"FOLIO: {sale.get('folio', '')}", bold=True, sz=fsz)
             elif tipo == "fecha":
                 L(f"Fecha: {str(sale.get('fecha', ''))[:16].replace('T', ' ')}", sz=fsz)
+            elif tipo == "hora":
+                L(f"Hora: {sale.get('hora') or str(sale.get('fecha', ''))[11:16]}", sz=fsz)
             elif tipo == "cliente":
                 L(f"Cliente: {sale.get('cliente_nombre', 'Público General')}", sz=fsz)
             elif tipo == "articulos":

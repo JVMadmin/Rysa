@@ -243,3 +243,131 @@ async def _insert_movimiento(conn, inv, it, folio, user_id, user_name):
         text(f'INSERT INTO {_quote("inventory_movements")} '
              '("_id","id","doc") VALUES (CAST(:k AS text),CAST(:k AS text),CAST(:d AS jsonb))'),
         {"k": mov["id"], "d": json.dumps(mov, ensure_ascii=False, default=str)})
+
+
+async def cancela_venta_pg(*, user, sale_id: str, motivo: str):
+    """Cancela una venta de forma ATÓMICA en PostgreSQL.
+
+    Revertir todo o nada: inventario (+ kardex y 'vendidas'), caja, saldo del
+    cliente y el estado de la venta. Usa SELECT ... FOR UPDATE sobre la venta
+    para impedir dobles cancelaciones concurrentes y sobre cada producto para
+    no perder unidades devueltas.
+    """
+    user_id = user.get("id")
+    user_name = user.get("name")
+
+    async with transaction() as conn:
+        row = (await conn.execute(
+            text(f'SELECT "id","doc" FROM {_quote("sales")} '
+                 'WHERE "id" = CAST(:i AS text) FOR UPDATE'),
+            {"i": sale_id})).first()
+        if row is None:
+            raise VentaError(404, "Venta no encontrada")
+        sale = dict(row[1])
+        if sale.get("estado") == "cancelada":
+            raise VentaError(409, "La venta ya está cancelada")
+        if sale.get("estado") != "confirmada":
+            raise VentaError(409, "Solo se pueden cancelar ventas confirmadas")
+
+        folio = sale.get("folio", "")
+        # A) Revertir inventario bloqueando cada producto.
+        for it in sale.get("items", []):
+            pid = it.get("product_id")
+            if not pid:
+                continue  # línea sin inventario (p. ej. recarga remitida)
+            prow = (await conn.execute(
+                text(f'SELECT "id","doc" FROM {_quote("products")} '
+                     'WHERE "id" = CAST(:i AS text) FOR UPDATE'),
+                {"i": pid})).first()
+            if prow is None:
+                continue
+            prod = dict(prow[1])
+            cant = float(it["cantidad"] or 0)
+            actual = round(float(prod.get("existencia", 0) or 0), 3)
+            nuevo = round(actual + cant, 3)
+            await conn.execute(
+                text(f'UPDATE {_quote("products")} SET "existencia" = :ne, '
+                     'doc = jsonb_set(jsonb_set(jsonb_set(doc, \'{existencia}\', CAST(:nej AS jsonb), true), '
+                     '\'{updated_at}\', CAST(:upd AS jsonb), true), '
+                     '\'{vendidas}\', CAST(CAST(COALESCE((doc->>\'vendidas\')::numeric,0) - CAST(:vnd AS numeric) AS text) AS jsonb), true) '
+                     f'WHERE "id" = CAST(:i AS text)'),
+                {"ne": nuevo, "nej": json.dumps(nuevo), "vnd": cant,
+                 "upd": json.dumps(now_iso()), "i": pid})
+            mov = {"id": uid(), "product_id": pid,
+                   "codigo": prod.get("codigo", it.get("codigo")),
+                   "descripcion": prod.get("descripcion", it.get("descripcion")),
+                   "tipo": "devolucion", "documento": folio,
+                   "entrada": cant, "salida": 0,
+                   "existencia_anterior": actual,
+                   "existencia_resultante": nuevo,
+                   "costo": float(prod.get("costo") or it.get("costo") or 0),
+                   "motivo": motivo, "observaciones": f"Cancelación {folio}",
+                   "usuario_id": user_id, "usuario_nombre": user_name,
+                   "referencia": f"Cancelación {folio}", "venta_id": sale_id,
+                   "caja_id": sale.get("caja_id") or "",
+                   "fecha": now_iso(),
+                   "hora": datetime.now(timezone.utc).strftime("%H:%M:%S")}
+            await conn.execute(
+                text(f'INSERT INTO {_quote("inventory_movements")} '
+                     '("_id","id","doc") VALUES (CAST(:k AS text),CAST(:k AS text),CAST(:d AS jsonb))'),
+                {"k": mov["id"], "d": json.dumps(mov, ensure_ascii=False, default=str)})
+
+        # B) Revertir caja: el efectivo vuelve a salir (devolución).
+        if sale.get("caja_id") and sale.get("condicion") == "contado":
+            efectivo = sum(float(p.get("monto", 0) or 0)
+                           for p in sale.get("pagos", []) if p.get("metodo") == "efectivo")
+            if efectivo > 0:
+                monto = round(min(efectivo, float(sale.get("total", 0) or 0)), 2)
+                cm = {"id": uid(), "caja_id": sale["caja_id"], "tipo": "devolucion",
+                      "concepto": f"Cancelación {folio}", "monto": monto,
+                      "referencia": folio, "usuario_id": user_id,
+                      "usuario_nombre": user_name, "fecha": now_iso()}
+                await conn.execute(
+                    text(f'INSERT INTO {_quote("caja_movimientos")} '
+                         '("_id","id","doc") VALUES (CAST(:k AS text),CAST(:k AS text),CAST(:d AS jsonb))'),
+                    {"k": cm["id"], "d": json.dumps(cm, ensure_ascii=False, default=str)})
+
+        # C) Revertir crédito: descuenta el saldo pendiente (respetando abonos).
+        if sale.get("condicion") == "credito" and sale.get("cliente_id"):
+            pendiente = round(float(sale.get("saldo", sale.get("total", 0) or 0)), 2)
+            if pendiente > 0:
+                await conn.execute(
+                    text(f'UPDATE {_quote("clients")} SET "saldo" = COALESCE("saldo",0) - :s, '
+                         'doc = jsonb_set(doc, \'{saldo}\', '
+                         'CAST(CAST(COALESCE((doc->>\'saldo\')::numeric,0) - CAST(:s2 AS numeric) AS text) AS jsonb), true) '
+                         f'WHERE "id" = CAST(:i AS text)'),
+                    {"s": float(pendiente), "s2": float(pendiente), "i": sale["cliente_id"]})
+
+        # D) Marcar la venta como cancelada (idempotente: FOR UPDATE ya protegió
+        #    la doble cancelación simultánea).
+        cancelacion = {"usuario": user_name, "usuario_id": user_id,
+                       "fecha": now_iso(), "motivo": motivo}
+        await conn.execute(
+            text(f'UPDATE {_quote("sales")} SET '
+                 'doc = jsonb_set(jsonb_set(jsonb_set(doc, \'{estado}\', CAST(:est AS jsonb), true), '
+                 '\'{cancelacion}\', CAST(:canc AS jsonb), true), '
+                 '\'{saldo}\', CAST(CAST(0 AS numeric) AS text)::jsonb, true) '
+                 f'WHERE "id" = CAST(:i AS text)'),
+            {"est": json.dumps("cancelada"), "canc": json.dumps(cancelacion, ensure_ascii=False, default=str),
+             "i": sale_id})
+
+        # E) Auditoría (se confirma con la transacción).
+        audit = {"id": uid(), "usuario_id": user_id, "usuario_nombre": user_name,
+                 "accion": "cancelar", "entidad": "venta", "registro_id": sale_id,
+                 "detalle": f"{folio} motivos: {motivo}", "fecha": now_iso()}
+        await conn.execute(
+            text(f'INSERT INTO {_quote("audit_logs")} '
+                 '("_id","id","doc") VALUES (CAST(:k AS text),CAST(:k AS text),CAST(:d AS jsonb))'),
+            {"k": audit["id"], "d": json.dumps(audit, ensure_ascii=False, default=str)})
+
+    # Lectura final fuera de la transacción (como hacía el endpoint original).
+    eng = get_engine()
+    async with eng.connect() as conn:
+        res = await conn.execute(
+            text(f'SELECT doc FROM {_quote("sales")} WHERE "id" = CAST(:i AS text)'),
+            {"i": sale_id})
+        r = res.first()
+        await conn.commit()
+    if not r:
+        raise VentaError(404, "Venta no encontrada")
+    return dict(r[0])

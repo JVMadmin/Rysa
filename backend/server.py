@@ -44,6 +44,7 @@ from deps import (
 import pgstore.pos as _pgpos
 import storage
 import pac_provider
+import moneycalc
 
 _APP_ENV = os.environ.get("ENVIRONMENT", "development").lower()
 logging.basicConfig(level=logging.DEBUG if _APP_ENV == "development" else logging.INFO)
@@ -242,7 +243,9 @@ def build_product_doc(d: dict) -> dict:
                       "mostrar_catalogo": bool(d.get("ventaweb", False))},
         "ficha_tecnica": {},
         "proveedores": [d.get("proveedor")] if d.get("proveedor") else [],
+        "precio_incluye_iva": True,
     })
+    _enriquecer_precios(doc)
     return doc
 
 # =========================================================================
@@ -294,6 +297,9 @@ class ProductInput(BaseModel):
     ubicacion: Optional[str] = ""
     stock_minimo: float = 0.0
     iva_tasa: float = 16.0
+    # ¿El precio capturado en `precios` incluye IVA? True = los PRECIOn son
+    # brutos (con IVA); False = son netos (sin IVA). Se deriva neto/bruto.
+    precio_incluye_iva: bool = True
     precios: List[PrecioItem] = Field(default_factory=list)
     precio_minimo: float = 0.0
     sat: dict = Field(default_factory=dict)
@@ -511,6 +517,8 @@ class SaleItem(BaseModel):
     precio: float
     iva_tasa: float = 16.0
     descuento: float = 0.0  # monto de descuento por linea
+    comentario: str = ""
+    costo: Optional[float] = None  # costo unitario tomado del producto (snapshot)
 
 class Pago(BaseModel):
     metodo: str  # efectivo | tarjeta | transferencia | deposito | otros
@@ -525,7 +533,10 @@ class SaleInput(BaseModel):
     lista_precios: int = 1
     tipo_venta: str = "directa"  # directa | cotizacion
     vendedor_id: Optional[str] = None
-    precios_incluyen_iva: bool = True      # suma el IVA sobre el precio neto
+    # Convención de precios: True = los precios enviados ya incluyen IVA (brutos,
+    # se extrae el neto); False = los precios son netos (se suma el IVA). El total
+    # siempre es el bruto. Default True mantiene compatibilidad con clientes antiguos.
+    precios_incluyen_iva: bool = True
     idempotency_key: Optional[str] = None  # evita ventas duplicadas en POS
     # Override de inventario negativo (solo roles autorizados, con auditoría).
     allow_negative_inventory: bool = False
@@ -576,13 +587,18 @@ class SettingsInput(BaseModel):
 # =========================================================================
 async def registrar_movimiento(product: dict, tipo: str, entrada: float, salida: float,
                                 usuario: dict, documento: str = "", referencia: str = "",
-                                costo: float = 0.0, motivo: str = "", observaciones: str = ""):
+                                costo: float = 0.0, motivo: str = "", observaciones: str = "",
+                                venta_id: str = "", caja_id: str = ""):
     anterior = round(float(product.get("existencia", 0)), 3)
     nueva_existencia = round(anterior + entrada - salida, 3)
     await db.products.update_one({"id": product["id"]}, {"$set": {"existencia": nueva_existencia, "updated_at": iso_now()}})
-    # Contador de unidades vendidas (para catálogo "más vendidos" en POS)
+    # Contador de unidades vendidas (para catálogo "más vendidos" en POS).
+    # Una devolución/cancelación reduce el contador: las unidades devueltas no
+    # deben seguir contando como vendidas.
     if tipo == "venta" and salida > 0:
         await db.products.update_one({"id": product["id"]}, {"$inc": {"vendidas": float(salida)}})
+    elif tipo in ("devolucion", "cancelacion") and entrada > 0:
+        await db.products.update_one({"id": product["id"]}, {"$inc": {"vendidas": -float(entrada)}})
     now = now_utc()
     await db.inventory_movements.insert_one({
         "id": uid(), "product_id": product["id"], "codigo": product.get("codigo"),
@@ -591,7 +607,8 @@ async def registrar_movimiento(product: dict, tipo: str, entrada: float, salida:
         "existencia_anterior": anterior, "existencia_resultante": nueva_existencia,
         "costo": round(float(costo or 0), 4), "motivo": motivo, "observaciones": observaciones,
         "usuario_id": usuario.get("id"), "usuario_nombre": usuario.get("name"),
-        "referencia": referencia, "fecha": iso_now(),
+        "referencia": referencia, "venta_id": venta_id or "", "caja_id": caja_id or "",
+        "fecha": iso_now(),
         "hora": now.strftime("%H:%M:%S"),
     })
     return nueva_existencia
@@ -1015,7 +1032,7 @@ async def create_product(data: ProductInput, user: dict = Depends(require_permis
     doc["codigo"] = codigo
     doc["id"] = uid()
     doc = asegurar_codigo_como_barras(doc)
-    doc["precios"] = calc_precios(doc["costo"], doc["precios"], doc["iva_tasa"])
+    _enriquecer_precios(doc)
     doc["created_at"] = iso_now()
     doc["updated_at"] = iso_now()
     existencia_inicial = float(doc.get("existencia", 0))
@@ -1026,6 +1043,53 @@ async def create_product(data: ProductInput, user: dict = Depends(require_permis
     await log_audit(user, "crear", "producto", doc["id"], f"{codigo} - {doc['descripcion']}")
     return await db.products.find_one({"id": doc["id"]}, {"_id": 0})
 
+def _enriquecer_precios(doc: dict) -> dict:
+    """Calcula neto/bruto por lista y utilidad/margen del producto (lista 1).
+
+    Considera el indicador `precio_incluye_iva`:
+      True  -> los precios capturados son BRUTOS (con IVA): se extrae el neto.
+      False -> los precios capturados son NETOS: se genera el bruto.
+    """
+    iva_tasa = float(doc.get("iva_tasa", 16.0))
+    costo = float(doc.get("costo", 0) or 0)
+    incluye = bool(doc.get("precio_incluye_iva", True))
+    precios = []
+    for p in doc.get("precios", []):
+        p = dict(p)
+        sin = float(p.get("precio_sin_iva") or 0)
+        con = float(p.get("precio_con_iva") or 0)
+        util = float(p.get("utilidad_pct") or 0)
+        if incluye:
+            if con > 0:
+                sin = moneycalc.neto_de_precio(con, iva_tasa, True)
+            elif sin > 0:
+                con = moneycalc.bruto_de_precio(sin, iva_tasa, False)
+            else:
+                neto_base = costo * (1 + util / 100) if util >= 0 else costo * (1 + (util or 0) / 100)
+                sin = round(neto_base, 2)
+                con = moneycalc.bruto_de_precio(sin, iva_tasa, False)
+        else:
+            if sin > 0:
+                con = moneycalc.bruto_de_precio(sin, iva_tasa, False)
+            elif con > 0:
+                sin = moneycalc.neto_de_precio(con, iva_tasa, True)
+            else:
+                con = round(costo * (1 + util / 100) * (1 + iva_tasa / 100), 2) if util >= 0 else round(costo * (1 + iva_tasa / 100), 2)
+                sin = moneycalc.neto_de_precio(con, iva_tasa, True)
+        if costo > 0:
+            util = round((sin / costo - 1) * 100, 2)
+        precios.append({"nombre": p.get("nombre", "Precio"), "utilidad_pct": util,
+                        "precio_sin_iva": round(sin, 2), "precio_con_iva": round(con, 2)})
+    doc["precios"] = precios
+    sin_ok = float(precios[0]["precio_sin_iva"]) if precios else costo
+    con_ok = float(precios[0]["precio_con_iva"]) if precios else round(costo * (1 + iva_tasa / 100), 2)
+    doc["precio_sin_iva"] = round(sin_ok, 2)
+    doc["precio_con_iva"] = round(con_ok, 2)
+    util, margen = moneycalc.utilidad_margen(sin_ok, costo)
+    doc["utilidad"] = util
+    doc["margen"] = margen
+    return doc
+
 @api.put("/products/{product_id}")
 async def update_product(product_id: str, data: ProductInput, user: dict = Depends(require_permission("producto.editar"))):
     existing = await db.products.find_one({"id": product_id})
@@ -1034,8 +1098,11 @@ async def update_product(product_id: str, data: ProductInput, user: dict = Depen
     doc = data.model_dump()
     doc.pop("existencia", None)  # existencia solo cambia por movimientos
     doc["codigo"] = existing["codigo"]
-    doc = asegurar_codigo_como_barras(doc)
-    doc["precios"] = calc_precios(doc["costo"], doc["precios"], doc["iva_tasa"])
+    # Se respeta exactamente el arreglo enviado; si viene vacío/ausente se
+    # conservan los códigos de barras ya registrados (incluye el codigo).
+    if not doc.get("codigos_barras"):
+        doc["codigos_barras"] = existing.get("codigos_barras", [])
+    _enriquecer_precios(doc)
     doc["updated_at"] = iso_now()
     await db.products.update_one({"id": product_id}, {"$set": doc})
     await log_audit(user, "editar", "producto", product_id, existing["codigo"])
@@ -1660,24 +1727,18 @@ async def caja_historial(desde: Optional[str] = None, hasta: Optional[str] = Non
 # VENTAS / POS
 # =========================================================================
 def calcular_venta(items: List[dict], descuento_global: float, precios_incluyen_iva: bool = True):
-    # Los precios que envía el POS son NETOS (sin IVA, corresponde a lo guardado en
-    # la base de datos). Si `precios_incluyen_iva` está activo se SUMA el IVA sobre el
-    # neto; si no, se cobra únicamente el neto sin IVA.
-    subtotal = 0.0   # neto (sin IVA)
-    iva_total = 0.0
-    desc_lineas = 0.0
-    for it in items:
-        neto = it["cantidad"] * it["precio"] - it.get("descuento", 0.0)
-        subtotal += neto
-        desc_lineas += it.get("descuento", 0.0)
-        if precios_incluyen_iva:
-            tasa = it.get("iva_tasa", 16.0) / 100
-            iva_total += neto * tasa
-    dg = min(max(descuento_global, 0.0), subtotal)
-    subtotal_final = subtotal - dg
-    total = max(0.0, round(subtotal_final + (iva_total if precios_incluyen_iva else 0.0), 2))
-    return {"subtotal": round(subtotal_final, 2), "iva_total": round(iva_total, 2),
-            "descuento_total": round(desc_lineas + dg, 2), "total": total}
+    # Convención (ver moneycalc): True = los precios enviados incluyen IVA (brutos,
+    # se extrae el neto); False = precios netos (se suma el IVA). El TOTAL siempre
+    # es el bruto. Devuelve además `detalle` con las líneas enriquecidas
+    # (importe_neto/bruto, iva_linea, precios unitarios neto/bruto).
+    res = moneycalc.calcular_venta(items, descuento_global, bool(precios_incluyen_iva))
+    return {
+        "subtotal": res["subtotal"],
+        "iva_total": res["iva_total"],
+        "descuento_total": res["descuento_total"],
+        "total": res["total"],
+        "detalle": res["detalle"],
+    }
 
 @api.get("/sales")
 async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
@@ -1797,8 +1858,16 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
             permitir_neg = controles.get("permitir_inventario_negativo", False)
             if controlar and not permitir_neg and not override_inv and float(p.get("existencia", 0)) < it["cantidad"]:
                 raise HTTPException(400, f"Existencia insuficiente de {p['codigo']} (disp: {p.get('existencia',0)})")
+        # Snapshot histórico de la venta: costo y clasificación se congelan aquí
+        # para que los reportes históricos no cambien si el precio/costo se edita.
+        it["costo"] = float(p.get("costo") or 0)
+        it["clasificacion"] = p.get("clasificacion") or ""
+        it["linea"] = p.get("linea") or ""
+        it["precio_incluye_iva"] = bool(p.get("precio_incluye_iva", True))
     totales = calcular_venta(items, data.descuento_global, data.precios_incluyen_iva)
     total = totales["total"]
+    # Líneas enriquecidas con importe_neto/bruto e IVA por línea (snapshot).
+    items = totales.pop("detalle", items)
     pagos = [p.model_dump() for p in data.pagos]
     pagado = sum(p["monto"] for p in pagos)
     cambio = 0.0
@@ -1896,40 +1965,18 @@ async def crear_recarga(data: RecargaInput, user: dict = Depends(require_permiss
 
 @api.post("/sales/{sale_id}/cancelar")
 async def cancel_sale(sale_id: str, data: CancelInput, user: dict = Depends(require_permission("venta.cancelar"))):
-    sale = await db.sales.find_one({"id": sale_id})
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
     if not sale:
         raise HTTPException(404, "Venta no encontrada")
     if not ver_todas_ventas(user) and sale.get("vendedor_id") != user["id"]:
         raise HTTPException(403, "No tienes permiso para cancelar esta venta")
-    if sale["estado"] == "cancelada":
-        raise HTTPException(400, "La venta ya está cancelada")
-    es_confirmada = sale["estado"] == "confirmada"
-    if es_confirmada:
-        # Revertir inventario
-        for it in sale["items"]:
-            p = await db.products.find_one({"id": it["product_id"]})
-            if p:
-                await registrar_movimiento(p, "devolucion", it["cantidad"], 0, user, sale["folio"], f"Cancelación {sale['folio']}")
-        # Revertir caja
-        if sale.get("caja_id") and sale["condicion"] == "contado":
-            efectivo = sum(pg["monto"] for pg in sale["pagos"] if pg["metodo"] == "efectivo")
-            if efectivo > 0:
-                await db.caja_movimientos.insert_one({
-                    "id": uid(), "caja_id": sale["caja_id"], "tipo": "devolucion",
-                    "concepto": f"Cancelación {sale['folio']}", "monto": round(min(efectivo, sale["total"]), 2),
-                    "referencia": sale["folio"], "usuario_id": user["id"],
-                    "usuario_nombre": user["name"], "fecha": iso_now()})
-        # Revertir crédito (solo el saldo pendiente, respetando abonos previos)
-        if sale["condicion"] == "credito" and sale.get("cliente_id"):
-            pendiente = round(float(sale.get("saldo", sale["total"])), 2)
-            if pendiente > 0:
-                await db.clients.update_one({"id": sale["cliente_id"]}, {"$inc": {"saldo": -pendiente}})
-            await db.sales.update_one({"id": sale_id}, {"$set": {"saldo": 0.0}})
-    await db.sales.update_one({"id": sale_id}, {"$set": {
-        "estado": "cancelada",
-        "cancelacion": {"usuario": user["name"], "fecha": iso_now(), "motivo": data.motivo}}})
-    await log_audit(user, "cancelar", "venta", sale_id, data.motivo)
-    return await db.sales.find_one({"id": sale_id}, {"_id": 0})
+    if not (data.motivo or "").strip():
+        raise HTTPException(422, "El motivo de cancelación es obligatorio")
+    try:
+        return await _pgpos.cancela_venta_pg(user=user, sale_id=sale_id,
+                                             motivo=(data.motivo or "").strip())
+    except _pgpos.VentaError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
 
 # Ventas suspendidas
 @api.post("/sales/suspend")
@@ -2861,8 +2908,30 @@ async def update_settings(data: SettingsInput, user: dict = Depends(require_perm
 # =========================================================================
 # ARCHIVOS / OBJECT STORAGE (imágenes de productos/categorías, PDFs de ticket)
 # =========================================================================
+
+def _convertir_a_webp(data: bytes) -> tuple:
+    """Convierte una imagen a WebP (85% de calidad) usando Pillow.
+
+    Devuelve (bytes_webp, 'image/webp'). Si Pillow no está instalado o la
+    conversión falla, devuelve los bytes originales sin cambiar el formato
+    (el sistema sigue funcionando, solo sin optimización).
+    """
+    try:
+        from PIL import Image
+        from io import BytesIO
+        img = Image.open(BytesIO(data))
+        img = img.convert("RGB")
+        out = BytesIO()
+        img.save(out, format="WEBP", quality=85)
+        out.seek(0)
+        return out.read(), "image/webp"
+    except Exception:
+        return data, None
+
+
 @api.post("/uploads/image")
 async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """Sube una imagen de producto/categoría convirtiéndola a WebP."""
     data = await file.read()
     if len(data) > 8 * 1024 * 1024:
         raise HTTPException(400, "La imagen no debe superar 8 MB.")
@@ -2871,27 +2940,28 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
     real_mime = storage.detect_mime_type(data)
     if real_mime not in ["image/jpeg", "image/png", "image/gif", "image/webp"]:
         raise HTTPException(400, "Formato real no permitido. Usa JPG, PNG, WEBP o GIF.")
-        
-    mime_to_ext = {
-        "image/jpeg": "jpg",
-        "image/png": "png",
-        "image/gif": "gif",
-        "image/webp": "webp"
-    }
-    safe_ext = mime_to_ext.get(real_mime, "png")
+
+    # Optimización: todas las imágenes se guardan en WEBP (formato ligero para
+    # catálogos grandes). Si la conversión no aplica, se conserva el original.
+    data_guardar = data
+    ctype = real_mime
+    convertido, new_mime = _convertir_a_webp(data)
+    if new_mime:
+        data_guardar = convertido
+        ctype = new_mime
     
     # Para evitar vulnerabilidades de path traversal y sobrescritura, usamos un UUID aleatorio
-    path = f"uploads/{uid()}.{safe_ext}"
-    ctype = real_mime
+    path = f"uploads/{uid()}.webp"
     try:
-        result = storage.put_object(path, data, ctype)
+        result = storage.put_object(path, data_guardar, ctype)
     except Exception as e:
         logger.error("Upload imagen falló: %s", str(e)[:160])
         raise HTTPException(502, "No se pudo subir la imagen al almacenamiento local.")
     stored = result.get("path", path)
     await db.files.insert_one({
         "id": uid(), "storage_path": stored, "original_filename": file.filename,
-        "content_type": ctype, "size": result.get("size", len(data)),
+        "content_type": ctype, "size": result.get("size", len(data_guardar)),
+        "original_size": len(data), "original_type": real_mime,
         "is_deleted": False, "created_at": iso_now(),
     })
     return {"path": stored, "url": f"/api/files/{stored}"}
@@ -3356,21 +3426,38 @@ async def _build_reporte(desde, hasta, group, vendedor_id=None, q=None,
             continue
         sale_total = 0.0
         for it in matching_lines:
-            tasa = float(it.get("iva_tasa", 16)) / 100
-            bruto = it["cantidad"] * it["precio"] - (it.get("descuento", 0) or 0)
-            neto = bruto / (1 + tasa)
-            costo_uni = pmeta.get(it.get("product_id"), {}).get("costo", 0.0)
-            costo = costo_uni * it["cantidad"]
+            # Reportes históricos: usan el snapshot congelado en la venta
+            # (importe_neto/bruto e IVA por línea). Las ventas antiguas (sin
+            # snapshot) se reconstruyen tratando `precio` como bruto (legacy).
+            tasa = 1 + float(it.get("iva_tasa", 16)) / 100
+            if it.get("importe_neto") is not None:
+                neto = float(it["importe_neto"])
+                if it.get("importe_bruto") is not None:
+                    bruto = float(it["importe_bruto"])
+                else:
+                    bruto = round(neto * tasa, 2)
+                iva_line = float(it.get("iva_linea") or 0) if it.get("iva_linea") is not None else round(bruto - neto, 2)
+            else:
+                bruto = it["cantidad"] * it["precio"] - (it.get("descuento", 0) or 0)
+                neto = max(0.0, bruto) / tasa if tasa else max(0.0, bruto)
+                iva_line = bruto - neto
+            costo_snap = it.get("costo")
+            if costo_snap is None:
+                costo_snap = pmeta.get(it.get("product_id"), {}).get("costo", 0.0)
+            costo = float(costo_snap) * it["cantidad"]
             pid = it.get("product_id") or it.get("codigo")
             p = por_producto.get(pid)
             if not p:
                 meta = pmeta.get(it.get("product_id")) or {}
                 p = {"codigo": it.get("codigo"), "descripcion": it.get("descripcion"),
-                     "cantidad": 0, "ingreso": 0.0, "costo": 0.0,
+                     "cantidad": 0, "ingreso": 0.0, "ingreso_bruto": 0.0, "iva": 0.0,
+                     "costo": 0.0,
                      "clasificacion": it.get("clasificacion") or ""}
                 por_producto[pid] = p
             p["cantidad"] += it["cantidad"]
             p["ingreso"] += neto
+            p["ingreso_bruto"] += bruto
+            p["iva"] += iva_line
             p["costo"] += costo
             total_ingreso += neto
             total_costo += costo
@@ -3405,7 +3492,13 @@ async def _build_reporte(desde, hasta, group, vendedor_id=None, q=None,
     productos = []
     for p in por_producto.values():
         util = p["ingreso"] - p["costo"]
-        productos.append({**p, "ingreso": round(p["ingreso"], 2), "costo": round(p["costo"], 2),
+        cant = p["cantidad"] or 0
+        productos.append({**p, "ingreso": round(p["ingreso"], 2),
+                          "ingreso_bruto": round(p["ingreso_bruto"], 2),
+                          "iva": round(p["iva"], 2),
+                          "precio_neto": round(p["ingreso"] / cant, 2) if cant else 0,
+                          "precio_bruto": round(p["ingreso_bruto"] / cant, 2) if cant else 0,
+                          "costo": round(p["costo"], 2),
                           "utilidad": round(util, 2),
                           "margen": round(util / p["ingreso"] * 100, 2) if p["ingreso"] else 0})
     top_vendidos = sorted(productos, key=lambda x: x["cantidad"], reverse=True)[:15]
@@ -3481,9 +3574,11 @@ def _reporte_excel_bytes(rep: dict) -> bytes:
         ws_c.append([c["categoria"], c["cantidad"], c["ingreso"], c["costo"], c["utilidad"], c["margen"]])
     estilar(ws_c)
     ws2 = wb.create_sheet("Productos")
-    ws2.append(["Código", "Producto", "Cantidad", "Ingreso", "Costo", "Utilidad", "Margen %"])
+    ws2.append(["Código", "Producto", "Cantidad", "Ingreso neto", "IVA", "Ingreso bruto",
+                "Precio neto prom.", "Precio bruto prom.", "Costo", "Utilidad", "Margen %"])
     for p in rep["productos"]:
-        ws2.append([p["codigo"], p["descripcion"], p["cantidad"], p["ingreso"], p["costo"], p["utilidad"], p["margen"]])
+        ws2.append([p["codigo"], p["descripcion"], p["cantidad"], p["ingreso"], p["iva"],
+                    p["ingreso_bruto"], p["precio_neto"], p["precio_bruto"], p["costo"], p["utilidad"], p["margen"]])
     estilar(ws2)
     ws3 = wb.create_sheet("Vendedores")
     ws3.append(["Vendedor", "Tickets", "Ventas", "Ticket promedio", "Utilidad"])
@@ -3517,7 +3612,7 @@ def _reporte_pdf_bytes(rep: dict) -> bytes:
     logo_path = None
     for cand in (os.path.join(os.path.dirname(__file__), "brand", "logotipo.png"),
                  os.getenv("UPLOAD_DIR", "")):
-        if cand and os.path.exists(cand):
+        if cand and os.path.isfile(cand):
             logo_path = cand
             break
 
@@ -3632,13 +3727,14 @@ def _reporte_pdf_bytes(rep: dict) -> bytes:
 
     # Productos
     elems.append(Paragraph("Utilidad por producto", h2))
-    data = [["Código", "Producto", "Cantidad", "Ingreso", "Costo", "Utilidad", "Margen %"]]
+    data = [["Código", "Producto", "Cant.", "Neto", "IVA", "Bruto", "Costo", "Utilidad", "Margen %"]]
     for p in rep["productos"][:120]:
         data.append([p["codigo"], p["descripcion"], p["cantidad"], f"$ {p['ingreso']:,.2f}",
+                     f"$ {p['iva']:,.2f}", f"$ {p['ingreso_bruto']:,.2f}",
                      f"$ {p['costo']:,.2f}", f"$ {p['utilidad']:,.2f}", f"{p['margen']}%"])
     if len(data) == 1:
-        data.append(["-", "Sin ventas", "-", "-", "-", "-", "-"])
-    elems.append(seccion_tabla("Productos", data, [72, None, 60, 78, 78, 78, 60], 7))
+        data.append(["-", "Sin ventas", "-", "-", "-", "-", "-", "-", "-"])
+    elems.append(seccion_tabla("Productos", data, [66, None, 50, 72, 66, 72, 66, 72, 55], 9))
 
     def _pie(canvas, docu):
         canvas.saveState()
@@ -3676,6 +3772,182 @@ async def reporte_ventas_export(desde: Optional[str] = None, hasta: Optional[str
     fname = f"reporte_ventas_{rep['desde']}_{rep['hasta']}.{suffix}"
     return StreamingResponse(io.BytesIO(raw), media_type=media,
         headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+# =========================================================================
+# REPORTE DE INVENTARIO VALORIZADO (existencia, costo, margen, rotación)
+# =========================================================================
+async def _build_inventario(desde: str = "", hasta: str = "", q: str = "",
+                            estado: str = "activo", user: dict = None) -> dict:
+    """Valoriza el inventario actual: existencia, costo, venta potencial,
+    margen y rotación (unidades vendidas en el periodo)."""
+    query = {}
+    if estado != "todos":
+        query["estado"] = estado
+    docs = await db.products.find(query, {"_id": 0}).to_list(50000)
+    if q:
+        ql = _hi(q)
+        docs = [p for p in docs if ql in _hi(p.get("codigo")) or ql in _hi(p.get("descripcion"))
+                or ql in _hi(p.get("linea")) or ql in _hi(p.get("clasificacion"))]
+
+    # Unidades vendidas por producto en el periodo (para rotación).
+    ventas_rango = {}
+    d = (desde[:10] or now_utc().strftime("%Y-%m-01"))
+    h = (hasta[:10] or now_utc().date().isoformat())
+    srows = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(100000)
+    for s in srows:
+        if not (d <= s.get("fecha", "")[:10] <= h):
+            continue
+        for it in s.get("items", []):
+            pid = it.get("product_id")
+            if not pid:
+                continue
+            ventas_rango[pid] = ventas_rango.get(pid, 0.0) + float(it.get("cantidad", 0) or 0)
+
+    filas = []
+    t_valor = t_potencial = t_costo = 0.0
+    t_unidades_vendidas = 0.0
+    for p in docs:
+        exist = float(p.get("existencia", 0) or 0)
+        costo = float(p.get("costo", 0) or 0)
+        neto = float(p.get("precio_sin_iva") or 0) or float(p.get("precios", [{}])[0].get("precio_sin_iva", 0) or 0)
+        con = float(p.get("precio_con_iva") or 0) or float(p.get("precios", [{}])[0].get("precio_con_iva", 0) or 0)
+        valor = round(exist * costo, 2)
+        potencial = round(exist * (con or neto), 2)
+        util_pot = round(exist * (neto - costo), 2)
+        margen = round((neto - costo) / neto * 100, 2) if neto else 0.0
+        vendidas = round(ventas_rango.get(p.get("id"), 0.0), 2)
+        rotacion = round(vendidas / exist * 100, 2) if exist else 0.0
+        t_valor += valor; t_potencial += potencial; t_costo += costo * exist
+        t_unidades_vendidas += vendidas
+        filas.append({
+            "codigo": p.get("codigo"), "descripcion": p.get("descripcion"),
+            "linea": p.get("linea") or "", "clasificacion": p.get("clasificacion") or "",
+            "unidad_medida": p.get("unidad_medida") or "PZA",
+            "existencia": round(exist, 2), "stock_minimo": float(p.get("stock_minimo", 0) or 0),
+            "costo": round(costo, 2), "precio_sin_iva": round(neto, 2),
+            "precio_con_iva": round(con, 2), "utilidad": round(neto - costo, 2),
+            "margen": margen, "valor_inventario": valor, "venta_potencial": potencial,
+            "utilidad_potencial": util_pot, "unidades_vendidas": vendidas,
+            "rotacion": rotacion, "estado": p.get("estado"),
+        })
+    filas.sort(key=lambda r: (r["valor_inventario"]), reverse=True)
+    return {
+        "desde": d, "hasta": h, "filtros": {"estado": estado, "q": q},
+        "totales": {
+            "productos": len(filas),
+            "unidades": round(sum(r["existencia"] for r in filas), 2),
+            "valor_inventario": round(t_valor, 2),
+            "costo_total": round(t_costo, 2),
+            "venta_potencial": round(t_potencial, 2),
+            "utilidad_potencial": round(t_potencial - t_costo, 2),
+            "margen_promedio": round((t_potencial - t_costo) / t_potencial * 100, 2) if t_potencial else 0,
+            "unidades_vendidas": round(t_unidades_vendidas, 2),
+        },
+        "productos": filas,
+    }
+
+
+@api.get("/reports/inventario")
+async def reporte_inventario(desde: Optional[str] = None, hasta: Optional[str] = None,
+                             q: Optional[str] = None, estado: str = "activo",
+                             user: dict = Depends(get_current_user)):
+    return await _build_inventario(desde or "", hasta or "", q or "", estado, user)
+
+
+@api.get("/reports/inventario/export")
+async def reporte_inventario_export(desde: Optional[str] = None, hasta: Optional[str] = None,
+                                    q: Optional[str] = None, estado: str = "activo", fmt: str = "excel",
+                                    user: dict = Depends(require_permission("exportar"))):
+    rep = await _build_inventario(desde or "", hasta or "", q or "", estado, user)
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    wb = Workbook()
+    ws = wb.active; ws.title = "Inventario"
+    hf = Font(bold=True, color="FFFFFF"); fill = PatternFill("solid", fgColor="B95A3A")
+    ws.append(["Código", "Producto", "Línea", "Clasificación", "Existencia", "Costo unit.",
+               "Precio neto", "Precio bruto", "Valor inventario", "Venta potencial",
+               "Utilidad potencial", "Margen %", "Unid. vendidas", "Rotación %"])
+    for col in ws[1]:
+        col.font = hf; col.fill = fill
+    for r in rep["productos"]:
+        ws.append([r["codigo"], r["descripcion"], r["linea"], r["clasificacion"],
+                   r["existencia"], r["costo"], r["precio_sin_iva"], r["precio_con_iva"],
+                   r["valor_inventario"], r["venta_potencial"], r["utilidad_potencial"],
+                   r["margen"], r["unidades_vendidas"], r["rotacion"]])
+    for col in ws.columns:
+        width = max((len(str(c.value)) if c.value is not None else 0) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(width + 2, 30)
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    fname = f"inventario_valorizado_{rep['desde']}_{rep['hasta']}.xlsx"
+    return StreamingResponse(io.BytesIO(buf.read()), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+
+# =========================================================================
+# CENTRO DE REPORTES (resumen ejecutivo + día típico)
+# =========================================================================
+@api.get("/reports/centro")
+async def reporte_centro(desde: Optional[str] = None, hasta: Optional[str] = None,
+                         user: dict = Depends(require_permission("reportes.ver"))):
+    """Resumen ejecutivo del periodo: ticket promedio, hora pico, día de la
+    semana con más ventas, métodos de pago y comparativos hoy/ayer/semana."""
+    now = now_utc()
+    hoy = now.date().isoformat()
+    ayer = (now - timedelta(days=1)).date().isoformat()
+    d = (desde[:10] if desde else now.strftime("%Y-%m-01"))
+    h = (hasta[:10] if hasta else hoy)
+    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(100000)
+    sales = [s for s in sales if d <= s.get("fecha", "")[:10] <= h]
+
+    dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+    por_hora = {}
+    por_dia = {dd: {"tickets": 0, "total": 0.0} for dd in dias}
+    por_metodo = {}
+    ingreso_neto = 0.0
+    costo_total = 0.0
+    for s in sales:
+        hora = str(s.get("hora") or (s.get("fecha", "")[11:16]) or "00:00")[:2]
+        por_hora[int(hora)] = por_hora.get(int(hora), 0) + 1
+        try:
+            idx = date.fromisoformat(s.get("fecha", "")[:10]).weekday()
+            por_dia[dias[idx]]["tickets"] += 1
+            por_dia[dias[idx]]["total"] += float(s.get("total", 0) or 0)
+        except Exception:
+            pass
+        for p in s.get("pagos", []):
+            m = p.get("metodo", "otros")
+            por_metodo[m] = por_metodo.get(m, 0) + float(p.get("monto", 0) or 0)
+        for it in s.get("items", []):
+            if it.get("importe_neto") is not None:
+                ingreso_neto += float(it["importe_neto"])
+            else:
+                t = 1 + float(it.get("iva_tasa", 16)) / 100
+                ingreso_neto += max(0.0, float(it["cantidad"]) * float(it["precio"]) - float(it.get("descuento", 0) or 0)) / t if t else 0
+            costo_total += float(it.get("costo") or 0) * float(it.get("cantidad", 0) or 0)
+
+    total_ventas = round(sum(float(s.get("total", 0) or 0) for s in sales), 2)
+    num_ventas = len(sales)
+    # Comparativos
+    def rango_total(ff):
+        return round(sum(float(s["total"]) for s in sales if s.get("fecha", "")[:10] == ff), 2)
+    hoy_t = rango_total(hoy); ayer_t = rango_total(ayer)
+    return {
+        "desde": d, "hasta": h,
+        "resumen": {
+            "ventas": total_ventas, "tickets": num_ventas,
+            "ticket_promedio": round(total_ventas / num_ventas, 2) if num_ventas else 0,
+            "ingreso_neto": round(ingreso_neto, 2),
+            "costo": round(costo_total, 2),
+            "utilidad": round(ingreso_neto - costo_total, 2),
+            "hoy": hoy_t, "ayer": ayer_t,
+            "delta_hoy_ayer": round(hoy_t - ayer_t, 2),
+        },
+        "por_hora": [{"hora": f"{hh:02d}:00", "tickets": por_hora.get(hh, 0)} for hh in range(24)],
+        "por_dia_semana": [{"dia": dd, "tickets": por_dia[dd]["tickets"], "total": round(por_dia[dd]["total"], 2)} for dd in dias],
+        "por_metodo": [{"metodo": k, "monto": round(v, 2)} for k, v in sorted(por_metodo.items(), key=lambda x: -x[1])],
+        "hora_pico": max(por_hora.items(), key=lambda x: x[1])[0] if por_hora else None,
+        "dia_pico": max(dias, key=lambda dd: por_dia[dd]["tickets"]) if num_ventas else None,
+    }
 
 # =========================================================================
 # STARTUP
