@@ -26,6 +26,10 @@ KNOWN_COLLECTIONS = [
     "pac_config",     "abonos", "counters", "sucursales", "price_lists",
     "mensajes", "plantillas", "favorites", "visits", "seller_locations",
     "sales_routes", "route_stops",
+    "proveedores", "compras", "cuentas_bancarias", "costos_historial",
+    "compras_ordenes", "compras_recepciones", "presupuestos",
+    "centros_costo", "recurrentes",
+    "pedidos",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.
@@ -38,6 +42,15 @@ TYPED_COLUMNS = {
     "caja_movimientos": ["monto"],
     "inventory_movements": ["entrada", "salida", "existencia_anterior", "existencia_resultante", "costo"],
     "abonos": ["monto"],
+    "proveedores": ["limite_credito"],
+    "compras": ["subtotal", "descuento", "iva", "otros_impuestos", "total",
+                "abonado", "saldo_pendiente"],
+    "costos_historial": ["cantidad", "costo"],
+    "compras_ordenes": ["subtotal", "iva", "total"],
+    "compras_recepciones": ["subtotal", "iva", "total"],
+    "presupuestos": ["monto"],
+    "recurrentes": ["importe"],
+    "pedidos": ["subtotal", "iva", "total"],
 }
 
 DDL_CACHE = set()

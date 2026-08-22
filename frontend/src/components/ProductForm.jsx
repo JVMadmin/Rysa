@@ -103,7 +103,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
   const setPrecio = (i, field, val) => {
     setF((s) => {
       const next = { ...s, [`${field}${i}`]: val };
-      const iva = num(s.impuesto) || 16, costo = num(s.costo);
+      const iva = num(s.impuesto) || 8, costo = num(s.costo);
       if (field === "utilpreci") {
         const sin = costo * (1 + num(val) / 100);
         next[`precio${i}`] = +(sin * (1 + iva / 100)).toFixed(2);
@@ -131,7 +131,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
       payload.costo = num(f.costo);
       payload.existencia = num(f.existencia);
       payload.stock_minimo = num(f.stockmin);
-      payload.iva_tasa = num(f.impuesto) || 16;
+      payload.iva_tasa = num(f.impuesto) || 8;
       payload.estado = STATUS_TO_ESTADO[String(f.status).toUpperCase()] || "activo";
       payload.precio_minimo = num(f.preciomin);
       payload.imagen_url = f.imagen;

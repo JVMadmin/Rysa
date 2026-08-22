@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { Plus, Search, Download, Upload, Pencil, Loader2, Users, FileDown, CheckCircle2, AlertTriangle, RefreshCw, X, ArrowUp, ArrowDown, ArrowUpDown, EyeOff, Eye, ChevronLeft, ChevronRight, MapPin, Crosshair } from "lucide-react";
+import { Plus, Search, Upload, Pencil, Loader2, Users, FileDown, FileSpreadsheet, FileText, CheckCircle2, AlertTriangle, RefreshCw, X, ArrowUp, ArrowDown, ArrowUpDown, EyeOff, Eye, ChevronLeft, ChevronRight, MapPin, Crosshair, SlidersHorizontal } from "lucide-react";
 
 const MAP_THEME = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const pinIcon = (bg) =>
@@ -66,8 +66,8 @@ const creditStatus = (c) => {
 
 const FILTROS = [
   ["all", "Todos"], ["con_credito", "Con crédito"], ["sin_credito", "Sin crédito"],
-  ["con_saldo", "Con saldo"], ["sin_saldo", "Sin saldo"], ["activo", "Activos"],
-  ["suspendido", "Suspendidos"], ["inactivo", "Inactivos"], ["con_ofertas", "Con ofertas"], ["sin_ofertas", "Sin ofertas"],
+  ["con_saldo", "Con saldo"], ["sin_saldo", "Sin saldo"],
+  ["con_ofertas", "Con ofertas"], ["sin_ofertas", "Sin ofertas"],
 ];
 
 // Configuración de columnas de la tabla (para orden y ocultar vacías)
@@ -95,6 +95,15 @@ export default function Clientes() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState("all");
+  const [fEstado, setFEstado] = useState("");
+  const [fTipo, setFTipo] = useState("");
+  const [fCiudad, setFCiudad] = useState("");
+  const [fVendedor, setFVendedor] = useState("");
+  const [fRFC, setFRFC] = useState("");
+  const [fTel, setFTel] = useState("");
+  const [fDesde, setFDesde] = useState("");
+  const [fHasta, setFHasta] = useState("");
+  const [exporting, setExporting] = useState(null);
   const [open, setOpen] = useState(false);
   const [f, setF] = useState(blank());
   const [editId, setEditId] = useState(null);
@@ -113,11 +122,28 @@ export default function Clientes() {
   const [hideEmpty, setHideEmpty] = useState(false);
   const [locBusy, setLocBusy] = useState(false);
 
+  const makeParams = () => {
+    const p = {};
+    if (q) p.q = q;
+    if (fEstado && fEstado !== "__all") p.estado = fEstado;
+    if (fTipo && fTipo !== "__all") p.tipo = fTipo;
+    if (filtro !== "all") p.filtro = filtro;
+    if (fCiudad) p.ciudad = fCiudad;
+    if (fVendedor) p.vendedor = fVendedor;
+    if (fRFC) p.rfc = fRFC;
+    if (fTel) p.telefono = fTel;
+    if (fDesde) p.fecha_desde = fDesde;
+    if (fHasta) p.fecha_hasta = fHasta;
+    return p;
+  };
+  const hasFilters = () => {
+    const p = makeParams();
+    return Object.keys(p).length > 0;
+  };
+
   const load = async () => {
     setLoading(true);
-    const params = {};
-    if (q) params.q = q;
-    if (filtro !== "all") params.filtro = filtro;
+    const params = makeParams();
     const { data } = await api.get("/clients", { params });
     setRows(data); setLoading(false);
   };
@@ -195,11 +221,20 @@ export default function Clientes() {
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); load(); }
   };
 
-  const exportExcel = async () => {
-    const params = {}; if (q) params.q = q; if (filtro !== "all") params.filtro = filtro;
-    const res = await api.get("/clients/export/excel", { responseType: "blob", params });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(res.data); link.download = "clientes.xlsx"; link.click();
+  const runExport = async (fmt) => {
+    const params = new URLSearchParams(makeParams());
+    const todo = !hasFilters();
+    setExporting(fmt);
+    toast.info(todo ? "Exportando todos los registros..." : "Generando archivo...");
+    try {
+      const res = await api.get(`/clients/export/${fmt}`, { responseType: "blob", params });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(res.data);
+      link.download = fmt === "excel" ? "clientes.xlsx" : "clientes.pdf";
+      link.click();
+      toast.success("Exportación completada.");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setExporting(null); }
   };
   const downloadPlantilla = async () => {
     const res = await api.get("/clients/plantilla/excel", { responseType: "blob" });
@@ -275,27 +310,55 @@ export default function Clientes() {
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={downloadPlantilla} data-testid="cli-plantilla"><FileDown className="w-4 h-4 mr-1" /> Plantilla</Button>
           {can("importar") && <Button variant="outline" onClick={() => fileRef.current.click()} data-testid="cli-import-btn"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
-          <Button variant="outline" onClick={exportExcel} data-testid="cli-export"><Download className="w-4 h-4 mr-1" /> Exportar</Button>
+          <Button variant="outline" onClick={() => runExport("excel")} disabled={!!exporting} data-testid="cli-export-excel">
+            {exporting === "excel" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-1 text-green-700" />} Exportar Excel
+          </Button>
+          <Button variant="outline" onClick={() => runExport("pdf")} disabled={!!exporting} data-testid="cli-export-pdf">
+            {exporting === "pdf" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileText className="w-4 h-4 mr-1 text-red-700" />} Exportar PDF
+          </Button>
           {can("cliente.crear") && <Button onClick={openNew} data-testid="nuevo-cliente-btn" className="bg-[#C1401E] hover:bg-[#A03316]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 card-soft p-3">
-        <div className="relative flex-1 min-w-[220px]">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <Input placeholder="Buscar por clave, nombre, RFC, representante, teléfono, correo, ciudad..." value={q}
-            onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} className="pl-9" data-testid="buscar-cliente" />
+      <div className="card-soft p-3 space-y-3">
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input placeholder="Buscar por clave, nombre, RFC, representante, teléfono, correo, ciudad..." value={q}
+              onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} className="pl-9" data-testid="buscar-cliente" />
+          </div>
+          <Select value={filtro} onValueChange={setFiltro}>
+            <SelectTrigger className="w-40" data-testid="filtro-clientes"><SelectValue placeholder="Filtro" /></SelectTrigger>
+            <SelectContent>{FILTROS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button variant={hideEmpty ? "default" : "outline"} onClick={() => setHideEmpty((v) => !v)}
+            className={hideEmpty ? "bg-[#C1401E] hover:bg-[#A03316]" : ""} data-testid="cli-hide-empty" title="Ocultar columnas sin datos">
+            {hideEmpty ? <Eye className="w-4 h-4 mr-1" /> : <EyeOff className="w-4 h-4 mr-1" />} Columnas vacías
+          </Button>
+          <Button variant="outline" onClick={load} data-testid="cli-buscar" className="gap-1"><Search className="w-4 h-4" /> Buscar</Button>
+          <Button variant="ghost" size="sm" onClick={() => { setQ(""); setFiltro("all"); setFEstado(""); setFTipo(""); setFCiudad(""); setFVendedor(""); setFRFC(""); setFTel(""); setFDesde(""); setFHasta(""); load(); }} data-testid="cli-limpiar-filtros">Limpiar filtros</Button>
         </div>
-        <Select value={filtro} onValueChange={setFiltro}>
-          <SelectTrigger className="w-44" data-testid="filtro-clientes"><SelectValue placeholder="Filtro" /></SelectTrigger>
-          <SelectContent>{FILTROS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
-        </Select>
-        <Button variant="outline" onClick={load} data-testid="cli-buscar"><Search className="w-4 h-4" /></Button>
-        <Button variant={hideEmpty ? "default" : "outline"} onClick={() => setHideEmpty((v) => !v)}
-          className={hideEmpty ? "bg-[#C1401E] hover:bg-[#A03316]" : ""} data-testid="cli-hide-empty" title="Ocultar columnas sin datos">
-          {hideEmpty ? <Eye className="w-4 h-4 mr-1" /> : <EyeOff className="w-4 h-4 mr-1" />} Columnas vacías
-        </Button>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2 items-center">
+          <Select value={fEstado} onValueChange={setFEstado}>
+            <SelectTrigger className="h-9" data-testid="cli-f-estado"><SelectValue placeholder="Estado del cliente" /></SelectTrigger>
+            <SelectContent><SelectItem value="__all">—</SelectItem><SelectItem value="activo">Activo</SelectItem><SelectItem value="suspendido">Suspendido</SelectItem><SelectItem value="inactivo">Inactivo</SelectItem></SelectContent>
+          </Select>
+          <Select value={fTipo} onValueChange={setFTipo}>
+            <SelectTrigger className="h-9" data-testid="cli-f-tipo"><SelectValue placeholder="Tipo de cliente" /></SelectTrigger>
+            <SelectContent><SelectItem value="__all">—</SelectItem>{Object.entries(tipoLabel).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+          </Select>
+          <Input placeholder="Ciudad" value={fCiudad} onChange={(e) => setFCiudad(e.target.value)} className="h-9" data-testid="cli-f-ciudad" />
+          <Input placeholder="Vendedor" value={fVendedor} onChange={(e) => setFVendedor(e.target.value)} className="h-9" data-testid="cli-f-vendedor" />
+          <Input placeholder="RFC" value={fRFC} onChange={(e) => setFRFC(e.target.value)} className="h-9" data-testid="cli-f-rfc" />
+          <Input placeholder="Teléfono" value={fTel} onChange={(e) => setFTel(e.target.value)} className="h-9" data-testid="cli-f-tel" />
+          <div className="flex items-center gap-2">
+            <Input type="date" value={fDesde} onChange={(e) => setFDesde(e.target.value)} className="h-9" data-testid="cli-f-desde" />
+            <span className="text-slate-400 text-xs">a</span>
+            <Input type="date" value={fHasta} onChange={(e) => setFHasta(e.target.value)} className="h-9" data-testid="cli-f-hasta" />
+          </div>
+        </div>
       </div>
 
       <div className="card-soft">

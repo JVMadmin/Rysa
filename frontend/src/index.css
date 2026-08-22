@@ -12,6 +12,11 @@ body {
 
 @layer base {
   :root {
+    /* Escala global: reducida otro 10% (pasa de 90% a ~81%) para que la
+       información se vea más alejada/espaciosa en pantalla (equivale a
+       alejarse un 10% más del zoom anterior). Tailwind usa rem, así que
+       reducir el font-size raíz comprime toda la interfaz proporcionalmente. */
+    font-size: 81%;
     /* Finexy fintech palette */
     --background: 20 20% 96%;          /* #F6F5F4 fondo general */
     --foreground: 0 0% 10%;            /* #1A1A1A texto principal */
@@ -164,7 +169,7 @@ body {
 
 @media print {
   html, body { height: auto !important; margin: 0 !important; padding: 0 !important; }
-  body > *:not(#thermal-print-clone) { display: none !important; }
+  body:not(.print-mode-letter):not(.print-mode-invoice) > *:not(#thermal-print-clone) { display: none !important; }
   #thermal-print-clone, #thermal-print-clone * { visibility: visible !important; }
   #thermal-print-clone {
     position: absolute; left: 0; top: 0; width: 80mm !important; max-width: 80mm !important;
@@ -182,4 +187,23 @@ body {
     position: absolute; left: 0; top: 0; width: 100%; min-height: 100vh;
     background: #fff; color: #000; padding: 0;
   }
+}
+
+/* Comprobante comercial RYSA — Formato carta (Letter 8.5x11) */
+.letter-doc { width: 210mm; max-width: 100%; background: #fff; color: #000; padding: 12mm 16mm; }
+.letter-doc table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+.letter-doc th { background: #C1401E; color: #fff; padding: 5px 8px; text-align: left; font-size: 8.5pt; }
+.letter-doc td { padding: 4px 8px; border-bottom: 1px solid #e2e8f0; }
+.letter-doc .text-right { text-align: right; }
+.letter-doc .text-center { text-align: center; }
+
+@media print {
+  body.print-mode-letter * { visibility: hidden !important; }
+  body.print-mode-letter #letter-template,
+  body.print-mode-letter #letter-template * { visibility: visible !important; }
+  body.print-mode-letter #letter-template {
+    position: absolute; left: 0; top: 0; width: 100%; min-height: 100vh;
+    background: #fff; color: #000; padding: 12mm 16mm;
+  }
+  body.print-mode-letter .letter-actions { display: none !important; }
 }

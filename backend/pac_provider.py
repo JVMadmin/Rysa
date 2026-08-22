@@ -167,7 +167,7 @@ def _receptor(cliente, overrides=None):
 def _conceptos(sale):
     conceptos = []
     for it in sale.get("items", []):
-        tasa = float(it.get("iva_tasa", 16)) / 100
+        tasa = float(it.get("iva_tasa", 8)) / 100
         bruto_unit = float(it["precio"]) - float(it.get("descuento", 0) or 0)
         base_unit = round(bruto_unit / (1 + tasa), 2)
         conceptos.append({

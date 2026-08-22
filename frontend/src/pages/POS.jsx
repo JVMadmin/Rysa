@@ -10,12 +10,14 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import CajaAperturaModal from "@/components/CajaAperturaModal";
 import { toast } from "sonner";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, PauseCircle, PlayCircle, X, Package,
   Banknote, ArrowLeftRight, CreditCard,   Tag, Printer, Hash, Keyboard, FileText,
   Smartphone, Landmark, Gift, DollarSign, User as UserIcon, Check, Tags, MessageCircle, Loader2,
-  Star, Flame, LayoutGrid, HandCoins,
+  Star, Flame, LayoutGrid, HandCoins, UserPlus, AlertTriangle, Share2, Download, RefreshCw,
+  Wallet as Wallet2,
 } from "lucide-react";
 
 const METODOS = [
@@ -44,7 +46,7 @@ const calcListPrice = (p, l, pct) => {
   if (costo > 0 && lIdx < n) {
     const pctLista = Number(pct[lIdx] ?? pct[0] ?? 0);
     const sin = costo * (1 + pctLista / 100);
-    return +(sin * (1 + Number(p.iva_tasa ?? p.iva ?? 16) / 100)).toFixed(2);
+    return +(sin * (1 + Number(p.iva_tasa ?? p.iva ?? 8) / 100)).toFixed(2);
   }
   return arr[0]?.precio_con_iva ?? 0;
 };
@@ -59,7 +61,7 @@ const PRODUCT_EX_CLS = (ex) => {
 
 const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold }) => {
   const neto = priceOf(p);
-  const tasa = Number(p.iva_tasa || 16);
+  const tasa = Number(p.iva_tasa || 8);
   const conIva = +(neto * (1 + tasa / 100)).toFixed(2);
   return (
   <div className="relative">
@@ -113,6 +115,13 @@ export default function POS({ windowId, windowLabel }) {
   const [clientQuery, setClientQuery] = useState("");
   const [clientOpen, setClientOpen] = useState(false);
   const [pubClientId, setPubClientId] = useState("");
+  const [cajaModalOpen, setCajaModalOpen] = useState(false);
+  const [cajaAbierta, setCajaAbierta] = useState(true);
+
+  const loadCaja = useCallback(() => {
+    api.get("/caja/actual").then((r) => setCajaAbierta(!!r.data?.caja)).catch(() => setCajaAbierta(false));
+  }, []);
+  useEffect(() => { loadCaja(); const id = setInterval(loadCaja, 30000); return () => clearInterval(id); }, [loadCaja]);
   const [linePrice, setLinePrice] = useState(null);
   const [selProd, setSelProd] = useState(null);
   const [libreVal, setLibreVal] = useState("");
@@ -145,9 +154,20 @@ export default function POS({ windowId, windowLabel }) {
   const [abonoCli, setAbonoCli] = useState(null);
   const [abono, setAbono] = useState({ monto: "", metodo: "efectivo", referencia: "" });
   const [abonoSaving, setAbonoSaving] = useState(false);
-  const [printMode, setPrintMode] = useState("thermal"); // thermal | invoice
+  const [posComp, setPosComp] = useState(null); // comprobante de abono desde el POS
+  const [posCompBusy, setPosCompBusy] = useState(false);
+  const [printMode, setPrintMode] = useState("thermal"); // thermal | letter | invoice
   const [sucursales, setSucursales] = useState([]);
   const incluyeIvaDefault = useRef(true); // valor de settings.precios_incluyen_iva
+  // Nuevo cliente desde el POS (modal, sin abandonar la venta)
+  const [nuevoClienteOpen, setNuevoClienteOpen] = useState(false);
+  const [nc, setNc] = useState({});
+  const [ncBusy, setNcBusy] = useState(false);
+  const [ncError, setNcError] = useState("");
+  const [ncDup, setNcDup] = useState([]);
+  // Impresión
+  const [printFail, setPrintFail] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const injectPageSize = useCallback((size) => {
     let el = document.getElementById("print-page-size");
@@ -172,8 +192,70 @@ export default function POS({ windowId, windowLabel }) {
   const printInvoice = useCallback(() => {
     injectPageSize("Letter portrait");
     document.body.classList.add("print-mode-invoice");
+    document.body.classList.remove("print-mode-letter");
     setTimeout(() => { window.print(); document.body.classList.remove("print-mode-invoice"); }, 50);
   }, [injectPageSize]);
+
+  const printLetter = useCallback(() => {
+    injectPageSize("Letter portrait");
+    document.body.classList.remove("print-mode-invoice");
+    document.body.classList.add("print-mode-letter");
+    setTimeout(() => { window.print(); document.body.classList.remove("print-mode-letter"); }, 50);
+  }, [injectPageSize]);
+
+  // --- Impresoras configuradas: destino real por tipo de documento ---
+  const printerById = (id) => (settings.printers?.lista || []).find((p) => p.id === id);
+  const defaultPrinterId = (tipo) => (settings.printers?.predeterminadas || settings.printers?.defaults || {})[tipo];
+  const enviarAlPuente = async (printer) => {
+    const base = String(settings.printers?.bridge_url || "").trim() || "http://localhost:9731";
+    const r = await fetch(base + "/print", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ printer: printer?.name || "", ip: printer?.ip || "", documento: "ticket" }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) throw new Error("bridge_error");
+  };
+
+  // Imprime el ticket según la impresora predeterminada para tickets.
+  // Si no hay puente/caja de impresión local, usa el diálogo del navegador.
+  // Un fallo de impresión NUNCA afecta la venta registrada.
+  const imprimirTicket = async () => {
+    const pr = printerById(defaultPrinterId("ticket") || defaultPrinterId("ticket_pos"));
+    if (pr && pr.tipo_conexion !== "browser") {
+      try { await enviarAlPuente(pr); setPrintFail(false); toast.success("Prueba de impresión enviada correctamente."); return true; }
+      catch { setPrintFail(true); toast.error("No fue posible imprimir. Verifica que la impresora esté encendida, conectada y disponible."); return false; }
+    }
+    try { printThermal(); setPrintFail(false); return true; }
+    catch { setPrintFail(true); return false; }
+  };
+
+  // --- Formato carta: PDF real del comprobante comercial RYSA ---
+  const generarCartaPDF = async () => {
+    if (!ticket?.id) { toast.error("Ticket no disponible"); return null; }
+    setPdfBusy(true);
+    try { const { data } = await api.post(`/sales/${ticket.id}/letter-pdf`); return data.url || data.path; }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); return null; }
+    finally { setPdfBusy(false); }
+  };
+  const descargarCarta = async () => { const url = await generarCartaPDF(); if (url) window.open(fileUrl(url), "_blank"); };
+  const compartirCarta = async () => {
+    const url = await generarCartaPDF();
+    if (!url) return;
+    const link = fileUrl(url);
+    if (navigator.share) { try { await navigator.share({ title: `Comprobante ${ticket?.folio}`, text: `Comprobante ${ticket?.folio}`, url: link }); } catch {} }
+    else { try { await navigator.clipboard.writeText(link); toast.success("Enlace copiado al portapapeles"); } catch { window.open(link, "_blank"); } }
+  };
+  const enviarCartaWhatsApp = async () => {
+    const url = await generarCartaPDF();
+    if (!url) return;
+    const msg = `Hola${ticket?.cliente_nombre ? " " + ticket.cliente_nombre : ""}, aquí está tu comprobante ${ticket?.folio} de ${settings.empresa_nombre || "Grupo RYSA"}. Total: ${money(ticket?.total)}.`;
+    try {
+      const modo = await adjuntarPdf(url, `comprobante-${ticket?.folio}.pdf`, `Comprobante ${ticket?.folio}`, msg);
+      if (modo === "share") toast.success("PDF adjuntado. Selecciona WhatsApp en el menú de compartir.");
+      else toast.info("El PDF se descargó. Adjúntalo manualmente en WhatsApp.");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
   const condicion = formaPago === "credito" ? "credito" : "contado";
   const clienteSel = useMemo(() => clients.find((c) => c.id === clienteId) || null, [clients, clienteId]);
   // Datos frescos del cliente del ticket impreso (RFC, dirección, teléfono, razón social).
@@ -304,18 +386,40 @@ export default function POS({ windowId, windowLabel }) {
     else toast.error("Producto no encontrado");
   };
 
+  const descargarBlob = (blob, filename) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  // Descarga el PDF y lo adjunta directamente (Web Share API con archivos).
+  // Así se envía el archivo real por WhatsApp, no un link. Si el navegador no
+  // soporta compartir archivos, el PDF se descarga como respaldo para adjuntarlo.
+  const adjuntarPdf = async (pdfUrl, filename, titulo, texto) => {
+    const resp = await api.get(pdfUrl.replace(/^.*\/api\/files\//, "/files/"), { responseType: "blob" });
+    const blob = resp.data;
+    const file = new File([blob], filename, { type: "application/pdf" });
+    if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+      await navigator.share({ title: titulo, text: texto, files: [file] });
+      return "share";
+    }
+    descargarBlob(blob, filename);
+    return "download";
+  };
+
   const sendWhatsApp = async () => {
     if (!ticket?.id) return toast.error("Ticket no disponible");
     setWaSending(true);
     try {
       const { data } = await api.post(`/sales/${ticket.id}/ticket-pdf`);
-      const url = fileUrl(data.url);
-      const digits = (waPhone || "").replace(/\D/g, "");
-      const phone = digits ? (digits.length === 10 ? "52" + digits : digits) : "";
-      const msg = `Hola${ticket.cliente_nombre ? " " + ticket.cliente_nombre : ""}, aquí está tu ${ticket.tipo_venta === "cotizacion" ? "cotización" : "ticket"} ${ticket.folio} de ${settings.empresa_nombre || "Grupo RYSA"}. Total: ${money(ticket.total)}. Descárgalo aquí: ${url}`;
-      const wa = phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
-      window.open(wa, "_blank");
-      toast.success("PDF generado, abriendo WhatsApp...");
+      const filename = `ticket-${ticket.folio}.pdf`;
+      const msg = `Hola${ticket.cliente_nombre ? " " + ticket.cliente_nombre : ""}, aquí está tu ${ticket.tipo_venta === "cotizacion" ? "cotización" : "ticket"} ${ticket.folio} de ${settings.empresa_nombre || "Grupo RYSA"}. Total: ${money(ticket.total)}.`;
+      const modo = await adjuntarPdf(data.url, filename, `Ticket ${ticket.folio}`, msg);
+      if (modo === "share") toast.success("PDF adjuntado. Selecciona WhatsApp en el menú de compartir.");
+      else toast.info("El PDF se descargó. Adjúntalo manualmente en WhatsApp.");
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setWaSending(false); }
   };
@@ -328,7 +432,7 @@ export default function POS({ windowId, windowLabel }) {
     setCart((c) => {
       const ex = c.find((i) => i.product_id === p.id);
       if (ex) return c.map((i) => (i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i));
-      return [...c, { product_id: p.id, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || "PZA", precio: priceOf(p), iva_tasa: p.iva_tasa || 16, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
+      return [...c, { product_id: p.id, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || "PZA", precio: priceOf(p), iva_tasa: p.iva_tasa || 8, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
     });
     setSelected(p.id);
     setQ(""); qRef.current = ""; setResults([]);
@@ -342,7 +446,7 @@ export default function POS({ windowId, windowLabel }) {
     setCart((c) => {
       const ex = c.find((i) => i.product_id === pid);
       if (ex) return c.map((i) => (i.product_id === pid ? { ...i, precio: Number(precio) || 0 } : i));
-      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa || 16, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
+      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa || 8, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
     });
     setSelected(pid);
     setQ(""); qRef.current = ""; setResults([]);
@@ -371,6 +475,37 @@ export default function POS({ windowId, windowLabel }) {
     const l = Number(c.precio_venta || c.lista_precios || 1);
     if (l >= 1 && l <= listaNames.length + 1) applyLista(l);
     setDescPct(Number(c.descuento_permanente || 0));
+  };
+
+  // Nuevo cliente desde el POS: modal sobre la venta, sin perder el carrito.
+  const ncBlank = () => ({ codigo: "", nombre: "", razon_social: "", telefono: "", whatsapp: "", celular: "", correo: "", rfc: "", direccion: "", colonia: "", ciudad: "", estado_geo: "", cp: "", referencias: "" });
+  const openNuevoCliente = () => { setNc(ncBlank()); setNcError(""); setNcDup([]); setNuevoClienteOpen(true); };
+  const seleccionarExistente = (c) => { pickClient(c); setNuevoClienteOpen(false); setNcDup([]); };
+
+  const guardarNuevoCliente = async () => {
+    if (!nc.nombre.trim()) return setNcError("El nombre es obligatorio");
+    const q = nc.nombre.trim().toLowerCase();
+    const candidatos = clients.filter((c) => c.nombre?.toLowerCase() === q || (nc.rfc && c.rfc && c.rfc.toLowerCase() === nc.rfc.toLowerCase()));
+    if (candidatos.length > 0 && ncDup.length === 0) {
+      setNcDup(candidatos);
+      return setNcError("Ya existe uno o más clientes con este nombre/RFC. Selecciona el existente o registra de todos modos.");
+    }
+    setNcBusy(true);
+    setNcError("");
+    try {
+      const payload = {
+        ...nc, nombre: nc.nombre.trim(), codigo: nc.codigo.trim() || undefined,
+        vendedor_id: user.id, lista_precios: 1, precio_venta: 1, estado: "activo", tipo: "publico",
+      };
+      const { data } = await api.post("/clients", payload);
+      setClients((prev) => [...prev, data].sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "", "es")));
+      pickClient(data);
+      setNuevoClienteOpen(false);
+      setNcDup([]);
+      toast.success(`Cliente ${data.nombre} creado y seleccionado`);
+    } catch (e) {
+      setNcError(formatApiError(e.response?.data?.detail) || "No se pudo registrar el cliente");
+    } finally { setNcBusy(false); }
   };
   const filteredClients = clientQuery
     ? clients.filter((c) => `${c.nombre} ${c.codigo} ${c.rfc || ""}`.toLowerCase().includes(clientQuery.toLowerCase())).slice(0, 100)
@@ -454,6 +589,13 @@ export default function POS({ windowId, windowLabel }) {
   const openPay = () => {
     if (cart.length === 0) return toast.error("Agrega productos");
     if (tipoVenta === "cotizacion") return confirmar();
+    // La caja es obligatoria para operar: si no hay sesión abierta, abre el
+    // modal de apertura (el vendedor no debe salir del POS).
+    if (!cajaAbierta) {
+      setCajaModalOpen(true);
+      toast.info("Abre una caja para continuar");
+      return;
+    }
     // Inventario insuficiente: solo se permite con autorización y motivo.
     const insuficiente = cart.filter((i) => {
       if (i.agotado) return false;
@@ -470,6 +612,20 @@ export default function POS({ windowId, windowLabel }) {
     setPagos([{ metodo, monto: String(totals.total) }]);
     setPayOpen(true);
   };
+
+  // Atajo de teclado: Ctrl+Enter abre el cobro (COBRAR) o guarda la cotización.
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (creditoBloqueado || cart.length === 0) return;
+        openPay();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [creditoBloqueado, cart.length, tipoVenta, formaPago, totals.total, can]);
 
   // Reset completo del POS: la venta siguiente NO debe heredar nada de la
   // anterior (cliente Público General, carrito vacío, forma de pago contado,
@@ -495,6 +651,10 @@ export default function POS({ windowId, windowLabel }) {
     setAbono({ monto: "", metodo: "efectivo", referencia: "" });
     setPrintMode("thermal");
     setTicket(null);
+    setPrintFail(false);
+    setNuevoClienteOpen(false);
+    setNcDup([]);
+    setNcError("");
     // Cliente vuelve a Público General (el resto lo restaura CartContext).
     if (pubClientId) setClienteId(pubClientId);
     refreshFolio();
@@ -507,7 +667,7 @@ export default function POS({ windowId, windowLabel }) {
         items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", precio: Number(i.precio) || 0, iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
         descuento_global: totals.descGlobalTotal,
         condicion,
-        pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0) })) : [],
+        pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0), ...(p.metodo === "tarjeta" && p.card_type ? { card_type: p.card_type } : {}) })) : [],
         lista_precios: Number(lista),
         tipo_venta: tipoVenta,
         precios_incluyen_iva: incluyeIva,
@@ -524,7 +684,13 @@ export default function POS({ windowId, windowLabel }) {
       resetPos();
       setTicket(data);
       setWaPhone(clienteSel?.whatsapp || clienteSel?.telefono || clienteSel?.celular || "");
+      setPrintFail(false);
       toast.success(`${tipoVenta === "cotizacion" ? "Cotización" : "Venta"} ${data.folio} registrada`);
+      loadCaja();
+      // Impresión automática: un error aquí NUNCA cancela ni revierte la venta.
+      if (settings.ticket_config?.auto_print && data.tipo_venta !== "cotizacion") {
+        imprimirTicket();
+      }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -542,21 +708,50 @@ export default function POS({ windowId, windowLabel }) {
     setAbonoSaving(true);
     try {
       const { data } = await api.post(`/cxc/${abonoCli.id}/abono`, { ...abono, monto });
-      toast.success(`Abono ${data.folio} · saldo actual ${money(data.saldo_actual)}${data.caja_afectada ? " · entró a caja" : ""}`);
+      toast.success("Abono registrado correctamente");
       setAbonoCli(null);
-      // refresca clientes para actualizar saldo mostrado
-      const { data: cl } = await api.get("/clients", { params: { estado: "activo" } });
-      setClients(cl.data);
-      const pub = cl.data.find((c) => c.codigo === "PUBLICO");
-      if (pub && !clienteId) setClienteId(pub.id);
+      // El comprobante siempre se abre, independientemente de que el refresco
+      // de clientes falle. El refresco va por separado para no bloquearlo.
+      setPosComp({ abono: data.abono || { folio: data.folio, cliente_nombre: abonoCli.nombre, monto, metodo: abono.metodo, referencia: abono.referencia, saldo_anterior: data.saldo_anterior, saldo_restante: data.saldo_actual }, cliente: abonoCli });
+      try {
+        // refresca clientes para actualizar saldo mostrado
+        const { data: cl } = await api.get("/clients", { params: { estado: "activo" } });
+        setClients(cl.data);
+        const pub = cl.data.find((c) => c.codigo === "PUBLICO");
+        if (pub && !clienteId) setClienteId(pub.id);
+      } catch { /* el refresco de clientes no debe impedir el comprobante */ }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setAbonoSaving(false); }
+  };
+
+  // Comprobante de abono (PDF/Imprimir/WhatsApp) desde el POS
+  const posGenCompPdf = async (abono) => {
+    setPosCompBusy(true);
+    try { const { data } = await api.post(`/abonos/${abono.id}/pdf`); return data; }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); return null; }
+    finally { setPosCompBusy(false); }
+  };
+  const posDescargarComp = async (abono) => { const d = await posGenCompPdf(abono); if (d) { const a = document.createElement("a"); a.href = fileUrl(d.url); a.download = d.filename; document.body.appendChild(a); a.click(); a.remove(); } };
+  const posCompartirComp = async (abono) => {
+    const d = await posGenCompPdf(abono); if (!d) return;
+    const link = fileUrl(d.url);
+    if (navigator.share) { try { await navigator.share({ title: `Comprobante ${abono.folio}`, text: `Comprobante ${abono.folio}`, url: link }); } catch {} }
+    else { try { await navigator.clipboard.writeText(link); toast.success("Enlace copiado"); } catch { window.open(link, "_blank"); } }
+  };
+  const posEnviarCompWhatsApp = async (abono) => {
+    const d = await posGenCompPdf(abono); if (!d) return;
+    const msg = `Hola ${abono.cliente_nombre || ""}, aquí está tu comprobante de abono ${abono.folio} de ${money(abono.monto)}.`;
+    try {
+      const modo = await adjuntarPdf(d.url, d.filename || `comprobante-${abono.folio}.pdf`, `Comprobante ${abono.folio}`, msg);
+      if (modo === "share") toast.success("PDF adjuntado. Selecciona WhatsApp en el menú de compartir.");
+      else toast.info("El PDF se descargó. Adjúntalo manualmente en WhatsApp.");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   const folioActual = tipoVenta === "cotizacion" ? nextFolio.cotizacion : nextFolio.venta;
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 -m-6 p-6 h-[calc(100vh-4rem)]" data-testid="pos-page">
+    <div className="flex flex-col lg:flex-row gap-4 -m-6 p-6 pb-28 min-h-0 lg:h-[calc(100vh-5rem)] lg:overflow-hidden" data-testid="pos-page">
       {/* Izquierda: Cliente (sobre el ticket) + Ticket/Carrito */}
       <div className="lg:w-[68%] flex flex-col min-h-0">
         {/* Cliente */}
@@ -586,13 +781,28 @@ export default function POS({ windowId, windowLabel }) {
             </div>
           )}
         </div>
-        <Select value={String(lista)} onValueChange={(v) => applyLista(Number(v))}>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={openNuevoCliente} className="h-12 whitespace-nowrap" data-testid="pos-nuevo-cliente" title="Registrar un cliente nuevo sin salir del POS">
+            <UserPlus className="w-4 h-4 mr-1 text-[#C1401E]" /> Nuevo cliente
+          </Button>
+          <Button
+            variant={cajaAbierta ? "outline" : "default"}
+            onClick={() => setCajaModalOpen(true)}
+            className={`h-12 whitespace-nowrap ${cajaAbierta ? "" : "bg-[#C1401E] hover:bg-[#A03316]"}`}
+            data-testid="pos-caja-btn"
+            title={cajaAbierta ? "Ver caja abierta" : "Abrir caja"}
+          >
+            <Wallet2 className={`w-4 h-4 mr-1 ${cajaAbierta ? "text-green-600" : "text-white"}`} />
+            {cajaAbierta ? "Caja abierta" : "Abrir caja"}
+          </Button>
+          <Select value={String(lista)} onValueChange={(v) => applyLista(Number(v))}>
           <SelectTrigger className="h-12 sm:w-44" data-testid="pos-lista"><Tags className="w-4 h-4 mr-1 text-slate-400" /><SelectValue /></SelectTrigger>
           <SelectContent>
             {listaNames.map((n, i) => <SelectItem key={i} value={String(i + 1)}>{n}</SelectItem>)}
             <SelectItem value={String(listaNames.length + 1)}>Precio mínimo</SelectItem>
           </SelectContent>
           </Select>
+        </div>
         </div>
 
         {/* Ticket / Carrito */}
@@ -649,7 +859,7 @@ export default function POS({ windowId, windowLabel }) {
             )}
           </div>
 
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 min-h-0 overflow-auto">
             {cart.length === 0 && <div className="p-8 text-center text-slate-300 text-sm">Carrito vacío</div>}
             {cart.length > 0 && (
               <table className="w-full text-xs border-collapse" data-testid="cart-table">
@@ -720,7 +930,7 @@ export default function POS({ windowId, windowLabel }) {
             )}
           </div>
 
-          <div className="p-3 border-t border-slate-200 space-y-2">
+          <div className="p-3 border-t border-slate-200 space-y-2 shrink-0">
             {tipoVenta === "directa" && (
               <div className="grid grid-cols-3 gap-2">
                 {[["contado", "Contado", Banknote], ["transferencia", "Transferencia", ArrowLeftRight], ["credito", "Crédito", CreditCard]].map(([k, l, Ic]) => (
@@ -748,24 +958,13 @@ export default function POS({ windowId, windowLabel }) {
                 Precios incluyen IVA
               </button>
             </div>
-            <div className="text-sm space-y-0.5">
-              {incluyeIva && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(totals.subtotal)}</span></div>}
-              {incluyeIva && <div className="flex justify-between text-slate-500"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(totals.iva)}</span></div>}
-              {totals.descGlobalAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}</span><span>-{money(totals.descGlobalAmount)}</span></div>}
-              {totals.descPctAmount > 0 && <div className="flex justify-between text-[#C1401E]"><span>Descuento cliente ({descPct}%)</span><span>-{money(totals.descPctAmount)}</span></div>}
-              <div className="flex justify-between font-display text-2xl font-black pt-1"><span>Total</span><span data-testid="pos-total">{money(totals.total)}</span></div>
-            </div>
+            {totals.descGlobalAmount > 0 && <div className="text-xs text-[#C1401E]">Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}: -{money(totals.descGlobalAmount)}</div>}
+            {totals.descPctAmount > 0 && <div className="text-xs text-[#C1401E]">Descuento cliente ({descPct}%): -{money(totals.descPctAmount)}</div>}
             {creditoBloqueado && (
               <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2" data-testid="pos-credito-bloqueo">
                 <CreditCard className="w-4 h-4" /> Este cliente no tiene crédito habilitado. Usa contado o habilita su crédito en Clientes.
               </div>
             )}
-            <div className="flex gap-2">
-              <Button variant="outline" className="h-12" onClick={suspender} data-testid="pos-suspend"><PauseCircle className="w-5 h-5" /></Button>
-              <Button className="flex-1 h-12 bg-[#C1401E] hover:bg-[#A03316] text-base font-bold" onClick={openPay} disabled={creditoBloqueado} data-testid="pos-cobrar">
-                {tipoVenta === "cotizacion" ? <><FileText className="w-5 h-5 mr-2" /> Guardar cotización</> : <>Cobrar · {money(totals.total)}</>}
-              </Button>
-            </div>
           </div>
         </div>
       </div>
@@ -856,20 +1055,82 @@ export default function POS({ windowId, windowLabel }) {
             <div className="space-y-3">
               {pagos.map((p, i) => (
                 <div key={i} className="flex gap-2 items-center">
-                  <Select value={p.metodo} onValueChange={(v) => setPagos((s) => s.map((x, idx) => idx === i ? { ...x, metodo: v } : x))}>
+                  <Select value={p.metodo} onValueChange={(v) => setPagos((s) => s.map((x, idx) => idx === i ? { ...x, metodo: v, card_type: v === "tarjeta" ? (x.card_type || "debito") : undefined } : x))}>
                     <SelectTrigger className="w-44" data-testid={`pago-metodo-${i}`}><SelectValue /></SelectTrigger>
                     <SelectContent>{METODOS.map(([k, l, Ic]) => <SelectItem key={k} value={k}><span className="flex items-center gap-2"><Ic className="w-4 h-4" /> {l}</span></SelectItem>)}</SelectContent>
                   </Select>
+                  {p.metodo === "tarjeta" && (
+                    <Select value={p.card_type || "debito"} onValueChange={(v) => setPagos((s) => s.map((x, idx) => idx === i ? { ...x, card_type: v } : x))}>
+                      <SelectTrigger className="w-32" data-testid={`pago-cardtype-${i}`}><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="debito"><span className="flex items-center gap-2"><CreditCard className="w-4 h-4" /> Débito</span></SelectItem>
+                        <SelectItem value="credito"><span className="flex items-center gap-2"><CreditCard className="w-4 h-4" /> Crédito</span></SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                   <Input type="number" value={p.monto} onChange={(e) => setPagos((s) => s.map((x, idx) => idx === i ? { ...x, monto: e.target.value } : x))} placeholder="0.00" data-testid={`pago-monto-${i}`} />
                   {pagos.length > 1 && <button onClick={() => setPagos((s) => s.filter((_, idx) => idx !== i))}><X className="w-4 h-4 text-slate-400" /></button>}
                 </div>
               ))}
-              <Button variant="outline" size="sm" onClick={() => setPagos((s) => [...s, { metodo: "tarjeta", monto: "" }])} data-testid="add-pago"><Plus className="w-4 h-4 mr-1" /> Pago mixto</Button>
+              <Button variant="outline" size="sm" onClick={() => setPagos((s) => [...s, { metodo: "tarjeta", monto: "", card_type: "debito" }])} data-testid="add-pago"><Plus className="w-4 h-4 mr-1" /> Pago mixto</Button>
               <div className="flex justify-between text-sm pt-2 border-t"><span>Pagado</span><span className="font-semibold">{money(pagado)}</span></div>
               <div className="flex justify-between text-lg font-bold"><span>Cambio</span><span data-testid="pos-cambio" className="text-green-600">{money(cambio)}</span></div>
             </div>
           )}
           <DialogFooter><Button variant="outline" onClick={() => setPayOpen(false)}>Cancelar</Button><Button onClick={confirmar} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirmar-venta">Confirmar venta</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Nuevo cliente desde el POS (el carrito y la venta NO se tocan) */}
+      <Dialog open={nuevoClienteOpen} onOpenChange={setNuevoClienteOpen}>
+        <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto" data-testid="pos-nuevo-cliente-dialog">
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><UserPlus className="w-5 h-5 text-[#C1401E]" /> Nuevo cliente</DialogTitle></DialogHeader>
+          {ncDup.length > 0 && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" data-testid="pos-nc-duplicados">
+              <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="w-4 h-4" /> Ya existe un cliente similar. Puedes seleccionarlo:</div>
+              <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                {ncDup.map((c) => (
+                  <button key={c.id} onClick={() => seleccionarExistente(c)} data-testid={`pos-nc-usar-${c.codigo}`}
+                    className="w-full text-left px-3 py-2 rounded-md bg-white border border-amber-200 hover:bg-amber-100 flex items-center justify-between">
+                    <span><b className="text-[#C1401E]">{c.codigo}</b> {c.nombre}{c.rfc ? ` · ${c.rfc}` : ""}</span>
+                    <span className="text-xs font-semibold text-amber-700">Usar este</span>
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setNcDup([])} className="mt-2 text-xs font-semibold text-amber-700 underline" data-testid="pos-nc-ignorar-dup">
+                Registrar de todos modos
+              </button>
+            </div>
+          )}
+          {ncError && !ncDup.length && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2" data-testid="pos-nc-error">{ncError}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Nombre / Razón social *</Label>
+              <Input value={nc.nombre} onChange={(e) => setNc((s) => ({ ...s, nombre: e.target.value }))} className="mt-1" data-testid="pos-nc-nombre" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Clave (opcional)</Label>
+              <Input value={nc.codigo} onChange={(e) => setNc((s) => ({ ...s, codigo: e.target.value }))} className="mt-1" placeholder="auto" data-testid="pos-nc-codigo" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">RFC</Label>
+              <Input value={nc.rfc} onChange={(e) => setNc((s) => ({ ...s, rfc: e.target.value }))} className="mt-1 font-mono" data-testid="pos-nc-rfc" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Teléfono</Label>
+              <Input value={nc.telefono} onChange={(e) => setNc((s) => ({ ...s, telefono: e.target.value }))} className="mt-1" data-testid="pos-nc-telefono" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">WhatsApp</Label>
+              <Input value={nc.whatsapp} onChange={(e) => setNc((s) => ({ ...s, whatsapp: e.target.value }))} className="mt-1" data-testid="pos-nc-whatsapp" /></div>
+            <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Email</Label>
+              <Input value={nc.correo} onChange={(e) => setNc((s) => ({ ...s, correo: e.target.value }))} className="mt-1" data-testid="pos-nc-correo" /></div>
+            <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Dirección</Label>
+              <Input value={nc.direccion} onChange={(e) => setNc((s) => ({ ...s, direccion: e.target.value }))} className="mt-1" data-testid="pos-nc-direccion" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Ciudad / Localidad</Label>
+              <Input value={nc.ciudad} onChange={(e) => setNc((s) => ({ ...s, ciudad: e.target.value }))} className="mt-1" data-testid="pos-nc-ciudad" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Estado</Label>
+              <Input value={nc.estado_geo} onChange={(e) => setNc((s) => ({ ...s, estado_geo: e.target.value }))} className="mt-1" /></div>
+            <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Referencias</Label>
+              <Input value={nc.referencias} onChange={(e) => setNc((s) => ({ ...s, referencias: e.target.value }))} className="mt-1" data-testid="pos-nc-referencias" /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setNuevoClienteOpen(false); setNcError(""); setNcDup([]); }}>Cancelar</Button>
+            <Button onClick={guardarNuevoCliente} disabled={ncBusy} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-nc-guardar">
+              {ncBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />} Guardar cliente
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -980,7 +1241,7 @@ export default function POS({ windowId, windowLabel }) {
 
 {/* Ticket térmico + Factura/Cotización */}
       <Dialog open={!!ticket} onOpenChange={(o) => { if (!o) setTicket(null); }}>
-        <DialogContent data-testid="ticket-dialog" className="max-w-3xl">
+        <DialogContent data-testid="ticket-dialog" className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display text-center">
               {ticket?.tipo_venta === "cotizacion" ? "Cotización" : "Ticket de venta"}
@@ -989,11 +1250,16 @@ export default function POS({ windowId, windowLabel }) {
           {ticket && (
             <>
               {/* Toggle vista */}
-              <div className="flex justify-center gap-2 mb-3">
+              <div className="flex justify-center gap-2 mb-3 flex-wrap">
                 <Button size="sm" variant={printMode === "thermal" ? "default" : "outline"}
                   onClick={() => setPrintMode("thermal")}
                   className={printMode === "thermal" ? "bg-[#C1401E]" : ""}>
                   Ticket térmico
+                </Button>
+                <Button size="sm" variant={printMode === "letter" ? "default" : "outline"}
+                  onClick={() => setPrintMode("letter")}
+                  className={printMode === "letter" ? "bg-[#C1401E]" : ""}>
+                  Formato carta
                 </Button>
                 <Button size="sm" variant={printMode === "invoice" ? "default" : "outline"}
                   onClick={() => setPrintMode("invoice")}
@@ -1001,6 +1267,15 @@ export default function POS({ windowId, windowLabel }) {
                   {ticket.tipo_venta === "cotizacion" ? "Cotización" : "Factura"}
                 </Button>
               </div>
+
+              {printFail && (
+                <div className="text-center text-sm bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2" data-testid="pos-print-fail">
+                  Venta realizada correctamente. No fue posible imprimir el ticket.
+                  <Button size="sm" variant="outline" onClick={imprimirTicket} className="ml-2" data-testid="pos-reintentar-impresion">
+                    <RefreshCw className="w-4 h-4 mr-1" /> Reintentar impresión
+                  </Button>
+                </div>
+              )}
 
               {/* Thermal ticket (80mm) */}
               {printMode === "thermal" && (
@@ -1059,6 +1334,116 @@ export default function POS({ windowId, windowLabel }) {
                 )}
                 <div className="text-center text-[11px]">{settings.ticket_config?.pie || "¡Gracias por su compra!"}</div>
               </div>
+              )}
+
+              {/* Formato carta RYSA (comprobante comercial Letter 8.5x11) */}
+              {printMode === "letter" && (
+                <div id="letter-template" className="letter-doc mx-auto" data-testid="letter-template">
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "3px solid #C1401E", paddingBottom: 12, marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "#C1401E" }}>{settings.empresa_nombre || "Grupo RYSA"}</div>
+                      <div style={{ fontSize: 10, color: "#475569" }}>{settings.razon_social || "RAYMUNDO GOMEZ DIAZ"}</div>
+                      {settings.rfc && <div style={{ fontSize: 9, color: "#64748B" }}>RFC: {settings.rfc}</div>}
+                      {settings.direccion && <div style={{ fontSize: 9, color: "#64748B" }}>{settings.direccion}</div>}
+                      {[settings.ciudad, settings.estado, settings.cp].filter(Boolean).length > 0 && <div style={{ fontSize: 9, color: "#64748B" }}>{[settings.ciudad, settings.estado, settings.cp].filter(Boolean).join(", ")}</div>}
+                      {settings.telefono && <div style={{ fontSize: 9, color: "#64748B" }}>Tel: {settings.telefono}</div>}
+                      {settings.correo && <div style={{ fontSize: 9, color: "#64748B" }}>{settings.correo}</div>}
+                      {ticketSucursal && <div style={{ fontSize: 9, color: "#C1401E", fontWeight: 600 }}>Sucursal: {ticketSucursal.nombre}</div>}
+                    </div>
+                    <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" style={{ height: 64 }} className="object-contain" />
+                  </div>
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#1F1F1F", letterSpacing: 1 }}>DOCUMENTO DE VENTA</div>
+                    <div style={{ fontSize: 9, color: "#64748B", textAlign: "right" }}>
+                      <div><b>Folio:</b> {ticket.folio} · <b>Fecha:</b> {ticket.fecha?.slice(0, 10)} {ticket.hora ? `· ${ticket.hora}` : ""}</div>
+                      <div><b>Vendedor:</b> {ticket.vendedor_nombre || ticket.usuario_nombre}</div>
+                      <div><b>Método de pago:</b> {(ticket.pagos || []).map((p) => {
+                        const base = ({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito", spei: "SPEI", otros: "Otro" })[p.metodo] || p.metodo;
+                        return p.metodo === "tarjeta" && p.card_type ? `${base} ${p.card_type === "debito" ? "Débito" : "Crédito"}` : base;
+                      }).join(" + ") || (ticket.condicion === "credito" ? "Crédito" : "Contado")}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ backgroundColor: "#F5F3F0", border: "1px solid #E2E0DC", borderRadius: 8, padding: 10, marginBottom: 14 }}>
+                    <div style={{ fontWeight: 700, color: "#C1401E", fontSize: 10, textTransform: "uppercase", marginBottom: 4 }}>Cliente</div>
+                    <div style={{ fontSize: 10, color: "#1F1F1F" }}>
+                      <div style={{ fontWeight: 600 }}>{ticketCliente?.razon_social || ticket.cliente_nombre}</div>
+                      {ticketCliente?.rfc && <div><b>RFC:</b> {ticketCliente.rfc}</div>}
+                      {(ticketCliente?.telefono || ticketCliente?.celular || ticketCliente?.whatsapp) && <div><b>Teléfono:</b> {ticketCliente.telefono || ticketCliente.celular || ticketCliente.whatsapp}</div>}
+                      {(ticketCliente?.correo || ticketCliente?.correos) && <div><b>Email:</b> {ticketCliente.correo || ticketCliente.correos}</div>}
+                      {[ticketCliente?.direccion, ticketCliente?.colonia, ticketCliente?.ciudad, ticketCliente?.estado_geo, ticketCliente?.cp].filter(Boolean).length > 0 &&
+                        <div><b>Dirección:</b> {[ticketCliente?.direccion, ticketCliente?.colonia, ticketCliente?.ciudad, ticketCliente?.estado_geo, ticketCliente?.cp].filter(Boolean).join(", ")}</div>}
+                    </div>
+                  </div>
+
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ width: "12%" }}>Código</th>
+                        <th>Descripción</th>
+                        <th style={{ width: "5%" }}>Und.</th>
+                        <th className="text-right" style={{ width: "8%" }}>Cant.</th>
+                        <th className="text-right" style={{ width: "12%" }}>Precio</th>
+                        <th className="text-right" style={{ width: "9%" }}>Desc.</th>
+                        <th className="text-right" style={{ width: "14%" }}>Importe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ticket.items.map((i, k) => {
+                        const importe = i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0));
+                        const precio = i.precio_bruto ?? i.precio;
+                        return (
+                          <tr key={k}>
+                            <td style={{ fontSize: "8pt" }}>{i.codigo}</td>
+                            <td>{i.descripcion}{i.comentario ? <><br /><span style={{ fontSize: "7.5pt", color: "#C1401E" }}>• {i.comentario}</span></> : null}</td>
+                            <td style={{ fontSize: "8pt" }}>{i.unidad}</td>
+                            <td className="text-right">{i.cantidad}</td>
+                            <td className="text-right">{money(precio)}</td>
+                            <td className="text-right">{i.descuento ? money(i.descuento) : "—"}</td>
+                            <td className="text-right" style={{ fontWeight: 600 }}>{money(importe)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, fontSize: "10pt" }}>
+                    <div style={{ width: 260 }}>
+                      {ticket.subtotal != null && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>}
+                      {Number(ticket.descuento_total || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#C1401E" }}><span>Descuento</span><span>-{money(ticket.descuento_total)}</span></div>}
+                      {Number(ticket.iva_total || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}><span>IVA</span><span>{money(ticket.iva_total)}</span></div>}
+                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontWeight: 800, fontSize: "13pt", color: "#C1401E", borderTop: "2px solid #C1401E" }}>
+                        <span>TOTAL</span><span>{money(ticket.total)}</span>
+                      </div>
+                      {ticket.condicion === "credito" && <div style={{ fontSize: "8pt", color: "#dc2626", textAlign: "right" }}>Saldo pendiente: {money(ticket.saldo)}</div>}
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: 28, paddingTop: 10, borderTop: "1px solid #E2E0DC", textAlign: "center" }}>
+                    <div style={{ fontWeight: 700, color: "#C1401E", fontSize: "12pt" }}>¡GRACIAS POR SU PREFERENCIA!</div>
+                    <div style={{ fontSize: "8pt", color: "#94a3b8", marginTop: 4 }}>
+                      {settings.empresa_nombre || "Grupo RYSA"} · {settings.rfc || ""}
+                    </div>
+                    {ticket.id && <div style={{ fontSize: "8pt", color: "#94a3b8", marginTop: 2 }}>Verifica tu comprobante en: {window.location.origin}/verificar/{ticket.id}</div>}
+                  </div>
+
+                  {/* Acciones del formato carta (no se imprimen) */}
+                  <div className="letter-actions" style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                    <Button size="sm" variant="outline" onClick={descargarCarta} disabled={pdfBusy} data-testid="letter-descargar">
+                      {pdfBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Download className="w-4 h-4 mr-1" />} Descargar PDF
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={compartirCarta} disabled={pdfBusy} data-testid="letter-compartir">
+                      <Share2 className="w-4 h-4 mr-1" /> Compartir
+                    </Button>
+                    <Button size="sm" className="bg-[#25D366] hover:bg-[#1ebe57]" onClick={enviarCartaWhatsApp} disabled={pdfBusy} data-testid="letter-whatsapp">
+                      <MessageCircle className="w-4 h-4 mr-1" /> Enviar por WhatsApp
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={printLetter} data-testid="letter-imprimir">
+                      <Printer className="w-4 h-4 mr-1" /> Imprimir
+                    </Button>
+                  </div>
+                </div>
               )}
 
               {/* Invoice/Quote letter-size template */}
@@ -1128,7 +1513,7 @@ export default function POS({ windowId, windowLabel }) {
                   <tbody>
                     {ticket.items.map((i, k) => {
                       const linImporte = i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0));
-                      const linIva = i.iva_linea ?? (incluyeIva ? linImporte * ((i.iva_tasa || 16) / 100) : 0);
+                      const linIva = i.iva_linea ?? (incluyeIva ? linImporte * ((i.iva_tasa || 8) / 100) : 0);
                       const uniPrecio = i.precio_bruto ?? i.precio;
                       return (
                         <tr key={k}>
@@ -1149,7 +1534,7 @@ export default function POS({ windowId, windowLabel }) {
                 {/* Forma de pago */}
                 <div className="flex justify-between mt-2" style={{ fontSize: "9pt", color: "#475569" }}>
                   <span>
-                    <strong>Forma de pago:</strong> {(ticket.pagos || []).map((p) => `${({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito" })[p.metodo] || p.metodo}${p.monto ? ` ${money(p.monto)}` : ""}`).join(" + ") || (ticket.condicion === "credito" ? "Crédito" : "Contado")}
+                    <strong>Forma de pago:</strong> {(ticket.pagos || []).map((p) => { const base = ({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito" })[p.metodo] || p.metodo; const lbl = p.metodo === "tarjeta" && p.card_type ? `${base} ${p.card_type === "debito" ? "Débito" : "Crédito"}` : base; return `${lbl}${p.monto ? ` ${money(p.monto)}` : ""}`; }).join(" + ") || (ticket.condicion === "credito" ? "Crédito" : "Contado")}
                   </span>
                   {ticket.cambio > 0 && <span><strong>Cambio:</strong> {money(ticket.cambio)}</span>}
                 </div>
@@ -1161,7 +1546,7 @@ export default function POS({ windowId, windowLabel }) {
                       <div className="flex justify-between py-1"><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>
                     )}
                     {incluyeIva && (
-                      <div className="flex justify-between py-1"><span>IVA ({settings.iva_tasa ?? 16}%)</span><span>{money(ticket.iva_total)}</span></div>
+                      <div className="flex justify-between py-1"><span>IVA ({settings.iva_tasa ?? 8}%)</span><span>{money(ticket.iva_total)}</span></div>
                     )}
                     {ticket.descuento_total > 0 && (
                       <div className="flex justify-between py-1"><span>Descuento</span><span>-{money(ticket.descuento_total)}</span></div>
@@ -1255,6 +1640,101 @@ export default function POS({ windowId, windowLabel }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Comprobante de abono desde el POS */}
+      <Dialog open={!!posComp} onOpenChange={(o) => !o && setPosComp(null)}>
+        <DialogContent className="max-w-md" data-testid="pos-comprobante-abono-dialog">
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> Abono registrado correctamente</DialogTitle></DialogHeader>
+          {posComp && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-[#E5E0DA] overflow-hidden" data-testid="pos-comprobante-abono-cuerpo">
+                <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-[#C1401E]">
+                  <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" className="h-12 w-12 object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                  <div className="flex-1">
+                    <div className="font-display font-extrabold text-[#C1401E] leading-none">{settings.empresa_nombre || "Grupo RYSA"}</div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 mt-0.5">Comprobante de Abono</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-display font-black text-[#C1401E]">{posComp.abono.folio}</div>
+                    <div className="text-[11px] text-slate-500">{(posComp.abono.fecha || new Date().toISOString()).slice(0, 10)} {(posComp.abono.fecha || "").slice(11, 16)}</div>
+                  </div>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="text-sm"><span className="text-slate-400 text-xs">Cliente:</span> <b>{posComp.abono.cliente_nombre || posComp.cliente?.nombre}</b></div>
+                  <div className="rounded-lg bg-[#F4ECE7] p-3 space-y-2">
+                    <div className="flex justify-between text-sm"><span className="text-slate-500">Saldo anterior</span><span className="font-semibold">{money(posComp.abono.saldo_anterior)}</span></div>
+                    <div className="flex justify-between text-base font-bold text-[#C1401E] border-t border-[#E5D5CC] pt-2"><span>ABONO</span><span>{money(posComp.abono.monto)}</span></div>
+                    <div className="flex justify-between text-base font-black border-t-2 border-[#C1401E] pt-2"><span>SALDO RESTANTE</span><span>{money(posComp.abono.saldo_restante)}</span></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
+                    <div><span className="text-slate-400">Método:</span> <span className="capitalize font-medium text-slate-700">{posComp.abono.metodo}</span></div>
+                    {posComp.abono.referencia && <div><span className="text-slate-400">Referencia:</span> <span className="font-medium text-slate-700">{posComp.abono.referencia}</span></div>}
+                    {posComp.abono.usuario_nombre && <div><span className="text-slate-400">Usuario:</span> <span className="font-medium text-slate-700">{posComp.abono.usuario_nombre}</span></div>}
+                  </div>
+                  <div className="text-center font-bold text-[#C1401E] pt-1">¡GRACIAS POR SU PAGO!</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center">
+                <Button size="sm" variant="outline" onClick={() => posDescargarComp(posComp.abono)} disabled={posCompBusy} data-testid="pos-abono-descargar-pdf">
+                  {posCompBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Download className="w-4 h-4 mr-1" />} PDF
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => posCompartirComp(posComp.abono)} disabled={posCompBusy} data-testid="pos-abono-compartir"><Share2 className="w-4 h-4 mr-1" /> Compartir</Button>
+                <Button size="sm" className="bg-[#25D366] hover:bg-[#1ebe57]" onClick={() => posEnviarCompWhatsApp(posComp.abono)} disabled={posCompBusy} data-testid="pos-abono-whatsapp">
+                  <MessageCircle className="w-4 h-4 mr-1" /> WhatsApp
+                </Button>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" className="w-full" onClick={() => setPosComp(null)}>Cerrar</Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Área de resumen + COBRAR sticky: SIEMPRE visible sin importar el scroll.
+          Estructural: fija al fondo del viewport, con estados claro/deshabilitado/carga.
+          El contenedor padre reserva el espacio con pb-28 para no ocultar contenido. */}
+      <div className="fixed bottom-0 inset-x-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur shadow-[0_-2px_14px_rgba(0,0,0,0.08)]" data-testid="pos-cobrar-bar">
+        <div className="mx-auto max-w-[1400px] px-4 sm:px-6 py-3 flex items-center gap-5 sm:gap-8 flex-wrap">
+          {/* Resumen */}
+          <div className="flex items-center gap-5 sm:gap-8 min-w-0 flex-1 flex-wrap" data-testid="pos-resumen">
+            <div className="hidden sm:block">
+              <div className="text-base uppercase tracking-wide text-slate-600 font-semibold">Subtotal</div>
+              <div className="text-xl font-bold text-slate-800 leading-tight tabular-nums">{money(totals.subtotal)}</div>
+            </div>
+            <div className="hidden sm:block">
+              <div className="text-base uppercase tracking-wide text-slate-600 font-semibold">IVA {settings.iva_tasa ?? 8}%</div>
+              <div className="text-xl font-bold text-slate-800 leading-tight tabular-nums">{money(totals.iva)}</div>
+            </div>
+            <div>
+              <div className="text-base uppercase tracking-wide text-slate-600 font-semibold">Descuento</div>
+              <div className="text-xl font-bold text-[#C1401E] leading-tight tabular-nums">-{money(totals.descGlobalAmount + totals.descPctAmount)}</div>
+            </div>
+            <div>
+              <div className="text-base uppercase tracking-wide text-slate-600 font-semibold">Total</div>
+              <div className="font-display font-black text-3xl text-[#C1401E] leading-none tabular-nums" data-testid="pos-total">{money(totals.total)}</div>
+            </div>
+          </div>
+
+          {/* Acciones: suspender + COBRAR siempre accesibles */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Button variant="outline" className="h-16 w-16" onClick={suspender} title="Suspender venta" data-testid="pos-suspend"><PauseCircle className="w-7 h-7" /></Button>
+            <Button
+              className="h-16 px-10 sm:px-20 bg-[#C1401E] hover:bg-[#A03316] disabled:bg-slate-300 disabled:cursor-not-allowed text-lg sm:text-xl font-bold rounded-xl shadow-lg shadow-[#C1401E]/25 transition-all active:scale-[0.98]"
+              onClick={openPay} disabled={creditoBloqueado || cart.length === 0} data-testid="pos-cobrar">
+              {tipoVenta === "cotizacion"
+                ? <><FileText className="w-7 h-7 mr-2" /> Guardar cotización</>
+                : <><HandCoins className="w-7 h-7 mr-2" /> COBRAR · {money(totals.total)}</>}
+              <kbd className="ml-4 hidden lg:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white/20 text-sm font-bold border border-white/40" title="Atajo de teclado: Ctrl + Enter">Ctrl <span>+</span> Enter ↵</kbd>
+            </Button>
+          </div>
+        </div>
+      </div>
+      <CajaAperturaModal
+        open={cajaModalOpen}
+        onOpenChange={setCajaModalOpen}
+        onAbierta={() => loadCaja()}
+      />
     </div>
   );
 }

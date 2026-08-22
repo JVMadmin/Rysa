@@ -83,6 +83,18 @@ export default function Ventas() {
     setRows(data); setSel([]); setLoading(false);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [rango, estado, vendedorId, desde, hasta]);
+
+  // Búsqueda histórica: encuentra cualquier venta por folio/cliente, sin importar
+  // la fecha ni el rango del listado (para reimprimir/reenviar tickets viejos).
+  const buscarHistorica = async () => {
+    if (!q.trim()) return load();
+    setLoading(true);
+    try {
+      const { data } = await api.get("/sales/por-folio", { params: { folio: q } });
+      setRows(data || []); setSel([]);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); setRows([]); }
+    finally { setLoading(false); }
+  };
   useEffect(() => {
     api.get("/vendedores").then((r) => setVendedores(r.data)).catch(() => {});
     api.get("/clients").then((r) => setClientes(r.data)).catch(() => {});
@@ -100,6 +112,45 @@ export default function Ventas() {
       const { data } = await api.post(`/sales/${s.id}/ticket-pdf`);
       window.open(fileUrl(data.url), "_blank");
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const descargarCarta = async (s) => {
+    try {
+      const { data } = await api.post(`/sales/${s.id}/letter-pdf`);
+      window.open(fileUrl(data.url), "_blank");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const descargarBlob = (blob, filename) => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const adjuntarPdf = async (pdfUrl, filename, titulo, texto) => {
+    const resp = await api.get(pdfUrl.replace(/^.*\/api\/files\//, "/files/"), { responseType: "blob" });
+    const file = new File([resp.data], filename, { type: "application/pdf" });
+    if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+      await navigator.share({ title: titulo, text: texto, files: [file] });
+      return "share";
+    }
+    descargarBlob(resp.data, filename);
+    return "download";
+  };
+
+  const reenviar = async (s) => {
+    setBusy(`wa-${s.id}`);
+    try {
+      const { data } = await api.post(`/sales/${s.id}/ticket-pdf`);
+      const filename = `ticket-${s.folio}.pdf`;
+      const msg = `Hola${s.cliente_nombre ? " " + s.cliente_nombre : ""}, aquí está tu ticket ${s.folio}. Total: ${money(s.total)}.`;
+      const modo = await adjuntarPdf(data.url, filename, `Ticket ${s.folio}`, msg);
+      if (modo === "share") toast.success("PDF adjuntado. Selecciona WhatsApp en el menú de compartir.");
+      else toast.info("El PDF se descargó. Adjúntalo manualmente en WhatsApp.");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(""); }
   };
 
   const irRemitir = (s, cancelarOriginal) => {
@@ -189,7 +240,7 @@ export default function Ventas() {
           </Select>
           <div className="relative flex-1 min-w-[180px]">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <Input placeholder="Buscar folio o cliente..." value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} className="pl-9" data-testid="buscar-venta" />
+            <Input placeholder="Buscar folio o cliente (incluye histórico)..." value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && buscarHistorica()} className="pl-9" data-testid="buscar-venta" />
           </div>
         </div>
       </div>
@@ -230,6 +281,8 @@ export default function Ventas() {
                 <td className="p-3">
                   <div className="flex gap-1 justify-end">
                     <Button size="icon" variant="ghost" onClick={() => setDetalle(s)} data-testid={`ver-${s.folio}`}><Eye className="w-4 h-4" /></Button>
+                    <Button size="icon" variant="ghost" title="Reimprimir PDF (ticket)" onClick={() => reimprimir(s)} data-testid={`reimprimir-${s.folio}`}><Printer className="w-4 h-4" /></Button>
+                    <Button size="icon" variant="ghost" title="Reenviar por WhatsApp" onClick={() => reenviar(s)} disabled={busy === `wa-${s.id}`} data-testid={`reenviar-${s.folio}`}>{busy === `wa-${s.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}</Button>
                     {s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion" &&
                       <Button size="sm" variant="outline" onClick={() => abrirFacturar(s)} title="Facturar" data-testid={`facturar-venta-${s.folio}`}><FileText className="w-4 h-4 mr-1" /> Facturar</Button>}
                     <Button size="sm" variant="outline" onClick={() => setRemitirSale(s)} title="Remitir" data-testid={`remitir-${s.folio}`}><Copy className="w-4 h-4 mr-1" /> Remitir</Button>
@@ -252,7 +305,7 @@ export default function Ventas() {
               <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-slate-600">
                 <span>Condición: <b>{detalle.condicion === "credito" ? "Crédito" : "Contado"}</b></span>
                 {sucursales.find((x) => x.id === detalle.sucursal_id)?.nombre && <span>Sucursal: <b>{sucursales.find((x) => x.id === detalle.sucursal_id).nombre}</b></span>}
-                {(detalle.pagos || []).length > 0 && <span>Pago: <b>{(detalle.pagos || []).map((p) => ({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito" })[p.metodo] || p.metodo).join(" + ")}</b></span>}
+                {(detalle.pagos || []).length > 0 && <span>Pago: <b>{(detalle.pagos || []).map((p) => { const base = ({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito", spei: "SPEI", otros: "Otro" })[p.metodo] || p.metodo; return p.metodo === "tarjeta" && p.card_type ? `${base} ${p.card_type === "debito" ? "Débito" : "Crédito"}` : base; }).join(" + ")}</b></span>}
                 {detalle.tipo_venta === "cotizacion" && <span className="text-amber-700"><b>Cotización</b></span>}
               </div>
               <table className="w-full mb-3">
@@ -278,7 +331,11 @@ export default function Ventas() {
               {detalle.cancelacion && <div className="mt-3 p-2 bg-red-50 text-red-700 rounded text-xs">Cancelada por {detalle.cancelacion.usuario}: {detalle.cancelacion.motivo}</div>}
             </div>
           )}
-          <DialogFooter><Button variant="outline" onClick={() => reimprimir(detalle)}><Printer className="w-4 h-4 mr-1" /> Reimprimir PDF</Button></DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => reimprimir(detalle)}><Printer className="w-4 h-4 mr-1" /> Ticket PDF</Button>
+            <Button variant="outline" onClick={() => descargarCarta(detalle)}><FileText className="w-4 h-4 mr-1" /> Carta PDF</Button>
+            <Button variant="outline" onClick={() => reenviar(detalle)} disabled={busy === `wa-${detalle?.id}`}>{busy === `wa-${detalle?.id}` ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <><Send className="w-4 h-4 mr-1" /> Reenviar</>}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

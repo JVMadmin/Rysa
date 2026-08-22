@@ -14,7 +14,11 @@ venv/
 .pytest_cache/
 tests/
 uploads/
-brand/
+# El logotipo/isotipo oficial va DENTRO de la imagen para los PDFs
+# (comprobante de abono, factura, ticket) cuando no hay logo configurado.
+brand/*
+!brand/logotipo.png
+!brand/isotipo.png
 *.log
 .git/
 .gitignore

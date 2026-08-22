@@ -30,7 +30,9 @@ const TABS = [
 ];
 
 const METODOS_NOMBRE = {
-  efectivo: "Efectivo", transferencia: "Transferencia", tarjeta: "Tarjeta", credito: "Crédito", otros: "Otros",
+  efectivo: "Efectivo", transferencia: "Transferencia", tarjeta: "Tarjeta",
+  tarjeta_debito: "Tarjeta Débito", tarjeta_credito: "Tarjeta Crédito",
+  credito: "Crédito", spei: "SPEI", deposito: "Depósito", otros: "Otros",
 };
 
 export default function Reportes() {

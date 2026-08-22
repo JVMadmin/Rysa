@@ -27,6 +27,7 @@ next-env.d.ts
 
 # Production builds
 /build
+build.done
 dist/
 dist
 

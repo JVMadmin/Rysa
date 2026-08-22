@@ -3,30 +3,131 @@ import { api, formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { toast } from "sonner";
 import Usuarios from "@/pages/Usuarios";
 import { ImageUpload } from "@/components/ImageUpload";
 import { fileUrl, API } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { Building2, MapPin, DollarSign, Store, UserCog, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap, HardDrive } from "lucide-react";
+import { Building2, MapPin, DollarSign, Store, UserCog, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap, HardDrive, Printer as PrinterIcon, Search, RefreshCw, CheckCircle2, XCircle, Landmark, Star, Pencil, Power, AlertTriangle } from "lucide-react";
 
 export default function Configuracion() {
   const { can } = useAuth();
   const [s, setS] = useState(null);
+  const [sErr, setSErr] = useState("");
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importFile, setImportFile] = useState(null);
   const [importing, setImporting] = useState(false);
 
-  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: [40, 30, 20, 15, 10], logo_url: "", ticket_config: {}, storage: { backend: "local", upload_dir: "" }, ...r.data, ticket_config: { tamano: "80mm", mostrar_rfc: true, mostrar_direccion: true, mostrar_telefono: true, encabezado: "", pie: "¡Gracias por su compra!", ...(r.data?.ticket_config || {}) }, storage: { backend: "local", upload_dir: "", ...(r.data?.storage || {}) } })); }, []);
+  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: [40, 30, 20, 15, 10], logo_url: "", ticket_config: {}, storage: { backend: "local", upload_dir: "" }, printers: { lista: [], predeterminadas: {}, bridge_url: "" }, ...r.data, ticket_config: { tamano: "80mm", mostrar_rfc: true, mostrar_direccion: true, mostrar_telefono: true, encabezado: "", pie: "¡Gracias por su compra!", auto_print: false, ...(r.data?.ticket_config || {}) }, storage: { backend: "local", upload_dir: "", ...(r.data?.storage || {}) }, printers: { lista: [], predeterminadas: {}, bridge_url: "", ...(r.data?.printers || {}) } })).catch((e) => setSErr(formatApiError(e.response?.data?.detail))); }, []);
 
   const setStorage = (k, v) => setS((x) => ({ ...x, storage: { ...(x.storage || {}), [k]: v } }));
 
   const set = (k, v) => setS((x) => ({ ...x, [k]: v }));
   const setTc = (k, v) => setS((x) => ({ ...x, ticket_config: { ...(x.ticket_config || {}), [k]: v } }));
+
+  // --- Impresoras (configuración persistente por tipo de documento) ---
+  const printers = s?.printers?.lista || [];
+  const printerDefaults = s?.printers?.predeterminadas || {};
+  const TIPOS_DOC = [
+    ["ticket", "Ticket POS"],
+    ["factura", "Facturas"],
+    ["nota", "Notas de venta"],
+    ["reporte", "Reportes"],
+    ["admin", "Documentos administrativos"],
+  ];
+  const setPrinters = (lista) => setS((x) => ({ ...x, printers: { ...(x.printers || {}), lista } }));
+  const setPrinterDefaults = (k, v) => setS((x) => ({ ...x, printers: { ...(x.printers || {}), predeterminadas: { ...(x.printers?.predeterminadas || {}), [k]: v } } }));
+  const addPrinter = (preset) => setPrinters([...printers, { id: "p" + Date.now().toString(36), nombre: preset?.nombre || "", tipo_conexion: preset?.tipo_conexion || "browser", ip: preset?.ip || "", bridge_url: "", habilitada: true }]);
+  const setPrinter = (i, k, v) => setPrinters(printers.map((p, idx) => idx === i ? { ...p, [k]: v } : p));
+  const delPrinter = (i) => setPrinters(printers.filter((_, idx) => idx !== i));
+  const setBridgeUrl = (v) => setS((x) => ({ ...x, printers: { ...(x.printers || {}), bridge_url: v } }));
+
+  // --- Cuentas bancarias (pagos y cotizaciones) ---
+  const [cuentas, setCuentas] = useState([]);
+  const ctaBlank = () => ({ banco: "", nombre: "", numero_cuenta: "", clabe: "", titular: "", moneda: "MXN", tipo_cuenta: "debito", activa: true, alias: "", predeterminada: false });
+  const [ctaForm, setCtaForm] = useState(ctaBlank());
+  const [ctaEditId, setCtaEditId] = useState(null);
+  const [ctaSaving, setCtaSaving] = useState(false);
+  const loadCuentas = async () => { try { const { data } = await api.get("/cuentas-bancarias"); setCuentas(data); } catch { setCuentas([]); } };
+  useEffect(() => { loadCuentas(); /* eslint-disable-next-line */ }, []);
+  const guardarCuenta = async () => {
+    if (!ctaForm.banco.trim() || !ctaForm.numero_cuenta.trim()) return toast.error("El banco y el número de cuenta son obligatorios");
+    setCtaSaving(true);
+    try {
+      if (ctaEditId) await api.put(`/cuentas-bancarias/${ctaEditId}`, ctaForm);
+      else await api.post("/cuentas-bancarias", ctaForm);
+      toast.success("Cuenta guardada"); setCtaForm(ctaBlank()); setCtaEditId(null); loadCuentas();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setCtaSaving(false); }
+  };
+  const toggleCuenta = async (c) => { try { await api.patch(`/cuentas-bancarias/${c.id}/pagar`); loadCuentas(); } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); } };
+  const editarCuenta = (c) => { setCtaForm({ ...ctaBlank(), ...c }); setCtaEditId(c.id); window.scrollTo({ top: 0, behavior: "smooth" }); };
+
+  // Detección honesta de impresoras: API Web de impresión del navegador (si está
+  // disponible) y/o puente local de impresión (app empaquetada). Sin inventar.
+  const [scanState, setScanState] = useState({ estado: "idle", mensaje: "", resultados: [] });
+  const [pruebaState, setPruebaState] = useState({});
+  const buscarImpresoras = async () => {
+    setScanState({ estado: "buscando", mensaje: "Buscando impresoras…", resultados: [] });
+    const bridge = String(s?.printers?.bridge_url || "").trim() || "http://localhost:9731";
+    let encontradas = [];
+    const manual = [];
+    if (navigator.printerList?.getPrinters) {
+      try { (await navigator.printerList.getPrinters()).forEach((p) => { manual.push({ id: "web-" + manual.length, nombre: p.name || "Impresora", tipo_conexion: "browser", ip: "", estado: "disponible" }); }); } catch {}
+    } else if (navigator.printerList) {
+      try { for await (const p of navigator.printerList) manual.push({ id: "web-" + manual.length, nombre: p.name || "Impresora", tipo_conexion: "browser", ip: "", estado: "disponible" }); } catch {}
+    }
+    encontradas = manual;
+    if (encontradas.length === 0) {
+      try {
+        const ctrl = new AbortController();
+        const txx = setTimeout(() => ctrl.abort(), 4000);
+        const r = await fetch(bridge + "/printers", { signal: ctrl.signal });
+        clearTimeout(txx);
+        if (r.ok) {
+          const data = await r.json();
+          const arr = Array.isArray(data) ? data : data.printers || [];
+          encontradas = arr.map((p, i) => ({ id: "bridge-" + (p.id || i), nombre: p.nombre || p.name || `Impresora ${i + 1}`, tipo_conexion: p.tipo_conexion || "bridge", ip: p.ip || "", estado: p.estado || "disponible" }));
+        }
+      } catch {}
+    }
+    setScanState({
+      estado: "hecho",
+      mensaje: encontradas.length
+        ? `Impresoras encontradas: ${encontradas.length}`
+        : "No se encontraron impresoras detectables. Un navegador no tiene acceso directo a impresoras USB/red; para ellas se requiere el puente de impresión local (app empaquetada).",
+      resultados: encontradas,
+    });
+  };
+
+  const probarPrinter = async (p) => {
+    setPruebaState((x) => ({ ...x, [p.id]: "probando" }));
+    const bridge = String(s?.printers?.bridge_url || "").trim() || "http://localhost:9731";
+    try {
+      if (p.tipo_conexion === "browser") {
+        const win = window.open("", "_blank", "width=520,height=360");
+        if (!win) throw new Error("popup bloqueado");
+        win.document.write('<html><head><title>Prueba de impresión RYSA</title></head><body style="font-family:sans-serif;font-size:14px;padding:24px"><h2 style="color:#C1401E">Prueba de impresión RYSA</h2><p>Si puedes imprimir esta página, la impresión por navegador funciona correctamente.</p><script>window.print();</' + 'script></body></html>');
+        win.document.close();
+        setPruebaState((x) => ({ ...x, [p.id]: "ok" }));
+        toast.success("Prueba de impresión enviada correctamente.");
+      } else {
+        const r = await fetch(bridge + "/print", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ printer: p.nombre, ip: p.ip, documento: "prueba", contenido: "Prueba de impresión RYSA" }), signal: AbortSignal.timeout(5000) });
+        if (!r.ok) throw new Error("bridge");
+        setPruebaState((x) => ({ ...x, [p.id]: "ok" }));
+        toast.success("Prueba de impresión enviada correctamente.");
+      }
+    } catch {
+      setPruebaState((x) => ({ ...x, [p.id]: "error" }));
+      toast.error("No se pudo imprimir. Verifica que la impresora esté encendida, conectada y disponible.");
+    }
+  };
   const setLista = (i, v) => setS((x) => ({ ...x, listas_precios_nombres: x.listas_precios_nombres.map((n, idx) => idx === i ? v : n) }));
   const setListaPct = (i, v) => setS((x) => ({ ...x, listas_precios_pct: (x.listas_precios_pct || [40, 30, 20, 15, 10]).map((n, idx) => idx === i ? v : n) }));
   const addLista = () => setS((x) => ({ ...x, listas_precios_nombres: [...(x.listas_precios_nombres || []), `Precio ${(x.listas_precios_nombres || []).length + 1}`], listas_precios_pct: [...(x.listas_precios_pct || [40, 30, 20, 15, 10]), 10] }));
@@ -128,6 +229,14 @@ export default function Configuracion() {
     finally { setImporting(false); }
   };
 
+  if (sErr) return (
+    <div className="max-w-lg mx-auto mt-20 text-center space-y-3" data-testid="cfg-error">
+      <AlertTriangle className="w-12 h-12 mx-auto text-[#C1401E]" />
+      <h1 className="font-display text-xl font-black tracking-tight text-slate-800">No se pudo cargar la Configuración</h1>
+      <p className="text-sm text-slate-500">No se pudo conectar con el servidor para leer los ajustes (endpoint /settings). Verifica que el servidor esté activo.</p>
+      {sErr && <p className="text-xs text-red-600">{sErr}</p>}
+    </div>
+  );
   if (!s) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>;
 
   const I = (label, k, type = "text") => (
@@ -147,7 +256,9 @@ export default function Configuracion() {
           <TabsTrigger value="empresa" data-testid="tab-empresa"><Building2 className="w-4 h-4 mr-1" /> Empresa / Ubicación</TabsTrigger>
           <TabsTrigger value="precios" data-testid="tab-precios"><DollarSign className="w-4 h-4 mr-1" /> Precios</TabsTrigger>
           <TabsTrigger value="sucursales" data-testid="tab-sucursales"><Store className="w-4 h-4 mr-1" /> Sucursales</TabsTrigger>
+          <TabsTrigger value="cuentas" data-testid="tab-cuentas"><Landmark className="w-4 h-4 mr-1" /> Cuentas bancarias</TabsTrigger>
           <TabsTrigger value="ticket" data-testid="tab-ticket"><Receipt className="w-4 h-4 mr-1" /> Diseño de ticket</TabsTrigger>
+          <TabsTrigger value="impresoras" data-testid="tab-impresoras"><PrinterIcon className="w-4 h-4 mr-1" /> Impresoras</TabsTrigger>
           <TabsTrigger value="usuarios" data-testid="tab-usuarios"><UserCog className="w-4 h-4 mr-1" /> Usuarios</TabsTrigger>
           <TabsTrigger value="storage" data-testid="tab-storage"><HardDrive className="w-4 h-4 mr-1" /> Almacenamiento</TabsTrigger>
           {can("config") && <TabsTrigger value="datos" data-testid="tab-datos"><DatabaseZap className="w-4 h-4 mr-1" /> Datos</TabsTrigger>}
@@ -337,6 +448,106 @@ export default function Configuracion() {
           </div>
         </TabsContent>
 
+        <TabsContent value="impresoras" className="pt-4">
+          <div className="space-y-4">
+            {s && (
+              <div className="card-soft p-5 space-y-4">
+                <div className="flex items-center gap-2 text-slate-700 font-semibold"><PrinterIcon className="w-4 h-4 text-[#C1401E]" /> Impresoras y salida de documentos</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center justify-between border border-slate-200 rounded-md px-3 h-12">
+                    <div>
+                      <div className="text-sm">Imprimir ticket automáticamente al finalizar una venta</div>
+                      <div className="text-[11px] text-slate-400">Un error de impresión nunca cancela la venta.</div>
+                    </div>
+                    <Switch checked={!!s.ticket_config?.auto_print} onCheckedChange={(v) => setTc("auto_print", v)} data-testid="cfg-auto-print" />
+                  </div>
+                  <div>
+                    <Label className="text-xs uppercase tracking-wider text-slate-500">Servicio / puente de impresión local (opcional)</Label>
+                    <Input value={s.printers?.bridge_url || ""} onChange={(e) => setBridgeUrl(e.target.value)} className="mt-1 font-mono" placeholder="http://localhost:9731" data-testid="cfg-bridge-url" />
+                    <p className="text-[11px] text-slate-400 mt-1">URL del puente que la app empaquetada expone para imprimir a impresoras USB/red (ej. <b>http://localhost:9731</b>). Con impresión por navegador no se requiere.</p>
+                  </div>
+                </div>
+
+                {/* Detección */}
+                <div className="border-t pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <Label className="text-xs uppercase tracking-wider text-slate-500">Detectar impresoras</Label>
+                    <Button variant="outline" size="sm" onClick={buscarImpresoras} disabled={scanState.estado === "buscando"} data-testid="cfg-buscar-impresoras">
+                      {scanState.estado === "buscando" ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Search className="w-4 h-4 mr-1" />} Buscar impresoras
+                    </Button>
+                  </div>
+                  {scanState.estado !== "idle" && <p className="text-sm mt-2 text-slate-600" data-testid="cfg-scan-msg">{scanState.mensaje}</p>}
+                  {scanState.resultados.length > 0 && (
+                    <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {scanState.resultados.map((r) => (
+                        <div key={r.id} className="flex items-center justify-between border border-slate-200 rounded-md px-3 py-2">
+                          <div>
+                            <div className="text-sm font-medium">{r.nombre}</div>
+                            <div className="text-[11px] text-slate-400">{r.tipo_conexion}{r.ip ? ` · ${r.ip}` : ""} · {r.estado}</div>
+                          </div>
+                          <Button variant="outline" size="sm" onClick={() => addPrinter(r)} data-testid={`cfg-agregar-impresora-${r.id}`}><Plus className="w-3.5 h-3.5 mr-1" /> Agregar</Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-[11px] text-slate-400 mt-2">Un navegador no puede enumerar impresoras instaladas ni de red directamente. La detección usa la API Web de impresión del navegador (si existe) o el puente local configurado arriba. No se muestran impresoras ficticias.</p>
+                </div>
+
+                {/* Lista de impresoras configuradas */}
+                <div className="border-t pt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs uppercase tracking-wider text-slate-500">Impresoras configuradas ({printers.length})</Label>
+                    <Button variant="outline" size="sm" onClick={() => addPrinter()} data-testid="cfg-agregar-impresora"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar impresora</Button>
+                  </div>
+                  {printers.length === 0 && <p className="text-sm text-slate-400">Aún no hay impresoras configuradas. Agrega una o usa "Buscar impresoras".</p>}
+                  {printers.map((p, i) => (
+                    <div key={p.id} className="border border-slate-200 rounded-lg p-3 grid grid-cols-2 md:grid-cols-6 gap-3 items-end" data-testid={`cfg-printer-${i}`}>
+                      <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Nombre</Label>
+                        <Input value={p.nombre} onChange={(e) => setPrinter(i, "nombre", e.target.value)} className="mt-1" placeholder="Ej. EPSON TM-T20III" /></div>
+                      <div><Label className="text-xs uppercase tracking-wider text-slate-500">Conexión</Label>
+                        <select value={p.tipo_conexion} onChange={(e) => setPrinter(i, "tipo_conexion", e.target.value)} className="mt-1 h-9 w-full border border-slate-200 rounded-md px-2 text-sm" data-testid={`cfg-printer-tipo-${i}`}>
+                          <option value="browser">Navegador (PDF/nativo)</option>
+                          <option value="bridge">Puente local</option>
+                          <option value="ip">IP de red (vía puente)</option>
+                        </select></div>
+                      {p.tipo_conexion !== "browser" && <div><Label className="text-xs uppercase tracking-wider text-slate-500">IP / Ruta</Label>
+                        <Input value={p.ip} onChange={(e) => setPrinter(i, "ip", e.target.value)} className="mt-1 font-mono" placeholder="192.168.1.50" data-testid={`cfg-printer-ip-${i}`} /></div>}
+                      <div className="flex items-center h-9 gap-2">
+                        <Button variant="outline" size="sm" onClick={() => probarPrinter(p)} disabled={pruebaState[p.id] === "probando"} data-testid={`cfg-printer-test-${i}`}>
+                          {pruebaState[p.id] === "probando" ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <PrinterIcon className="w-3.5 h-3.5 mr-1" />} Imprimir prueba
+                        </Button>
+                        <button onClick={() => delPrinter(i)} className="text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                      <div className="text-right text-sm">
+                        {pruebaState[p.id] === "ok" ? <span className="text-green-600 flex items-center justify-end gap-1"><CheckCircle2 className="w-4 h-4" /> Enviada</span>
+                          : pruebaState[p.id] === "error" ? <span className="text-red-600 flex items-center justify-end gap-1"><XCircle className="w-4 h-4" /> Falló</span>
+                          : <span className="text-slate-300 text-xs">Lista</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Predeterminadas por tipo de documento */}
+                <div className="border-t pt-4">
+                  <Label className="text-xs uppercase tracking-wider text-slate-500 mb-2 block">Impresora predeterminada por tipo de documento</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {TIPOS_DOC.map(([k, l]) => (
+                      <div key={k}>
+                        <Label className="text-xs text-slate-500">{l}</Label>
+                        <select value={printerDefaults[k] || ""} onChange={(e) => setPrinterDefaults(k, e.target.value)} className="mt-1 h-9 w-full border border-slate-200 rounded-md px-2 text-sm" data-testid={`cfg-default-${k}`}>
+                          <option value="">Navegador (predeterminado)</option>
+                          {printers.map((p) => <option key={p.id} value={p.id}>{p.nombre || `Impresora (${p.tipo_conexion})`}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-2">La configuración se guarda en el servidor y persiste tras cerrar sesión, reiniciar el navegador o el POS. La arquitectura permite después asignarla por usuario, caja, terminal o sucursal.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
         <TabsContent value="usuarios" className="pt-4">
           <Usuarios embedded />
         </TabsContent>
@@ -366,6 +577,63 @@ export default function Configuracion() {
               <div className="text-xs uppercase tracking-wider text-slate-400 mb-1">Directorio efectivo actual</div>
               <div className="font-mono text-slate-700">{s.storage?.upload_dir || "(UPLOAD_DIR del servidor)"}</div>
               <p className="text-[11px] text-slate-400 mt-1">Guardado y reinicio del servidor aplican el cambio. Los archivos ya subidos no se mueven automáticamente.</p>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="cuentas" className="pt-4">
+          <div className="card-soft p-5 max-w-2xl space-y-5" data-testid="cuentas-tab">
+            <div className="flex items-center gap-2 text-slate-700 font-semibold"><Landmark className="w-4 h-4 text-[#C1401E]" /> Cuentas bancarias</div>
+            <p className="text-sm text-slate-500">Cuentas para mostrar en cotizaciones y usar como forma de pago. Puedes marcarla como predeterminada.</p>
+
+            {/* Alta / edición */}
+            <div className="border border-slate-200 rounded-lg p-4 space-y-3">
+              <div className="text-xs uppercase tracking-wider text-slate-500">{ctaEditId ? "Editar cuenta" : "Nueva cuenta"}</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label className="text-xs text-slate-500">Banco</Label><Input value={ctaForm.banco} onChange={(e) => setCtaForm((s) => ({ ...s, banco: e.target.value }))} className="mt-1" placeholder="BBVA" data-testid="cta-banco" /></div>
+                <div><Label className="text-xs text-slate-500">Alias</Label><Input value={ctaForm.alias} onChange={(e) => setCtaForm((s) => ({ ...s, alias: e.target.value }))} className="mt-1" placeholder="Cuenta principal" data-testid="cta-alias" /></div>
+                <div><Label className="text-xs text-slate-500">Número de cuenta</Label><Input value={ctaForm.numero_cuenta} onChange={(e) => setCtaForm((s) => ({ ...s, numero_cuenta: e.target.value }))} className="mt-1 font-mono" data-testid="cta-numero" /></div>
+                <div><Label className="text-xs text-slate-500">CLABE</Label><Input value={ctaForm.clabe} onChange={(e) => setCtaForm((s) => ({ ...s, clabe: e.target.value }))} className="mt-1 font-mono" /></div>
+                <div><Label className="text-xs text-slate-500">Nombre</Label><Input value={ctaForm.nombre} onChange={(e) => setCtaForm((s) => ({ ...s, nombre: e.target.value }))} className="mt-1" /></div>
+                <div><Label className="text-xs text-slate-500">Titular</Label><Input value={ctaForm.titular} onChange={(e) => setCtaForm((s) => ({ ...s, titular: e.target.value }))} className="mt-1" /></div>
+                <div><Label className="text-xs text-slate-500">Tipo</Label>
+                  <Select value={ctaForm.tipo_cuenta} onValueChange={(v) => setCtaForm((s) => ({ ...s, tipo_cuenta: v }))}>
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="debito">Débito</SelectItem><SelectItem value="credito">Crédito</SelectItem><SelectItem value="nomina">Nómina</SelectItem><SelectItem value="otros">Otros</SelectItem></SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs text-slate-500">Predeterminada</Label>
+                  <div className="flex items-center mt-2"><Switch checked={ctaForm.predeterminada} onCheckedChange={(v) => setCtaForm((s) => ({ ...s, predeterminada: v }))} data-testid="cta-predeterminada" /><span className="ml-2 text-sm text-slate-500">{ctaForm.predeterminada ? "Sí" : "No"}</span></div>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {ctaEditId && <Button variant="outline" onClick={() => { setCtaForm(ctaBlank()); setCtaEditId(null); }}>Cancelar</Button>}
+                <Button onClick={guardarCuenta} disabled={ctaSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cta-guardar">
+                  {ctaSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4 mr-1" /> Guardar</>}
+                </Button>
+              </div>
+            </div>
+
+            {/* Listado */}
+            <div className="space-y-2">
+              {cuentas.length === 0 && <p className="text-sm text-slate-400">Aún no tienes cuentas bancarias.</p>}
+              {cuentas.map((c) => (
+                <div key={c.id} className="border border-slate-200 rounded-lg p-3 flex items-center gap-3" data-testid={`cta-row-${c.id}`}>
+                  <div className="h-10 w-10 rounded-lg bg-[#C1401E]/10 text-[#C1401E] flex items-center justify-center shrink-0"><Landmark className="w-5 h-5" /></div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{c.banco}</span>
+                      {c.predeterminada && <Star className="w-3.5 h-3.5 text-amber-500" data-testid={`cta-pred-${c.id}`} />}
+                      <Badge className={c.activa ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}>{c.activa ? "Activa" : "Inactiva"}</Badge>
+                    </div>
+                    <div className="text-sm text-slate-500 font-mono">Cuenta: {c.numero_cuenta}</div>
+                    {c.alias && <div className="text-xs text-slate-400">{c.alias}</div>}
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => editarCuenta(c)}><Pencil className="w-4 h-4" /></Button>
+                  <Button size="sm" variant="outline" onClick={() => toggleCuenta(c)} className={c.activa ? "text-amber-600" : "text-green-600"}><Power className="w-4 h-4" /></Button>
+                </div>
+              ))}
             </div>
           </div>
         </TabsContent>

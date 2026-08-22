@@ -62,7 +62,7 @@ def calcular_venta(items: list, descuento_global: float = 0.0,
     for it in items:
         qty = float(it["cantidad"] or 0)
         pbruto = float(it["precio"] or 0)
-        tasa = tasa_decimal(it.get("iva_tasa", 16.0))
+        tasa = tasa_decimal(it.get("iva_tasa", 8.0))
         desc = max(0.0, float(it.get("descuento", 0.0) or 0))
 
         if precios_incluyen_iva:

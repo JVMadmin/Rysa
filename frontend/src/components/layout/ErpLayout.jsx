@@ -1,36 +1,59 @@
-﻿import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
+﻿import React from "react";
+import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { useBranding } from "@/hooks/useBranding";
+import { useBranding, DEFAULT_LOGO } from "@/hooks/useBranding";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
   UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3, Smartphone, Bug,
-  Search, ChevronRight, MapPinned, Radar, Route as RouteIcon,
+  Search, ChevronRight, MapPinned, Radar, Route as RouteIcon, ShoppingBag, Truck, ScanLine,
 } from "lucide-react";
 import {
   Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
 } from "@/components/ui/command";
 
 const NAV = [
-  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/app/pos", label: "Punto de Venta", icon: ShoppingCart, perm: "venta.crear" },
-  { to: "/app/recargas", label: "Recargas", icon: Smartphone, perm: "venta.crear" },
-  { to: "/app/ventas", label: "Ventas", icon: Receipt },
-  { to: "/app/reportes", label: "Reportes", icon: BarChart3, perm: "reportes.ver" },
-  { to: "/app/facturacion", label: "Facturación", icon: FileText },
-  { to: "/app/productos", label: "Productos", icon: Package },
-  { to: "/app/categorias", label: "Categorías", icon: Tags },
-  { to: "/app/clientes", label: "Clientes", icon: Users },
-  { to: "/app/visitas", label: "Visitas Comerciales", icon: MapPinned, perm: "visita.ver" },
-  { to: "/app/mi-ruta", label: "Mi Ruta", icon: RouteIcon, perm: "visita.ver" },
-  { to: "/app/supervision", label: "Supervisión Comercial", icon: Radar, perm: "supervision.ver" },
-  { to: "/app/cxc", label: "Cuentas por Cobrar", icon: HandCoins, perm: "cxc.ver" },
-  { to: "/app/caja", label: "Caja", icon: Wallet, perm: "caja.ver" },
-  { to: "/app/usuarios", label: "Usuarios", icon: UserCog, perm: "usuarios.ver" },
-  { to: "/app/auditoria", label: "Auditoría", icon: ScrollText, perm: "auditoria.ver" },
-  { to: "/app/configuracion", label: "Configuración", icon: Settings, perm: "config" },
-  { to: "/app/devtools", label: "Depuración", icon: Bug, perm: "dev.errores", dev: true },
+  // PRINCIPAL
+  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, section: "PRINCIPAL" },
+  
+  // OPERACIÓN
+  { to: "/app/pos", label: "Punto de venta", icon: ShoppingCart, perm: "venta.crear", section: "OPERACIÓN" },
+  { to: "/app/ventas", label: "Ventas", icon: Receipt, section: "OPERACIÓN" },
+  { to: "/app/inventario", label: "Inventario", icon: Package, section: "OPERACIÓN" },
+  { to: "/app/clientes", label: "Clientes", icon: Users, section: "OPERACIÓN" },
+  { to: "/app/cxc", label: "Cuentas por cobrar", icon: HandCoins, perm: "cxc.ver", section: "OPERACIÓN" },
+  
+  // ASAUSTECIMIENTO
+  { to: "/app/compras", label: "Compras y gastos", icon: ShoppingBag, perm: "compra.ver", section: "ABASTECIMIENTO" },
+  { to: "/app/proveedores", label: "Proveedores", icon: Truck, perm: "proveedor.ver", section: "ABASTECIMIENTO" },
+  { to: "/app/cxp", label: "Cuentas por pagar", icon: Wallet, perm: "cxp.ver", section: "ABASTECIMIENTO" },
+  
+  // COMERCIAL
+  { to: "/app/cotizaciones", label: "Cotizaciones", icon: Receipt, section: "COMERCIAL" },
+  { to: "/app/pedidos", label: "Pedidos", icon: ShoppingCart, section: "COMERCIAL" },
+  { to: "/app/facturacion", label: "Facturación", icon: FileText, section: "COMERCIAL" },
+  
+  // FUERZA DE VENTAS
+  { to: "/app/vendedores", label: "Vendedores", icon: UserCog, section: "FUERZA DE VENTAS" },
+  { to: "/app/clientes-en-campo", label: "Clientes en campo", icon: MapPinned, perm: "visita.ver", section: "FUERZA DE VENTAS" },
+  { to: "/app/mapa", label: "Mapa", icon: Radar, section: "FUERZA DE VENTAS" },
+  { to: "/app/rutas", label: "Rutas", icon: RouteIcon, perm: "visita.ver", section: "FUERZA DE VENTAS" },
+  { to: "/app/visitas", label: "Visitas", icon: MapPinned, perm: "visita.ver", section: "FUERZA DE VENTAS" },
+  { to: "/app/seguimiento", label: "Seguimiento", icon: ScanLine, section: "FUERZA DE VENTAS" },
+  
+  // ADMINISTRACIÓN
+  { to: "/app/caja", label: "Caja", icon: Wallet, perm: "caja.ver", section: "ADMINISTRACIÓN" },
+  { to: "/app/finanzas", label: "Finanzas", icon: BarChart3, section: "ADMINISTRACIÓN" },
+  { to: "/app/reportes", label: "Reportes", icon: BarChart3, perm: "reportes.ver", section: "ADMINISTRACIÓN" },
+  
+  // SISTEMA
+  { to: "/app/usuarios", label: "Usuarios y permisos", icon: UserCog, perm: "usuarios.ver", section: "SISTEMA" },
+  { to: "/app/sucursales", label: "Sucursales", icon: LayoutDashboard, section: "SISTEMA" },
+  { to: "/app/impresoras", label: "Impresoras", icon: Settings, section: "SISTEMA" },
+  { to: "/app/configuracion", label: "Configuración", icon: Settings, perm: "config", section: "SISTEMA" },
+  { to: "/app/cuentas-bancarias", label: "Cuentas bancarias", icon: Wallet, section: "SISTEMA" },
+  { to: "/app/devtools", label: "Depuración", icon: Bug, perm: "dev.errores", dev: true, section: "SISTEMA" },
 ];
 
 export default function ErpLayout() {
@@ -85,7 +108,7 @@ export default function ErpLayout() {
     { to: "/app/pos", label: "Nueva venta", icon: ShoppingCart, perm: "venta.crear" },
     { to: "/app/recargas", label: "Registrar recarga", icon: Smartphone, perm: "venta.crear" },
     { to: "/app/caja", label: "Abrir / cerrar caja", icon: Wallet, perm: "caja.abrir" },
-    { to: "/app/productos", label: "Nuevo producto", icon: Package },
+    { to: "/app/inventario", label: "Nuevo producto", icon: Package },
     { to: "/app/clientes", label: "Registrar cliente", icon: Users },
     { to: "/app/configuracion", label: "Ajustes del sistema", icon: Settings, perm: "config" },
   ].filter((a) => !a.perm || can(a.perm));
@@ -99,6 +122,18 @@ export default function ErpLayout() {
         : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"
     }`;
 
+  const visibleGrouped = (() => {
+        const groups = {};
+        visible.forEach((n) => {
+          const sec = n.section || "OTHERS";
+          if (!groups[sec]) groups[sec] = [];
+          groups[sec].push(n);
+        });
+        return groups;
+      })();
+
+      const sectionsOrder = ["PRINCIPAL", "OPERACIÓN", "ABASTECIMIENTO", "COMERCIAL", "FUERZA DE VENTAS", "ADMINISTRACIÓN", "SISTEMA"];
+
   return (
     <div className="min-h-screen flex bg-canvas">
       {/* Sidebar izquierdo: solo iconos, angosto */}
@@ -109,38 +144,68 @@ export default function ErpLayout() {
         <div className={`flex items-center justify-center gap-2 ${collapsed ? "mx-auto h-11 w-11" : "px-2"}`}>
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden ${logoUrl ? "" : "bg-terracota shadow-card"}`}>
             {logoUrl ? (
-              <img src={logoUrl} alt="logo" className="w-full h-full object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+              <img src={logoUrl} alt="logo" className="w-full h-full object-contain"
+                onError={(e) => {
+                  // Fallback robusto: si la URL configurada no carga, se usa el
+                  // logotipo por defecto; solo se oculta si tampoco carga este.
+                  if (!e.currentTarget.src.includes("ISOTIPO-Photoroom.png")) {
+                    e.currentTarget.src = DEFAULT_LOGO;
+                  } else {
+                    e.currentTarget.style.display = "none";
+                  }
+                }} />
             ) : (
               <Boxes className="w-5 h-5 text-white" />
             )}
           </div>
           {!collapsed && (
-            <div className="leading-tight">
-              <div className="font-display font-extrabold text-slate-900 text-lg tracking-tight">RYSA</div>
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400">ERP · POS</div>
-            </div>
+          <div className="leading-tight">
+            <div className="font-display font-extrabold text-slate-900 text-lg tracking-tight">RYSA</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400">ERP · POS</div>
+          </div>
           )}
         </div>
 
         <nav className={collapsed ? "flex-1 flex flex-col items-center gap-1.5 overflow-y-auto" : "flex-1 space-y-1 overflow-y-auto"}>
-          {visible.map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              title={n.label}
-              data-testid={`nav-${n.to.split("/").pop()}`}
-              className={({ isActive }) =>
-                collapsed
-                  ? iconClass({ isActive })
-                  : `flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium transition-colors ${
-                      isActive ? "bg-terracota text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-                    }`
-              }
-            >
-              <n.icon className="w-5 h-5 shrink-0" strokeWidth={2} />
-              {!collapsed && <span>{n.label}</span>}
-            </NavLink>
-          ))}
+          {sectionsOrder.map((sec, si) => {
+            const items = visibleGrouped[sec];
+            if (!items || items.length === 0) return null;
+            return (
+              <React.Fragment key={sec}>
+                {/* Separador de sección */}
+                {collapsed && (
+                  <div className="w-full h-px bg-slate-200 my-1" />
+                )}
+                {!collapsed && (
+                  <div className="px-2 py-1">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold px-2">
+                      {sec}
+                    </div>
+                    <div className="h-px bg-slate-200 mt-1" />
+                  </div>
+                )}
+                {/* Items del ítem */}
+                {items.map((n) => (
+                  <NavLink
+                    key={n.to}
+                    to={n.to}
+                    title={n.label}
+                    data-testid={`nav-${n.to.split("/").pop()}`}
+                    className={({ isActive }) =>
+                      collapsed
+                        ? iconClass({ isActive })
+                        : `flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium transition-colors ${
+                            isActive ? "bg-terracota text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                          }`
+                    }
+                  >
+                    <n.icon className="w-5 h-5 shrink-0" strokeWidth={2} />
+                    {!collapsed && <span>{n.label}</span>}
+                  </NavLink>
+                ))}
+              </React.Fragment>
+            );
+          })}
         </nav>
 
         <button

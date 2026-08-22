@@ -21,6 +21,8 @@ xlwt==1.3.0
 reportlab==5.0.0
 qrcode>=8.0
 Pillow>=10.4.0
+pytesseract>=0.3.10
+PyMuPDF>=1.24.0
 
 # --- PostgreSQL (única base de datos soportada) ---
 sqlalchemy[asyncio]>=2.0

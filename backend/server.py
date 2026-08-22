@@ -20,6 +20,7 @@ import uuid
 import re
 import time
 import logging
+import mimetypes
 import jwt
 from typing import List, Optional
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File, Request
@@ -42,7 +43,10 @@ from deps import (
     es_rol_privilegiado,
 )
 import pgstore.pos as _pgpos
+import pgstore.compras as _pgcompras
 import storage
+import exports
+import ocr_invoice as _ocr_invoice
 import pac_provider
 import moneycalc
 
@@ -205,7 +209,7 @@ def parse_row(canon: dict):
 def build_product_doc(d: dict) -> dict:
     """Documento de producto: conserva los 85 campos y sincroniza los campos usados por POS/Inventario."""
     iva = d.get("impuesto")
-    iva = float(iva) if iva not in (None, 0, "") else 16.0
+    iva = float(iva) if iva not in (None, 0, "") else 8.0
     costo = float(d.get("costo") or 0)
     precios = []
     for i in range(1, 6):
@@ -296,7 +300,7 @@ class ProductInput(BaseModel):
     existencia: float = 0.0
     ubicacion: Optional[str] = ""
     stock_minimo: float = 0.0
-    iva_tasa: float = 16.0
+    iva_tasa: float = 8.0
     # ¿El precio capturado en `precios` incluye IVA? True = los PRECIOn son
     # brutos (con IVA); False = son netos (sin IVA). Se deriva neto/bruto.
     precio_incluye_iva: bool = True
@@ -494,14 +498,200 @@ class AbonoInput(BaseModel):
     referencia: Optional[str] = ""
     nota: Optional[str] = ""
 
+# =========================================================================
+# PROVEEDORES
+# =========================================================================
+class ProveedorInput(BaseModel):
+    nombre: str  # nombre comercial
+    razon_social: Optional[str] = ""
+    rfc: Optional[str] = ""
+    telefono: Optional[str] = ""
+    email: Optional[str] = ""
+    direccion: Optional[str] = ""
+    cp: Optional[str] = ""
+    ciudad: Optional[str] = ""
+    estado: Optional[str] = ""
+    contacto: Optional[str] = ""
+    telefono_contacto: Optional[str] = ""
+    email_contacto: Optional[str] = ""
+    condiciones_pago: Optional[str] = ""
+    dias_credito: int = 0
+    limite_credito: float = 0.0
+    banco: Optional[str] = ""
+    cuenta: Optional[str] = ""
+    clabe: Optional[str] = ""
+    observaciones: Optional[str] = ""
+    activo: bool = True
+    categoria: Optional[str] = ""
+
+# =========================================================================
+# CUENTAS BANCARIAS
+# =========================================================================
+class CuentaBancariaInput(BaseModel):
+    banco: str
+    nombre: Optional[str] = ""
+    numero_cuenta: str
+    clabe: Optional[str] = ""
+    titular: Optional[str] = ""
+    moneda: str = "MXN"
+    tipo_cuenta: Optional[str] = "debito"  # debito | credito | nomina | otros
+    activa: bool = True
+    alias: Optional[str] = ""
+    predeterminada: bool = False
+
+# =========================================================================
+# COMPRAS / GASTOS
+# =========================================================================
+class CompraItemInput(BaseModel):
+    product_id: Optional[str] = None
+    codigo: str = ""
+    descripcion: str = ""
+    unidad: str = "PZA"
+    cantidad: float = 1.0
+    costo: float = 0.0  # costo unitario
+    iva_tasa: float = 8.0
+    descuento: float = 0.0
+    afecta_inventario: bool = True  # ✓ Afecta inventario (compra) vs gasto
+    importe: Optional[float] = None
+
+class CompraInput(BaseModel):
+    tipo: str = "compra"  # compra | gasto | mixto
+    proveedor_id: Optional[str] = None
+    proveedor_nombre: Optional[str] = ""
+    factura_numero: Optional[str] = ""
+    fecha_factura: Optional[str] = ""
+    fecha_recepcion: Optional[str] = ""
+    fecha_vencimiento: Optional[str] = ""
+    concepto: Optional[str] = ""
+    categoria: Optional[str] = ""
+    subtotal: float = 0.0
+    descuento: float = 0.0
+    iva: float = 0.0
+    otros_impuestos: float = 0.0
+    total: float = 0.0
+    metodo_pago: str = "efectivo"  # efectivo|transferencia|tarjeta|deposito|credito|otros
+    forma_pago: Optional[str] = ""  # contado | credito
+    cuenta_bancaria_id: Optional[str] = None
+    observaciones: Optional[str] = ""
+    items: List[CompraItemInput] = Field(default_factory=list)
+    documentos: List[dict] = Field(default_factory=list)  # evidencia/factura
+    # ---- Evolución Compras y Gastos ----
+    orden_id: Optional[str] = None          # orden de compra relacionada
+    recepcion_id: Optional[str] = None      # recepción de mercancía relacionada
+    centro_costo_id: Optional[str] = None   # centro de costo del gasto
+    centro_costo_nombre: Optional[str] = ""
+    sucursal_id: Optional[str] = None       # sucursal destino
+    # Costos adicionales de compra (flete, seguro, maniobras, transporte, otros)
+    flete: float = 0.0
+    seguro: float = 0.0
+    maniobras: float = 0.0
+    transporte: float = 0.0
+    otros_costos: float = 0.0
+
+# ---- ÓRDENES DE COMPRA ----
+class OrdenItemInput(BaseModel):
+    product_id: Optional[str] = None
+    codigo: str = ""
+    descripcion: str = ""
+    unidad: str = "PZA"
+    solicitado: float = 1.0
+    costo: float = 0.0
+    iva_tasa: float = 8.0
+
+class OrdenCompraInput(BaseModel):
+    proveedor_id: Optional[str] = None
+    proveedor_nombre: Optional[str] = ""
+    fecha_orden: Optional[str] = ""
+    fecha_estimada: Optional[str] = ""
+    estado: str = "borrador"   # borrador | enviada | cancelada
+    notas: Optional[str] = ""
+    items: List[OrdenItemInput] = Field(default_factory=list)
+    sucursal_id: Optional[str] = None
+    cuenta_bancaria_id: Optional[str] = None
+
+class OrdenEstadoInput(BaseModel):
+    estado: str  # borrador | enviada | cancelada
+
+# ---- RECEPCIONES DE MERCANCÍA ----
+class RecepcionItemInput(BaseModel):
+    product_id: Optional[str] = None
+    codigo: str = ""
+    descripcion: str = ""
+    unidad: str = "PZA"
+    cantidad: float = 0.0      # cantidad realmente recibida
+    costo: float = 0.0
+    iva_tasa: float = 8.0
+
+class RecepcionInput(BaseModel):
+    orden_id: str
+    fecha: Optional[str] = ""
+    factura_numero: Optional[str] = ""
+    fecha_factura: Optional[str] = ""
+    metodo_pago: str = "efectivo"
+    forma_pago: Optional[str] = ""   # contado | credito
+    cuenta_bancaria_id: Optional[str] = None
+    fecha_vencimiento: Optional[str] = ""
+    observaciones: Optional[str] = ""
+    items: List[RecepcionItemInput] = Field(default_factory=list)
+    documentos: List[dict] = Field(default_factory=list)
+
+# ---- PRESUPUESTOS ----
+class PresupuestoInput(BaseModel):
+    categoria: Optional[str] = ""
+    sucursal_id: Optional[str] = None
+    centro_costo_id: Optional[str] = None
+    centro_costo_nombre: Optional[str] = ""
+    periodo: str = ""          # YYYY-MM
+    monto: float = 0.0
+    notas: Optional[str] = ""
+
+# ---- CENTROS DE COSTO ----
+class CentroCostoInput(BaseModel):
+    nombre: str
+    codigo: Optional[str] = ""
+    descripcion: Optional[str] = ""
+    activo: bool = True
+
+# ---- GASTOS / COMPRAS RECURRENTES ----
+class RecurrenteInput(BaseModel):
+    tipo: str = "gasto"        # gasto | compra
+    proveedor_id: Optional[str] = None
+    proveedor_nombre: Optional[str] = ""
+    concepto: Optional[str] = ""
+    categoria: Optional[str] = ""
+    importe: float = 0.0
+    frecuencia: str = "mensual"  # semanal | quincenal | mensual | bimestral | trimestral | anual
+    dia: int = 1                # día del periodo en que se genera
+    cuenta_bancaria_id: Optional[str] = None
+    recordatorio: bool = True
+    sucursal_id: Optional[str] = None
+    centro_costo_id: Optional[str] = None
+    centro_costo_nombre: Optional[str] = ""
+    activo: bool = True
+    notas: Optional[str] = ""
+
+# ---- PAGO DE CUENTA POR PAGAR ----
+class CompraPagoInput(BaseModel):
+    monto: float = 0.0
+    metodo_pago: str = "efectivo"
+    cuenta_bancaria_id: Optional[str] = None
+    referencia: Optional[str] = ""
+    fecha: Optional[str] = ""
+    notas: Optional[str] = ""
+
+
 class CajaOpen(BaseModel):
     fondo_inicial: float = 0.0
     caja_nombre: Optional[str] = ""
+    denominaciones: Optional[dict] = None   # {1000: 2, 500: 1, ...} (billetes y monedas)
+    metodo: Optional[str] = "denominaciones"  # denominaciones | solo_monto
 
 class CajaOpenPorUsuario(BaseModel):
     usuario_id: str
     fondo_inicial: float = 0.0
     caja_nombre: Optional[str] = ""
+    denominaciones: Optional[dict] = None
+    metodo: Optional[str] = "denominaciones"
 
 class CajaMovimiento(BaseModel):
     tipo: str  # entrada | retiro | gasto | ajuste
@@ -520,7 +710,7 @@ class SaleItem(BaseModel):
     cantidad: float
     unidad: str = "PZA"
     precio: float
-    iva_tasa: float = 16.0
+    iva_tasa: float = 8.0
     descuento: float = 0.0  # monto de descuento por linea
     comentario: str = ""
     costo: Optional[float] = None  # costo unitario tomado del producto (snapshot)
@@ -528,6 +718,7 @@ class SaleItem(BaseModel):
 class Pago(BaseModel):
     metodo: str  # efectivo | tarjeta | transferencia | deposito | otros
     monto: float
+    card_type: Optional[str] = None  # debito | credito (solo cuando metodo == "tarjeta")
 
 class SaleInput(BaseModel):
     cliente_id: Optional[str] = None
@@ -549,6 +740,40 @@ class SaleInput(BaseModel):
 
 class CancelInput(BaseModel):
     motivo: str
+
+# ---- COTIZACIONES (conversión a venta) ----
+class CotizacionConvertInput(BaseModel):
+    condicion: str = "contado"  # contado | credito
+    pagos: List[Pago] = Field(default_factory=list)
+    vendedor_id: Optional[str] = None
+
+# ---- PEDIDOS ----
+class PedidoItemInput(BaseModel):
+    product_id: Optional[str] = None
+    codigo: str = ""
+    descripcion: str = ""
+    unidad: str = "PZA"
+    solicitado: float = 1.0
+    precio: float = 0.0
+    iva_tasa: float = 8.0
+
+class PedidoInput(BaseModel):
+    cliente_id: Optional[str] = None
+    vendedor_id: Optional[str] = None
+    fecha_pedido: Optional[str] = ""
+    fecha_entrega: Optional[str] = ""
+    notas: Optional[str] = ""
+    items: List[PedidoItemInput] = Field(default_factory=list)
+    estado: str = "borrador"  # borrador | confirmado | surtido | convertido | cancelado
+    sucursal_id: Optional[str] = None
+
+class PedidoEstadoInput(BaseModel):
+    estado: str  # borrador | confirmado | surtido | cancelado
+
+class PedidoConvertInput(BaseModel):
+    condicion: str = "contado"
+    pagos: List[Pago] = Field(default_factory=list)
+    vendedor_id: Optional[str] = None
 
 class RecargaInput(BaseModel):
     compania: str
@@ -578,7 +803,7 @@ class SettingsInput(BaseModel):
     ciudad: Optional[str] = ""
     estado: Optional[str] = ""
     cp: Optional[str] = ""
-    iva_tasa: float = 16.0
+    iva_tasa: float = 8.0
     moneda: str = "MXN"
     precios_incluyen_iva: bool = True
     listas_precios_nombres: List[str] = Field(default_factory=lambda: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"])
@@ -587,6 +812,8 @@ class SettingsInput(BaseModel):
     ticket_config: dict = Field(default_factory=dict)
     sucursales: List[SucursalItem] = Field(default_factory=list)
     storage: dict = Field(default_factory=dict)
+    # Impresoras configuradas (lista) + predeterminadas por tipo de documento.
+    printers: dict = Field(default_factory=dict)
 
 # =========================================================================
 # INVENTARIO (KARDEX) - helper
@@ -957,20 +1184,18 @@ def calc_precios(costo: float, precios: List[dict], iva_tasa: float) -> List[dic
 @api.get("/products")
 async def list_products(response: Response, estado: Optional[str] = None, q: Optional[str] = None,
                         filtro: Optional[str] = None, categoria: Optional[str] = None,
+                        sku: Optional[str] = None, linea: Optional[str] = None,
+                        unidad_medida: Optional[str] = None, proveedor: Optional[str] = None,
+                        min_costo: Optional[float] = None, max_costo: Optional[float] = None,
+                        min_precio: Optional[float] = None, max_precio: Optional[float] = None,
                         skip: int = 0, limit: int = 100,
                         user: dict = Depends(get_current_user)):
     limit = max(1, min(int(limit), 500))
     skip = max(0, int(skip))
-    query = {}
-    if estado:
-        query["estado"] = estado
-    if categoria:
-        query["clasificacion"] = categoria
-    if q:
-        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
-        query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
-                        {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx},
-                        {"codigos_barras": rx}]
+    query = _product_export_query(estado=estado, q=q, categoria=categoria, sku=sku,
+                                  linea=linea, unidad_medida=unidad_medida, proveedor=proveedor,
+                                  min_costo=min_costo, max_costo=max_costo,
+                                  min_precio=min_precio, max_precio=max_precio)
     if filtro in ("bajo_stock", "sin_existencia"):
         docs = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).to_list(20000)
         if filtro == "bajo_stock":
@@ -1056,7 +1281,7 @@ def _enriquecer_precios(doc: dict) -> dict:
       True  -> los precios capturados son BRUTOS (con IVA): se extrae el neto.
       False -> los precios capturados son NETOS: se genera el bruto.
     """
-    iva_tasa = float(doc.get("iva_tasa", 16.0))
+    iva_tasa = float(doc.get("iva_tasa", 8.0))
     costo = float(doc.get("costo", 0) or 0)
     incluye = bool(doc.get("precio_incluye_iva", True))
     precios = []
@@ -1455,33 +1680,13 @@ def parse_client_row(row: dict):
 @api.get("/clients")
 async def list_clients(q: Optional[str] = None, estado: Optional[str] = None,
                        tipo: Optional[str] = None, filtro: Optional[str] = None,
+                       ciudad: Optional[str] = None, vendedor: Optional[str] = None,
+                       rfc: Optional[str] = None, telefono: Optional[str] = None,
+                       fecha_desde: Optional[str] = None, fecha_hasta: Optional[str] = None,
                        user: dict = Depends(get_current_user)):
-    query = {}
-    if estado:
-        query["estado"] = estado
-    if tipo:
-        query["tipo"] = tipo
-    # Filtros rápidos
-    if filtro == "con_credito":
-        query["credito_autorizado"] = True
-    elif filtro == "sin_credito":
-        query["credito_autorizado"] = {"$ne": True}
-    elif filtro == "con_saldo":
-        query["saldo"] = {"$gt": 0}
-    elif filtro == "sin_saldo":
-        query["$or"] = [{"saldo": {"$lte": 0}}, {"saldo": {"$exists": False}}]
-    elif filtro in ("activo", "suspendido", "inactivo"):
-        query["estado"] = filtro
-    elif filtro == "con_ofertas":
-        query["ofertas"] = True
-    elif filtro == "sin_ofertas":
-        query["ofertas"] = {"$ne": True}
-    if q:
-        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
-        query["$and"] = query.get("$and", []) + [{"$or": [
-            {"codigo": rx}, {"nombre": rx}, {"razon_social": rx}, {"rfc": rx},
-            {"representa": rx}, {"telefono": rx}, {"tel_oficina": rx}, {"celular": rx},
-            {"correo": rx}, {"correos": rx}, {"ciudad": rx}, {"estado_geo": rx}]}]
+    query = _client_export_query(q=q, estado=estado, tipo=tipo, filtro=filtro, ciudad=ciudad,
+                                 vendedor=vendedor, rfc=rfc, telefono=telefono,
+                                 fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
     clients = await db.clients.find(query, {"_id": 0}).sort("nombre", 1).to_list(5000)
     now = now_utc()
     mes = now.strftime("%Y-%m")
@@ -1635,6 +1840,7 @@ async def abrir_caja(data: CajaOpen, user: dict = Depends(require_permission("ca
         nombre = f"Caja {caja_numero}"
     doc = {"id": uid(), "usuario_id": user["id"], "usuario_nombre": user["name"],
            "caja_nombre": nombre, "caja_numero": caja_numero, "fondo_inicial": data.fondo_inicial,
+           "denominaciones": data.denominaciones, "metodo": data.metodo or "denominaciones",
            "sucursal_id": user.get("sucursal_id") or await _default_sucursal_id(),
            "estado": "abierta", "fecha_apertura": iso_now(), "fecha_cierre": None}
     await db.cajas.insert_one(doc)
@@ -1658,6 +1864,7 @@ async def abrir_caja_por_usuario(data: CajaOpenPorUsuario, user: dict = Depends(
         nombre = f"Caja {caja_numero}"
     doc = {"id": uid(), "usuario_id": data.usuario_id, "usuario_nombre": target["name"],
            "caja_nombre": nombre, "caja_numero": caja_numero, "fondo_inicial": data.fondo_inicial,
+           "denominaciones": data.denominaciones, "metodo": data.metodo or "denominaciones",
            "sucursal_id": target.get("sucursal_id") or await _default_sucursal_id(),
            "estado": "abierta", "fecha_apertura": iso_now(), "fecha_cierre": None}
     await db.cajas.insert_one(doc)
@@ -1806,6 +2013,17 @@ async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
         sales = [s for s in sales if (not d or s.get("fecha", "")[:10] >= d) and (not h or s.get("fecha", "")[:10] <= h)]
     return sales
 
+@api.get("/sales/por-folio")
+async def sale_por_folio(folio: str, user: dict = Depends(get_current_user)):
+    """Busca una venta por folio (exacto o parcial) SIN limitar por fecha ni por
+    el tope de 3000 registros, para poder reimprimir/reenviar tickets históricos."""
+    query = {"$or": [{"folio": {"$regex": sanitize_search_term(folio), "$options": "i"}},
+                     {"cliente_nombre": {"$regex": sanitize_search_term(folio), "$options": "i"}}]}
+    if not ver_todas_ventas(user):
+        query["vendedor_id"] = user["id"]
+    docs = await db.sales.find(query, {"_id": 0}).sort("fecha", -1).to_list(200)
+    return docs
+
 @api.get("/sales/{sale_id}")
 async def get_sale(sale_id: str, user: dict = Depends(get_current_user)):
     s = await db.sales.find_one({"id": sale_id}, {"_id": 0})
@@ -1831,6 +2049,12 @@ async def set_sale_cliente(sale_id: str, payload: dict, user: dict = Depends(req
 
 @api.post("/sales")
 async def create_sale(data: SaleInput, user: dict = Depends(require_permission("venta.crear"))):
+    """Crea una venta o cotización. Lógica completa en `_crear_venta` (reutilizada por
+    la conversión de cotizaciones y pedidos a venta)."""
+    return await _crear_venta(user, data)
+
+
+async def _crear_venta(user: dict, data: SaleInput):
     if not data.items:
         raise HTTPException(400, "La venta no tiene productos")
     cliente = None
@@ -1950,6 +2174,240 @@ async def create_sale(data: SaleInput, user: dict = Depends(require_permission("
             override_inv=override_inv)
     except _pgpos.VentaError as e:
         raise HTTPException(status_code=e.status, detail=e.message)
+
+# =========================================================================
+# COTIZACIONES (listado, detalle y conversión a venta)
+# =========================================================================
+@api.get("/cotizaciones")
+async def cotizaciones_list(estado: Optional[str] = None, vendedor_id: Optional[str] = None,
+                            cliente_id: Optional[str] = None, desde: Optional[str] = None,
+                            hasta: Optional[str] = None, q: Optional[str] = None,
+                            user: dict = Depends(get_current_user)):
+    flt = {"tipo_venta": "cotizacion"}
+    if estado and estado != "todos":
+        flt["estado"] = estado
+    if vendedor_id:
+        flt["vendedor_id"] = vendedor_id
+    if cliente_id:
+        flt["cliente_id"] = cliente_id
+    docs = await db.sales.find(flt, {"_id": 0}).sort("fecha", -1).to_list(100000)
+    if desde:
+        docs = [d for d in docs if (d.get("fecha") or "")[:10] >= desde]
+    if hasta:
+        docs = [d for d in docs if (d.get("fecha") or "")[:10] <= hasta]
+    if q:
+        ql = q.lower().strip()
+        docs = [d for d in docs if ql in " ".join(str(d.get(k) or "") for k in ("folio", "cliente_nombre", "vendedor_nombre")).lower()]
+    return docs
+
+
+@api.get("/cotizaciones/{cot_id}")
+async def cotizacion_detail(cot_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.sales.find_one({"id": cot_id, "tipo_venta": "cotizacion"}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Cotización no encontrada")
+    return doc
+
+
+@api.post("/cotizaciones/{cot_id}/convertir")
+async def cotizacion_convertir(cot_id: str, data: CotizacionConvertInput,
+                               user: dict = Depends(require_permission("venta.crear"))):
+    """Convierte una cotización guardada en venta real. Reutiliza la pipeline
+    completa de `_crear_venta` (caja obligatoria, inventario, crédito, caja pg)."""
+    cot = await db.sales.find_one({"id": cot_id, "tipo_venta": "cotizacion"}, {"_id": 0})
+    if not cot:
+        raise HTTPException(404, "Cotización no encontrada")
+    if cot.get("estado") != "cotizacion":
+        raise HTTPException(409, f"Esta cotización ya no es convertible (estado: {cot.get('estado')})")
+    items = []
+    for it in cot.get("items", []):
+        items.append(SaleItem(
+            product_id=it.get("product_id"), codigo=it.get("codigo") or "",
+            descripcion=it.get("descripcion") or "", cantidad=float(it.get("cantidad") or 0),
+            unidad=it.get("unidad") or "PZA",
+            precio=float(it.get("precio") or it.get("precio_bruto") or 0),
+            iva_tasa=float(it.get("iva_tasa") or 8), descuento=float(it.get("descuento") or 0),
+            comentario=it.get("comentario") or ""))
+    payload = SaleInput(
+        cliente_id=cot.get("cliente_id"), items=items,
+        descuento_global=float(cot.get("descuento_global") or 0),
+        condicion=data.condicion, pagos=data.pagos,
+        lista_precios=int(cot.get("lista_precios") or 1),
+        tipo_venta="directa", vendedor_id=data.vendedor_id, precios_incluyen_iva=True)
+    sale = await _crear_venta(user, payload)
+    await db.sales.update_one({"id": cot_id}, {"$set": {
+        "estado": "convertida", "convertida_a": sale["id"], "convertida_folio": sale["folio"],
+        "convertida_en": iso_now()}})
+    await log_audit(user, "cotizacion_convertir", "venta", cot_id,
+                    f"{cot.get('folio')} -> venta {sale['folio']}")
+    return sale
+
+
+# =========================================================================
+# PEDIDOS (CRUD + estados + conversión a venta)
+# =========================================================================
+@api.get("/pedidos")
+async def pedidos_list(estado: Optional[str] = None, cliente_id: Optional[str] = None,
+                       vendedor_id: Optional[str] = None, q: Optional[str] = None,
+                       user: dict = Depends(get_current_user)):
+    flt = {}
+    if estado and estado != "todos":
+        flt["estado"] = estado
+    if cliente_id:
+        flt["cliente_id"] = cliente_id
+    if vendedor_id:
+        flt["vendedor_id"] = vendedor_id
+    docs = await db.pedidos.find(flt, {"_id": 0}).sort("fecha_pedido", -1).to_list(100000)
+    if q:
+        ql = q.lower().strip()
+        docs = [d for d in docs if ql in " ".join(str(d.get(k) or "") for k in ("folio", "cliente_nombre", "vendedor_nombre")).lower()]
+    return docs
+
+
+@api.get("/pedidos/{ped_id}")
+async def pedido_detail(ped_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.pedidos.find_one({"id": ped_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Pedido no encontrado")
+    return doc
+
+
+@api.post("/pedidos")
+async def pedido_create(data: PedidoInput, user: dict = Depends(get_current_user)):
+    if not data.items:
+        raise HTTPException(400, "Agrega al menos un producto al pedido")
+    cliente = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0}) if data.cliente_id else None
+    cliente_nombre = cliente["nombre"] if cliente else "Público General"
+    items = []
+    subtotal = 0.0
+    for it in data.items:
+        if float(it.solicitado) <= 0:
+            continue
+        precio = float(it.precio or 0)
+        if precio <= 0 and it.product_id:
+            p = await db.products.find_one({"id": it.product_id}, {"_id": 0})
+            if p:
+                precio = float(p.get("precio") or (p.get("precios") or [{}])[0].get("precio_con_iva") or 0)
+        importe = round(float(it.solicitado) * precio, 2)
+        subtotal += importe
+        items.append({
+            "product_id": it.product_id, "codigo": it.codigo, "descripcion": it.descripcion,
+            "unidad": it.unidad or "PZA", "solicitado": float(it.solicitado),
+            "surtido": 0.0, "pendiente": float(it.solicitado),
+            "precio": round(precio, 2), "iva_tasa": float(it.iva_tasa or 8), "importe": importe,
+        })
+    if not items:
+        raise HTTPException(400, "No hay cantidades válidas en el pedido")
+    folio = await next_counter("pedido", "PDO", 6)
+    iva = round(sum(i["importe"] * (i["iva_tasa"] / 100) for i in items), 2)
+    doc = {
+        "id": uid(), "folio": folio, "cliente_id": data.cliente_id, "cliente_nombre": cliente_nombre,
+        "vendedor_id": data.vendedor_id or user["id"], "vendedor_nombre": user["name"],
+        "fecha_pedido": data.fecha_pedido or iso_now()[:10], "fecha_entrega": data.fecha_entrega,
+        "notas": data.notas or "", "items": items,
+        "subtotal": round(subtotal, 2), "iva": iva, "total": round(subtotal + iva, 2),
+        "estado": "borrador", "sucursal_id": data.sucursal_id or user.get("sucursal_id"),
+        "usuario_id": user["id"], "usuario_nombre": user["name"],
+        "creado_en": iso_now(), "actualizado_en": iso_now(),
+    }
+    await db.pedidos.insert_one(doc)
+    await log_audit(user, "pedido_crear", "pedido", doc["id"], f"{folio} {cliente_nombre}")
+    return doc
+
+
+@api.put("/pedidos/{ped_id}")
+async def pedido_update(ped_id: str, data: PedidoInput, user: dict = Depends(get_current_user)):
+    ex = await db.pedidos.find_one({"id": ped_id})
+    if not ex:
+        raise HTTPException(404, "Pedido no encontrado")
+    if ex.get("estado") in ("convertido", "cancelado"):
+        raise HTTPException(409, f"Un pedido {ex.get('estado')} no se puede editar")
+    cliente = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0}) if data.cliente_id else None
+    cliente_nombre = cliente["nombre"] if cliente else ex.get("cliente_nombre") or "Público General"
+    items = []
+    subtotal = 0.0
+    for it in data.items:
+        if float(it.solicitado) <= 0:
+            continue
+        prev = next((x for x in ex.get("items", []) if x.get("product_id") == it.product_id), None)
+        surtido = float((prev or {}).get("surtido", 0) or 0)
+        if float(it.solicitado) < surtido:
+            raise HTTPException(400, f"{it.descripcion}: no puedes bajar la cantidad por debajo de lo ya surtido ({surtido})")
+        precio = float(it.precio or (prev or {}).get("precio") or 0)
+        importe = round(float(it.solicitado) * precio, 2)
+        subtotal += importe
+        items.append({
+            "product_id": it.product_id, "codigo": it.codigo, "descripcion": it.descripcion,
+            "unidad": it.unidad or "PZA", "solicitado": float(it.solicitado),
+            "surtido": surtido, "pendiente": round(float(it.solicitado) - surtido, 3),
+            "precio": round(precio, 2), "iva_tasa": float(it.iva_tasa or 8), "importe": importe,
+        })
+    if not items:
+        raise HTTPException(400, "No hay cantidades válidas en el pedido")
+    iva = round(sum(i["importe"] * (i["iva_tasa"] / 100) for i in items), 2)
+    up = {**ex,
+          "cliente_id": data.cliente_id, "cliente_nombre": cliente_nombre,
+          "vendedor_id": data.vendedor_id or ex.get("vendedor_id"),
+          "fecha_pedido": data.fecha_pedido or ex.get("fecha_pedido"),
+          "fecha_entrega": data.fecha_entrega, "notas": data.notas or "",
+          "items": items, "subtotal": round(subtotal, 2), "iva": iva,
+          "total": round(subtotal + iva, 2),
+          "sucursal_id": data.sucursal_id or ex.get("sucursal_id"),
+          "actualizado_en": iso_now()}
+    await db.pedidos.update_one({"id": ped_id}, {"$set": up})
+    await log_audit(user, "pedido_editar", "pedido", ped_id, ex.get("folio"))
+    return up
+
+
+@api.post("/pedidos/{ped_id}/estado")
+async def pedido_estado(ped_id: str, data: PedidoEstadoInput, user: dict = Depends(get_current_user)):
+    ex = await db.pedidos.find_one({"id": ped_id})
+    if not ex:
+        raise HTTPException(404, "Pedido no encontrado")
+    if data.estado not in ("borrador", "confirmado", "surtido", "cancelado"):
+        raise HTTPException(400, "Estado no válido")
+    if ex.get("estado") == "convertido":
+        raise HTTPException(409, "Un pedido convertido a venta no puede cambiar de estado")
+    await db.pedidos.update_one({"id": ped_id},
+                                {"$set": {"estado": data.estado, "actualizado_en": iso_now()}})
+    await log_audit(user, "pedido_estado", "pedido", ped_id, f"{ex.get('folio')} -> {data.estado}")
+    return {"ok": True, "estado": data.estado}
+
+
+@api.post("/pedidos/{ped_id}/convertir")
+async def pedido_convertir(ped_id: str, data: PedidoConvertInput,
+                           user: dict = Depends(require_permission("venta.crear"))):
+    """Convierte un pedido en venta real (usa la pipeline completa `_crear_venta`)."""
+    ped = await db.pedidos.find_one({"id": ped_id}, {"_id": 0})
+    if not ped:
+        raise HTTPException(404, "Pedido no encontrado")
+    if ped.get("estado") in ("convertido", "cancelado"):
+        raise HTTPException(409, f"Un pedido {ped.get('estado')} no se puede convertir")
+    items = []
+    for it in ped.get("items", []):
+        cantidad = float(it.get("surtido") or 0) or float(it.get("solicitado") or 0)
+        if cantidad <= 0:
+            continue
+        items.append(SaleItem(
+            product_id=it.get("product_id"), codigo=it.get("codigo") or "",
+            descripcion=it.get("descripcion") or "", cantidad=cantidad,
+            unidad=it.get("unidad") or "PZA", precio=float(it.get("precio") or 0),
+            iva_tasa=float(it.get("iva_tasa") or 8), descuento=0.0))
+    if not items:
+        raise HTTPException(400, "El pedido no tiene cantidades para surtir")
+    payload = SaleInput(
+        cliente_id=ped.get("cliente_id"), items=items, descuento_global=0.0,
+        condicion=data.condicion, pagos=data.pagos, lista_precios=1,
+        tipo_venta="directa", vendedor_id=data.vendedor_id or ped.get("vendedor_id"),
+        precios_incluyen_iva=True)
+    sale = await _crear_venta(user, payload)
+    await db.pedidos.update_one({"id": ped_id}, {"$set": {
+        "estado": "convertido", "convertida_a": sale["id"], "convertida_folio": sale["folio"],
+        "actualizado_en": iso_now()}})
+    await log_audit(user, "pedido_convertir", "pedido", ped_id,
+                    f"{ped.get('folio')} -> venta {sale['folio']}")
+    return sale
+
 
 @api.post("/recargas")
 async def crear_recarga(data: RecargaInput, user: dict = Depends(require_permission("venta.crear"))):
@@ -2298,8 +2756,10 @@ async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(requi
     doc = {"id": uid(), "folio": folio, "cliente_id": client_id, "cliente_codigo": cli.get("codigo"),
            "cliente_nombre": cli.get("nombre"), "monto": monto, "metodo": data.metodo,
            "referencia": data.referencia or "", "nota": data.nota or "", "fecha": iso_now(),
+           "saldo_anterior": saldo_cli,
+           "saldo_restante": round(saldo_cli - monto, 2),
            "aplicaciones": aplicaciones, "usuario_id": user["id"], "usuario_nombre": user["name"],
-           "caja_id": caja["id"] if caja else None}
+           "caja_id": caja["id"] if caja else None, "estado": "confirmado"}
     await db.abonos.insert_one(doc)
     if caja and data.metodo == "efectivo":
         await db.caja_movimientos.insert_one({
@@ -2309,7 +2769,1289 @@ async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(requi
     await log_audit(user, "abono", "cliente", client_id, f"{folio} monto {monto} metodo {data.metodo}")
     return {"ok": True, "folio": folio, "saldo_anterior": saldo_cli,
             "saldo_actual": round(saldo_cli - monto, 2), "aplicaciones": aplicaciones,
-            "caja_afectada": bool(caja and data.metodo == "efectivo")}
+            "caja_afectada": bool(caja and data.metodo == "efectivo"), "abono": doc}
+
+# =========================================================================
+# ABONOS: historial, comprobante PDF y cancelación auditada
+# =========================================================================
+@api.get("/abonos")
+async def abonos_list(desde: Optional[str] = None, hasta: Optional[str] = None,
+                      cliente: Optional[str] = None, usuario: Optional[str] = None,
+                      metodo: Optional[str] = None, folio: Optional[str] = None,
+                      q: Optional[str] = None,
+                      user: dict = Depends(get_current_user)):
+    docs = await db.abonos.find({}, {"_id": 0}).to_list(100000)
+    if desde:
+        docs = [d for d in docs if (d.get("fecha") or "")[:10] >= desde]
+    if hasta:
+        docs = [d for d in docs if (d.get("fecha") or "")[:10] <= hasta]
+    if cliente:
+        docs = [d for d in docs if d.get("cliente_id") == cliente or cliente.lower() in (d.get("cliente_nombre") or "").lower()]
+    if usuario:
+        docs = [d for d in docs if d.get("usuario_id") == usuario]
+    if metodo and metodo != "todos":
+        docs = [d for d in docs if d.get("metodo") == metodo]
+    if folio:
+        docs = [d for d in docs if folio.lower() in (d.get("folio") or "").lower()]
+    if q:
+        ql = q.lower().strip()
+        docs = [d for d in docs if ql in " ".join(str(d.get(k) or "") for k in ("folio", "cliente_nombre", "referencia")).lower()]
+    docs.sort(key=lambda d: d.get("fecha") or "", reverse=True)
+    return docs
+
+@api.post("/abonos/{abono_id}/pdf")
+async def abono_pdf(abono_id: str, user: dict = Depends(get_current_user)):
+    abono = await db.abonos.find_one({"id": abono_id}, {"_id": 0})
+    if not abono:
+        raise HTTPException(404, "Abono no encontrado")
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    cliente = None
+    if abono.get("cliente_id"):
+        c = await db.clients.find_one({"id": abono["cliente_id"]}, {"_id": 0})
+        if c:
+            cliente = {"nombre": c.get("nombre"), "rfc": c.get("rfc"),
+                       "telefono": c.get("telefono") or c.get("celular") or c.get("whatsapp"),
+                       "correo": c.get("correo") or c.get("correos")}
+    try:
+        pdf_bytes = storage.build_abono_pdf(abono, settings, cliente)
+        folio_clean = "".join(c for c in abono.get('folio', 'abono') if c.isalnum())
+        path = f"abonos/{folio_clean}-{uid()[:8]}.pdf"
+        result = storage.put_object(path, pdf_bytes, "application/pdf")
+    except Exception as e:
+        logger.error("Comprobante de abono PDF falló: %s", str(e)[:200])
+        raise HTTPException(502, "No se pudo generar el comprobante de abono.")
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": uid(), "storage_path": stored,
+        "original_filename": f"RYSA_Comprobante_Abono_{abono.get('folio')}.pdf",
+        "content_type": "application/pdf", "size": result.get("size", len(pdf_bytes)),
+        "abono_id": abono_id, "cliente_id": abono.get("cliente_id"),
+        "is_deleted": False, "created_at": iso_now()})
+    return {"path": stored, "url": f"/api/files/{stored}", "filename": f"RYSA_Comprobante_Abono_{abono.get('folio')}.pdf"}
+
+@api.post("/abonos/{abono_id}/cancelar")
+async def abono_cancelar(abono_id: str, motivo: str = "Cancelación",
+                         user: dict = Depends(get_current_user)):
+    """Cancela un abono confirmado: recompone el saldo del cliente y sus ventas,
+    registra auditoría y conserva el comprobante/historial original. No elimina
+    físicamente el abono (doble reversión imposible)."""
+    abono = await db.abonos.find_one({"id": abono_id})
+    if not abono:
+        raise HTTPException(404, "Abono no encontrado")
+    if abono.get("estado") == "cancelado":
+        raise HTTPException(409, "El abono ya está cancelado")
+    if not abono.get("cliente_id"):
+        raise HTTPException(400, "El abono no tiene cliente asociado")
+    cli = await db.clients.find_one({"id": abono["cliente_id"]})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    monto = round(float(abono.get("monto", 0) or 0), 2)
+    # Revertir aplicaciones: sumar de vuelta el saldo a cada venta.
+    for ap in abono.get("aplicaciones", []):
+        sal = float((await db.sales.find_one({"id": ap.get("sale_id")}, {"_id": 0}) or {}).get("saldo", 0) or 0)
+        await db.sales.update_one({"id": ap["sale_id"]},
+                                  {"$set": {"saldo": round(sal + float(ap.get("monto", 0) or 0), 2)}})
+    # Revertir saldo del cliente.
+    nuevo_saldo = round(float(cli.get("saldo", 0) or 0) + monto, 2)
+    await db.clients.update_one({"id": abono["cliente_id"]}, {"$set": {"saldo": nuevo_saldo}})
+    # Caja (si el abono fue efectivo, revertirlo).
+    if abono.get("caja_id"):
+        await db.caja_movimientos.insert_one({
+            "id": uid(), "caja_id": abono["caja_id"], "tipo": "retiro",
+            "concepto": f"Cancelación abono {abono.get('folio')}", "monto": monto,
+            "referencia": abono.get("folio"), "usuario_id": user["id"],
+            "usuario_nombre": user["name"], "fecha": iso_now()})
+    await db.abonos.update_one({"id": abono_id}, {"$set": {
+        "estado": "cancelado", "cancelacion": {"usuario": user["name"], "usuario_id": user["id"],
+                                               "fecha": iso_now(), "motivo": motivo}}})
+    await log_audit(user, "abono_cancelar", "abono", abono_id,
+                    f"{abono.get('folio')} monto {monto} motivo {motivo}")
+    return {"ok": True, "folio": abono.get("folio"), "saldo_recompuesto": nuevo_saldo}
+
+# =========================================================================
+# PROVEEDORES
+# =========================================================================
+@api.get("/proveedores")
+async def proveedores_list(q: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+    flt = {}
+    docs = await db.proveedores.find(flt, {"_id": 0}).to_list(20000)
+    if q:
+        ql = q.lower().strip()
+        docs = [d for d in docs if ql in " ".join(str(d.get(k) or "") for k in
+                ("nombre", "razon_social", "rfc", "contacto", "telefono", "email")).lower()]
+    docs.sort(key=lambda d: (d.get("nombre") or "").lower())
+    return docs
+
+@api.post("/proveedores")
+async def proveedor_create(data: ProveedorInput, user: dict = Depends(get_current_user)):
+    pid = uid()
+    codigo = f"PRV{pid[:6].upper()}"
+    doc = {"id": pid, "codigo": codigo, **data.model_dump(),
+           "estado": "activo" if data.activo else "inactivo",
+           "created_at": iso_now(), "updated_at": iso_now(),
+           "usuario_id": user["id"], "usuario_nombre": user["name"]}
+    await db.proveedores.insert_one(doc)
+    await log_audit(user, "proveedor_crear", "proveedor", pid, data.nombre)
+    return {k: doc[k] for k in doc if k != "usuario_id"}
+
+@api.put("/proveedores/{proveedor_id}")
+async def proveedor_update(proveedor_id: str, data: ProveedorInput,
+                           user: dict = Depends(get_current_user)):
+    ex = await db.proveedores.find_one({"id": proveedor_id})
+    if not ex:
+        raise HTTPException(404, "Proveedor no encontrado")
+    up = data.model_dump()
+    up.update({"id": proveedor_id, "codigo": ex.get("codigo"),
+               "estado": "activo" if data.activo else "inactivo",
+               "updated_at": iso_now()})
+    await db.proveedores.update_one({"id": proveedor_id}, {"$set": up})
+    await log_audit(user, "proveedor_editar", "proveedor", proveedor_id, data.nombre)
+    return {k: up[k] for k in up if k != "usuario_id"}
+
+@api.patch("/proveedores/{proveedor_id}/estado")
+async def proveedor_estado(proveedor_id: str, activo: bool,
+                           user: dict = Depends(get_current_user)):
+    await db.proveedores.update_one({"id": proveedor_id},
+                                    {"$set": {"activo": activo, "estado": "activo" if activo else "inactivo",
+                                              "updated_at": iso_now()}})
+    await log_audit(user, "proveedor_estado", "proveedor", proveedor_id,
+                    "activo" if activo else "inactivo")
+    return {"ok": True}
+
+@api.get("/proveedores/{proveedor_id}/ficha")
+async def proveedor_ficha(proveedor_id: str, user: dict = Depends(get_current_user)):
+    """Ficha del proveedor: datos + compras/facturas/pendientes/historial."""
+    prov = await db.proveedores.find_one({"id": proveedor_id}, {"_id": 0})
+    if not prov:
+        raise HTTPException(404, "Proveedor no encontrado")
+    compras = await db.compras.find({"proveedor_id": proveedor_id, "estado": "confirmada"},
+                                    {"_id": 0}).to_list(20000)
+    total_compras = round(sum(float(c.get("total", 0) or 0) for c in compras), 2)
+    pendiente = round(sum(float(c.get("saldo_pendiente", 0) or 0) for c in compras), 2)
+    facturas = [c for c in compras if c.get("factura_numero")]
+    ultima = None
+    if compras:
+        ultima = sorted(compras, key=lambda c: c.get("fecha_recepcion") or "", reverse=True)[0]
+    # Costos por producto de este proveedor.
+    costos = await db.costos_historial.find({"proveedor_id": proveedor_id}, {"_id": 0}).to_list(5000)
+    por_producto = {}
+    for h in costos:
+        e = por_producto.setdefault(h["product_id"], {"product_id": h["product_id"],
+                                                      "codigo": h.get("codigo"),
+                                                      "descripcion": h.get("descripcion"),
+                                                      "historial": []})
+        e["historial"].append({"fecha": h.get("fecha"), "factura": h.get("factura"),
+                               "compra": h.get("folio"), "cantidad": h.get("cantidad"),
+                               "costo": h.get("costo")})
+    for e in por_producto.values():
+        e["historial"].sort(key=lambda x: x.get("fecha") or "", reverse=True)
+        e["ultimo_costo"] = e["historial"][0]["costo"] if e["historial"] else None
+    return {"proveedor": prov, "resumen": {
+                "compras_total": total_compras, "facturas": len(facturas),
+                "pendiente": pendiente,
+                "ultima_compra": str(ultima.get("fecha_recepcion") or "")[:10] if ultima else "",
+            },
+            "compras": sorted(compras, key=lambda c: c.get("fecha_recepcion") or "", reverse=True)[:50],
+            "productos": list(por_producto.values())}
+
+# =========================================================================
+# CUENTAS BANCARIAS
+# =========================================================================
+@api.get("/cuentas-bancarias")
+async def cuentas_bancarias_list(user: dict = Depends(get_current_user)):
+    docs = await db.cuentas_bancarias.find({}, {"_id": 0}).to_list(5000)
+    docs.sort(key=lambda d: (0 if d.get("predeterminada") else 1, (d.get("banco") or "").lower()))
+    return docs
+
+@api.post("/cuentas-bancarias")
+async def cuenta_bancaria_create(data: CuentaBancariaInput,
+                                 user: dict = Depends(get_current_user)):
+    cid = uid()
+    if data.predeterminada:
+        for cta in await db.cuentas_bancarias.find({}, {"_id": 0}).to_list(5000):
+            await db.cuentas_bancarias.update_one({"id": cta["id"]}, {"$set": {"predeterminada": False}})
+    doc = {"id": cid, **data.model_dump(), "created_at": iso_now(),
+           "usuario_id": user["id"], "usuario_nombre": user["name"]}
+    await db.cuentas_bancarias.insert_one(doc)
+    await log_audit(user, "cuenta_bancaria_crear", "cuenta_bancaria", cid,
+                    f"{data.banco} {data.numero_cuenta}")
+    return doc
+
+@api.put("/cuentas-bancarias/{cuenta_id}")
+async def cuenta_bancaria_update(cuenta_id: str, data: CuentaBancariaInput,
+                                 user: dict = Depends(get_current_user)):
+    if not await db.cuentas_bancarias.find_one({"id": cuenta_id}):
+        raise HTTPException(404, "Cuenta no encontrada")
+    if data.predeterminada:
+        for cta in await db.cuentas_bancarias.find({}, {"_id": 0}).to_list(5000):
+            await db.cuentas_bancarias.update_one({"id": cta["id"]}, {"$set": {"predeterminada": False}})
+    up = data.model_dump()
+    await db.cuentas_bancarias.update_one({"id": cuenta_id}, {"$set": up})
+    await log_audit(user, "cuenta_bancaria_editar", "cuenta_bancaria", cuenta_id,
+                    f"{data.banco} {data.numero_cuenta}")
+    return await db.cuentas_bancarias.find_one({"id": cuenta_id}, {"_id": 0})
+
+@api.patch("/cuentas-bancarias/{cuenta_id}/pagar")
+async def cuenta_bancaria_pagar(cuenta_id: str, user: dict = Depends(get_current_user)):
+    """Activa/desactiva una cuenta (nunca se elimina físicamente)."""
+    cta = await db.cuentas_bancarias.find_one({"id": cuenta_id})
+    if not cta:
+        raise HTTPException(404, "Cuenta no encontrada")
+    nueva = not bool(cta.get("activa", True))
+    await db.cuentas_bancarias.update_one({"id": cuenta_id}, {"$set": {"activa": nueva}})
+    await log_audit(user, "cuenta_bancaria_estado", "cuenta_bancaria", cuenta_id,
+                    "activa" if nueva else "inactiva")
+    return {"ok": True, "activa": nueva}
+
+# =========================================================================
+# COMPRAS / GASTOS
+# =========================================================================
+@api.post("/compras")
+async def compras_create(data: CompraInput, user: dict = Depends(get_current_user)):
+    """Registra y confirma una compra/gasto. Afecta inventario de forma
+    transaccional SOLO para los items con `afecta_inventario`."""
+    proveedor_nombre = data.proveedor_nombre or ""
+    if data.proveedor_id:
+        prov = await db.proveedores.find_one({"id": data.proveedor_id}, {"_id": 0})
+        if prov:
+            proveedor_nombre = prov.get("nombre") or proveedor_nombre
+    tipo = data.tipo
+    items = []
+    for it in data.items:
+        importe = it.importe
+        if importe is None:
+            importe = round(float(it.cantidad) * float(it.costo) - float(it.descuento), 2)
+        items.append({"product_id": it.product_id, "codigo": it.codigo,
+                      "descripcion": it.descripcion, "unidad": it.unidad,
+                      "cantidad": float(it.cantidad), "costo": float(it.costo),
+                      "iva_tasa": float(it.iva_tasa), "descuento": float(it.descuento),
+                      "afecta_inventario": bool(it.afecta_inventario),
+                      "importe": round(float(importe), 2)})
+    if tipo not in ("compra", "gasto", "mixto"):
+        tipo = "compra" if any(i["afecta_inventario"] for i in items) else "gasto"
+    cid = uid()
+    folio = await next_counter("compra", "CMP", 6) if tipo != "gasto" else await next_counter("gasto", "GST", 6)
+    saldo_pendiente = 0.0
+    if data.forma_pago == "credito" or data.metodo_pago == "credito":
+        saldo_pendiente = round(float(data.total), 2)
+    caja = await caja_abierta_de(user["id"]) if data.metodo_pago == "efectivo" else None
+    costos_adicionales = round(float(data.flete) + float(data.seguro) +
+                               float(data.maniobras) + float(data.transporte) +
+                               float(data.otros_costos), 2)
+    doc = {
+        "id": cid, "folio": folio, "tipo": tipo,
+        "proveedor_id": data.proveedor_id, "proveedor_nombre": proveedor_nombre,
+        "factura_numero": data.factura_numero, "fecha_factura": data.fecha_factura,
+        "fecha_recepcion": data.fecha_recepcion or iso_now(),
+        "fecha_vencimiento": data.fecha_vencimiento, "concepto": data.concepto,
+        "categoria": data.categoria, "subtotal": round(float(data.subtotal), 2),
+        "descuento": round(float(data.descuento), 2), "iva": round(float(data.iva), 2),
+        "otros_impuestos": round(float(data.otros_impuestos), 2),
+        "total": round(float(data.total), 2), "metodo_pago": data.metodo_pago,
+        "forma_pago": data.forma_pago or ("credito" if data.metodo_pago == "credito" else "contado"),
+        "cuenta_bancaria_id": data.cuenta_bancaria_id,
+        "observaciones": data.observaciones, "items": items,
+        "documentos": data.documentos or [],
+        # Evolución Compras y Gastos
+        "orden_id": data.orden_id, "recepcion_id": data.recepcion_id,
+        "centro_costo_id": data.centro_costo_id, "centro_costo_nombre": data.centro_costo_nombre,
+        "sucursal_id": data.sucursal_id or user.get("sucursal_id"),
+        "costos_adicionales": {
+            "flete": round(float(data.flete), 2), "seguro": round(float(data.seguro), 2),
+            "maniobras": round(float(data.maniobras), 2),
+            "transporte": round(float(data.transporte), 2),
+            "otros": round(float(data.otros_costos), 2),
+            "total": costos_adicionales,
+        },
+        "costo_total_mercancia": round(float(data.total) + costos_adicionales, 2),
+        "pagos": [],
+        "abonado": 0.0, "saldo_pendiente": round(saldo_pendiente, 2),
+        "estado": "confirmada", "caja_id": caja["id"] if caja else None,
+        "usuario_id": user["id"], "usuario_nombre": user["name"],
+        "fecha": iso_now(), "created_at": iso_now(),
+    }
+    try:
+        result = await _pgcompras.registrar_compra_pg(user=user, doc=doc)
+    except Exception as e:
+        if getattr(e, "status", 0) and getattr(e, "message", None):
+            raise HTTPException(e.status, e.message)
+        raise
+    # Efectivo al contado entra a caja.
+    if caja and data.metodo_pago == "efectivo" and data.forma_pago != "credito":
+        await db.caja_movimientos.insert_one({
+            "id": uid(), "caja_id": caja["id"], "tipo": "entrada",
+            "concepto": (f"Compra {folio}" if tipo != "gasto" else f"Gasto {folio}") + " · " + (proveedor_nombre or "S/D"),
+            "monto": -round(float(data.total), 2), "referencia": folio,
+            "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()})
+    return result
+
+@api.post("/compras/{compra_id}/cancelar")
+async def compras_cancelar(compra_id: str, motivo: str = "Cancelación",
+                           user: dict = Depends(get_current_user)):
+    try:
+        result = await _pgcompras.cancela_compra_pg(user=user, compra_id=compra_id, motivo=motivo)
+    except Exception as e:
+        if getattr(e, "status", 0) and getattr(e, "message", None):
+            raise HTTPException(e.status, e.message)
+        raise
+    return result
+
+@api.get("/compras")
+async def compras_list(desde: Optional[str] = None, hasta: Optional[str] = None,
+                       tipo: Optional[str] = None, proveedor: Optional[str] = None,
+                       rfc: Optional[str] = None, factura: Optional[str] = None,
+                       categoria: Optional[str] = None, producto: Optional[str] = None,
+                       sucursal: Optional[str] = None, usuario: Optional[str] = None,
+                       metodo_pago: Optional[str] = None, estado: Optional[str] = None,
+                       afecta_inventario: Optional[bool] = None,
+                       con_documento: Optional[bool] = None,
+                       pagada: Optional[str] = None,
+                       q: Optional[str] = None,
+                       user: dict = Depends(get_current_user)):
+    flt = {"estado": {"$ne": "borrador"}} if estado != "todos" else {}
+    docs = await db.compras.find(flt, {"_id": 0}).to_list(100000)
+    if desde:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] >= desde]
+    if hasta:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] <= hasta]
+    if tipo and tipo != "todos":
+        docs = [d for d in docs if d.get("tipo") == tipo]
+    if proveedor:
+        docs = [d for d in docs if d.get("proveedor_id") == proveedor or proveedor.lower() in (d.get("proveedor_nombre") or "").lower()]
+    if rfc:
+        docs = [d for d in docs if rfc.lower() in (d.get("proveedor_rfc") or "").lower()]
+    if factura:
+        docs = [d for d in docs if factura.lower() in (d.get("factura_numero") or "").lower()]
+    if categoria and categoria != "todos":
+        docs = [d for d in docs if d.get("categoria") == categoria]
+    if producto:
+        docs = [d for d in docs if any(producto.lower() in (it.get("descripcion") or "").lower() or producto.lower() == str(it.get("codigo") or "").lower() for it in d.get("items", []))]
+    if sucursal:
+        docs = [d for d in docs if d.get("sucursal_id") == sucursal]
+    if usuario:
+        docs = [d for d in docs if d.get("usuario_id") == usuario]
+    if metodo_pago and metodo_pago != "todos":
+        docs = [d for d in docs if d.get("metodo_pago") == metodo_pago]
+    if estado and estado != "todos":
+        docs = [d for d in docs if d.get("estado") == estado]
+    if afecta_inventario is not None:
+        docs = [d for d in docs if any(it.get("afecta_inventario") for it in d.get("items", [])) == afecta_inventario] if afecta_inventario else \
+               [d for d in docs if not any(it.get("afecta_inventario") for it in d.get("items", []))]
+    if con_documento is not None:
+        docs = [d for d in docs if bool(d.get("documentos")) == con_documento]
+    if pagada and pagada != "todos":
+        if pagada == "pagada":
+            docs = [d for d in docs if float(d.get("saldo_pendiente", 0) or 0) <= 0]
+        elif pagada == "pendiente":
+            docs = [d for d in docs if float(d.get("saldo_pendiente", 0) or 0) > 0]
+        elif pagada == "vencida":
+            docs = [d for d in docs if float(d.get("saldo_pendiente", 0) or 0) > 0 and (d.get("fecha_vencimiento") or "")[:10] and (d.get("fecha_vencimiento") or "")[:10] < now_utc().date().isoformat()]
+    if q:
+        ql = q.lower().strip()
+        docs = [d for d in docs if ql in " ".join(str(d.get(k) or "") for k in ("folio", "factura_numero", "concepto", "proveedor_nombre")).lower()]
+    docs.sort(key=lambda d: d.get("fecha_recepcion") or "", reverse=True)
+    return docs
+
+@api.get("/compras/resumen")
+async def compras_resumen(desde: Optional[str] = None, hasta: Optional[str] = None,
+                          user: dict = Depends(get_current_user)):
+    docs = await db.compras.find({"estado": "confirmada"}, {"_id": 0}).to_list(100000)
+    if desde:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] >= desde]
+    if hasta:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] <= hasta]
+    total_compras = round(sum(float(d.get("total", 0) or 0) for d in docs if d.get("tipo") != "gasto"), 2)
+    total_gastos = round(sum(float(d.get("total", 0) or 0) for d in docs if d.get("tipo") == "gasto"), 2)
+    compras_pend = round(sum(float(d.get("saldo_pendiente", 0) or 0) for d in docs if d.get("tipo") != "gasto"), 2)
+    gastos_pend = round(sum(float(d.get("saldo_pendiente", 0) or 0) for d in docs if d.get("tipo") == "gasto"), 2)
+    # Proveedor con mayor volumen, categoría mayor y productos más comprados.
+    por_prov = {}
+    por_cat = {}
+    prod_count = {}
+    for d in docs:
+        por_prov[d.get("proveedor_nombre") or "S/D"] = round(por_prov.get(d.get("proveedor_nombre") or "S/D", 0) + float(d.get("total", 0) or 0), 2)
+        cat = d.get("categoria") or "Sin categoría"
+        por_cat[cat] = round(por_cat.get(cat, 0) + float(d.get("total", 0) or 0), 2)
+        for it in d.get("items", []):
+            if it.get("afecta_inventario"):
+                k = it.get("product_id") or it.get("codigo")
+                e = prod_count.setdefault(k, {"product_id": it.get("product_id"), "codigo": it.get("codigo"),
+                                              "descripcion": it.get("descripcion"), "cantidad": 0.0})
+                e["cantidad"] = round(e["cantidad"] + float(it.get("cantidad", 0) or 0), 2)
+    mes_actual = now_utc().strftime("%Y-%m")
+    docs_mes = [d for d in docs if (d.get("fecha_recepcion") or "")[:7] == mes_actual]
+    return {
+        "compras_periodo": total_compras, "gastos_periodo": total_gastos,
+        "total_periodo": round(total_compras + total_gastos, 2),
+        "compras_pendientes": compras_pend, "gastos_pendientes": gastos_pend,
+        "facturas": len([d for d in docs if d.get("factura_numero")]),
+        "compras_mes": round(sum(float(d.get("total", 0) or 0) for d in docs_mes if d.get("tipo") != "gasto"), 2),
+        "gastos_mes": round(sum(float(d.get("total", 0) or 0) for d in docs_mes if d.get("tipo") == "gasto"), 2),
+        "mejor_proveedor": max(por_prov, key=por_prov.get, default="—"),
+        "mejor_categoria": max(por_cat, key=por_cat.get, default="—"),
+        "productos_mas_comprados": sorted(prod_count.values(), key=lambda x: x["cantidad"], reverse=True)[:10],
+    }
+
+@api.post("/compras/ocr")
+async def compras_ocr(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """Lee una factura (foto o PDF) con OCR y devuelve proveedor, montos y
+    conceptos. Los conceptos se cruzan contra el catálogo de productos para
+    poder ajustar el inventario automáticamente al confirmar la compra."""
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "El archivo no debe superar 15 MB.")
+    filename = file.filename or ""
+    real_mime = storage.detect_mime_type(data)
+    if real_mime not in ("application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"):
+        raise HTTPException(400, "Formato no permitido. Usa una imagen (JPG/PNG/WEBP) o un PDF de la factura.")
+    products = await db.products.find(
+        {"estado": "activo"},
+        {"_id": 0, "id": 1, "codigo": 1, "descripcion": 1, "costo": 1,
+         "iva_tasa": 1, "unidad_medida": 1}).to_list(100000)
+    try:
+        result = _ocr_invoice.process_factura(data, filename, products)
+    except Exception as e:
+        logger.warning("OCR factura falló: %s", str(e)[:200])
+        raise HTTPException(422, str(e))
+    return result
+
+# =========================================================================
+# ÓRDENES DE COMPRA
+# =========================================================================
+@api.get("/compras/ordenes")
+async def ordenes_list(estado: Optional[str] = None, proveedor: Optional[str] = None,
+                       pendientes: Optional[bool] = None, q: Optional[str] = None,
+                       user: dict = Depends(get_current_user)):
+    docs = await db.compras_ordenes.find({}, {"_id": 0}).to_list(100000)
+    if estado and estado != "todos":
+        docs = [d for d in docs if d.get("estado") == estado]
+    if proveedor:
+        docs = [d for d in docs if d.get("proveedor_id") == proveedor or
+                proveedor.lower() in (d.get("proveedor_nombre") or "").lower()]
+    if pendientes is True:
+        docs = [d for d in docs if d.get("estado") in ("enviada", "parcialmente_recibida")]
+    if q:
+        ql = q.lower().strip()
+        docs = [d for d in docs if ql in " ".join(str(d.get(k) or "") for k in ("folio", "proveedor_nombre", "notas")).lower()]
+    docs.sort(key=lambda d: d.get("fecha_orden") or "", reverse=True)
+    return docs
+
+@api.get("/compras/ordenes/{orden_id}")
+async def orden_detail(orden_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.compras_ordenes.find_one({"id": orden_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Orden no encontrada")
+    return doc
+
+@api.post("/compras/ordenes")
+async def orden_create(data: OrdenCompraInput, user: dict = Depends(get_current_user)):
+    proveedor_nombre = data.proveedor_nombre or ""
+    if data.proveedor_id:
+        prov = await db.proveedores.find_one({"id": data.proveedor_id}, {"_id": 0})
+        if prov:
+            proveedor_nombre = prov.get("nombre") or proveedor_nombre
+    if not data.items:
+        raise HTTPException(400, "Agrega al menos un producto a la orden")
+    oid = uid()
+    folio = await next_counter("orden", "OC", 6)
+    items = []
+    subtotal = 0.0
+    for it in data.items:
+        if float(it.solicitado) <= 0:
+            continue
+        subtotal += round(float(it.solicitado) * float(it.costo), 2)
+        items.append({"product_id": it.product_id, "codigo": it.codigo,
+                      "descripcion": it.descripcion, "unidad": it.unidad or "PZA",
+                      "solicitado": float(it.solicitado), "recibido": 0.0,
+                      "pendiente": float(it.solicitado), "costo": float(it.costo),
+                      "iva_tasa": float(it.iva_tasa)})
+    if not items:
+        raise HTTPException(400, "No hay cantidades válidas en la orden")
+    iva = round(sum(float(i["solicitado"]) * float(i["costo"]) * (float(i["iva_tasa"]) / 100) for i in items), 2)
+    estado = "enviada" if data.estado == "enviada" else "borrador"
+    doc = {
+        "id": oid, "folio": folio, "proveedor_id": data.proveedor_id,
+        "proveedor_nombre": proveedor_nombre,
+        "fecha_orden": data.fecha_orden or iso_now()[:10],
+        "fecha_estimada": data.fecha_estimada, "estado": estado,
+        "notas": data.notas or "", "items": items,
+        "subtotal": round(subtotal, 2), "iva": iva, "total": round(subtotal + iva, 2),
+        "sucursal_id": data.sucursal_id or user.get("sucursal_id"),
+        "cuenta_bancaria_id": data.cuenta_bancaria_id,
+        "usuario_id": user["id"], "usuario_nombre": user["name"],
+        "creado_en": iso_now(), "actualizado_en": iso_now(),
+    }
+    await db.compras_ordenes.insert_one(doc)
+    await log_audit(user, "orden_crear", "orden_compra", oid, f"{folio} {proveedor_nombre}")
+    return doc
+
+@api.put("/compras/ordenes/{orden_id}")
+async def orden_update(orden_id: str, data: OrdenCompraInput,
+                       user: dict = Depends(get_current_user)):
+    ex = await db.compras_ordenes.find_one({"id": orden_id})
+    if not ex:
+        raise HTTPException(404, "Orden no encontrada")
+    if ex.get("estado") in ("recibida", "cancelada"):
+        raise HTTPException(409, f"Una orden {ex['estado']} no se puede editar")
+    proveedor_nombre = data.proveedor_nombre or ex.get("proveedor_nombre") or ""
+    if data.proveedor_id:
+        prov = await db.proveedores.find_one({"id": data.proveedor_id}, {"_id": 0})
+        if prov:
+            proveedor_nombre = prov.get("nombre") or proveedor_nombre
+    items = []
+    subtotal = 0.0
+    for it in data.items:
+        if float(it.solicitado) <= 0:
+            continue
+        prev = next((x for x in ex.get("items", []) if x.get("product_id") == it.product_id), None)
+        recibido = float((prev or {}).get("recibido", 0) or 0)
+        if float(it.solicitado) < recibido:
+            raise HTTPException(400, f"{it.descripcion}: no puedes bajar la cantidad por debajo de lo ya recibido ({recibido})")
+        subtotal += round(float(it.solicitado) * float(it.costo), 2)
+        items.append({"product_id": it.product_id, "codigo": it.codigo,
+                      "descripcion": it.descripcion, "unidad": it.unidad or "PZA",
+                      "solicitado": float(it.solicitado), "recibido": recibido,
+                      "pendiente": round(float(it.solicitado) - recibido, 3),
+                      "costo": float(it.costo), "iva_tasa": float(it.iva_tasa)})
+    iva = round(sum(float(i["solicitado"]) * float(i["costo"]) * (float(i["iva_tasa"]) / 100) for i in items), 2)
+    up = {"id": orden_id, "folio": ex.get("folio"), "proveedor_id": data.proveedor_id,
+          "proveedor_nombre": proveedor_nombre,
+          "fecha_orden": data.fecha_orden or ex.get("fecha_orden"),
+          "fecha_estimada": data.fecha_estimada, "estado": ex.get("estado"),
+          "notas": data.notas or "", "items": items,
+          "subtotal": round(subtotal, 2), "iva": iva, "total": round(subtotal + iva, 2),
+          "sucursal_id": data.sucursal_id or ex.get("sucursal_id"),
+          "cuenta_bancaria_id": data.cuenta_bancaria_id,
+          "usuario_id": ex.get("usuario_id"), "usuario_nombre": ex.get("usuario_nombre"),
+          "creado_en": ex.get("creado_en"), "actualizado_en": iso_now()}
+    await db.compras_ordenes.update_one({"id": orden_id}, {"$set": up})
+    await log_audit(user, "orden_editar", "orden_compra", orden_id, ex.get("folio"))
+    return up
+
+@api.post("/compras/ordenes/{orden_id}/estado")
+async def orden_estado(orden_id: str, data: OrdenEstadoInput,
+                       user: dict = Depends(get_current_user)):
+    ex = await db.compras_ordenes.find_one({"id": orden_id})
+    if not ex:
+        raise HTTPException(404, "Orden no encontrada")
+    if data.estado not in ("borrador", "enviada", "cancelada"):
+        raise HTTPException(400, "Estado no válido")
+    if ex.get("estado") == "recibida" and data.estado != "cancelada":
+        raise HTTPException(409, "Una orden recibida no puede cambiar de estado")
+    await db.compras_ordenes.update_one({"id": orden_id},
+                                        {"$set": {"estado": data.estado, "actualizado_en": iso_now()}})
+    await log_audit(user, "orden_estado", "orden_compra", orden_id,
+                    f"{ex.get('folio')} -> {data.estado}")
+    return {"ok": True, "estado": data.estado}
+
+# =========================================================================
+# RECEPCIONES DE MERCANCÍA
+# =========================================================================
+@api.post("/compras/recepciones")
+async def recepcion_create(data: RecepcionInput, user: dict = Depends(get_current_user)):
+    orden = await db.compras_ordenes.find_one({"id": data.orden_id}, {"_id": 0})
+    if not orden:
+        raise HTTPException(404, "Orden de compra no encontrada")
+    if orden.get("estado") == "cancelada":
+        raise HTTPException(409, "No se puede recibir una orden cancelada")
+    # Mapa de productos de la orden.
+    orden_items = {i.get("product_id"): i for i in orden.get("items", []) if i.get("product_id")}
+    rec_items = []
+    for it in data.items:
+        pid = it.product_id
+        oi = orden_items.get(pid)
+        if oi is None:
+            raise HTTPException(400, f"{it.descripcion or it.codigo} no está en la orden")
+        pendiente = float(oi.get("pendiente", 0) or 0)
+        cantidad = float(it.cantidad)
+        if cantidad <= 0:
+            cantidad = pendiente
+        if cantidad > pendiente + 1e-9:
+            raise HTTPException(400, f"{oi.get('descripcion')}: recibes {cantidad} pero solo quedan {pendiente} pendientes")
+        if cantidad <= 0:
+            continue
+        rec_items.append({"product_id": pid, "codigo": it.codigo or oi.get("codigo"),
+                          "descripcion": it.descripcion or oi.get("descripcion"),
+                          "unidad": it.unidad or oi.get("unidad") or "PZA",
+                          "cantidad": round(cantidad, 3),
+                          "costo": float(it.costo) if it.costo else float(oi.get("costo", 0) or 0),
+                          "iva_tasa": float(it.iva_tasa) if it.iva_tasa else float(oi.get("iva_tasa", 8) or 8)})
+    if not rec_items:
+        raise HTTPException(400, "No hay cantidades recibidas que registrar")
+
+    rid = uid()
+    folio_rcp = await next_counter("recepcion", "RCP", 6)
+    folio_cmp = await next_counter("compra", "CMP", 6)
+    subtotal = round(sum(float(i["cantidad"]) * float(i["costo"]) for i in rec_items), 2)
+    iva = round(sum(float(i["cantidad"]) * float(i["costo"]) * (float(i["iva_tasa"]) / 100) for i in rec_items), 2)
+    total = round(subtotal + iva, 2)
+    cid = uid()
+    proveedor_nombre = orden.get("proveedor_nombre") or ""
+    fecha = data.fecha or iso_now()[:10]
+    saldo_pendiente = round(total, 2) if (data.forma_pago == "credito" or data.metodo_pago == "credito") else 0.0
+
+    recepcion = {
+        "id": rid, "folio": folio_rcp, "orden_id": data.orden_id,
+        "orden_folio": orden.get("folio"), "proveedor_id": orden.get("proveedor_id"),
+        "proveedor_nombre": proveedor_nombre, "fecha": fecha,
+        "factura_numero": data.factura_numero, "fecha_factura": data.fecha_factura,
+        "metodo_pago": data.metodo_pago,
+        "forma_pago": data.forma_pago or ("credito" if data.metodo_pago == "credito" else "contado"),
+        "cuenta_bancaria_id": data.cuenta_bancaria_id,
+        "fecha_vencimiento": data.fecha_vencimiento, "observaciones": data.observaciones or "",
+        "items": rec_items, "subtotal": subtotal, "iva": iva, "total": total,
+        "saldo_pendiente": saldo_pendiente,
+        "documentos": data.documentos or [], "estado": "confirmada",
+        "usuario_id": user["id"], "usuario_nombre": user["name"],
+        "sucursal_id": orden.get("sucursal_id") or user.get("sucursal_id"),
+        "compra_id": cid, "created_at": iso_now(),
+    }
+    compra = {
+        "id": cid, "folio": folio_cmp, "tipo": "compra",
+        "proveedor_id": orden.get("proveedor_id"), "proveedor_nombre": proveedor_nombre,
+        "factura_numero": data.factura_numero, "fecha_factura": data.fecha_factura,
+        "fecha_recepcion": fecha, "fecha_vencimiento": data.fecha_vencimiento,
+        "concepto": f"Recepción {folio_rcp} / Orden {orden.get('folio')}",
+        "categoria": "", "subtotal": subtotal, "descuento": 0.0, "iva": iva,
+        "otros_impuestos": 0.0, "total": total, "metodo_pago": data.metodo_pago,
+        "forma_pago": recepcion["forma_pago"], "cuenta_bancaria_id": data.cuenta_bancaria_id,
+        "observaciones": data.observaciones or "",
+        "items": [{**i, "descuento": 0.0, "afecta_inventario": False,
+                   "importe": round(float(i["cantidad"]) * float(i["costo"]), 2)} for i in rec_items],
+        "documentos": data.documentos or [],
+        "orden_id": data.orden_id, "recepcion_id": rid,
+        "centro_costo_id": None, "centro_costo_nombre": "",
+        "sucursal_id": recepcion["sucursal_id"],
+        "costos_adicionales": {"flete": 0.0, "seguro": 0.0, "maniobras": 0.0,
+                               "transporte": 0.0, "otros": 0.0, "total": 0.0},
+        "costo_total_mercancia": total, "pagos": [],
+        "abonado": 0.0, "saldo_pendiente": saldo_pendiente,
+        "estado": "confirmada", "caja_id": None,
+        "usuario_id": user["id"], "usuario_nombre": user["name"],
+        "fecha": iso_now(), "created_at": iso_now(),
+    }
+    try:
+        result = await _pgcompras.recibir_orden_pg(user=user, orden=orden,
+                                                   recepcion=recepcion, compra=compra)
+    except Exception as e:
+        if getattr(e, "status", 0) and getattr(e, "message", None):
+            raise HTTPException(e.status, e.message)
+        raise
+    # Efectivo al contado sale de caja.
+    caja = await caja_abierta_de(user["id"]) if data.metodo_pago == "efectivo" else None
+    if caja and recepcion["forma_pago"] != "credito":
+        await db.caja_movimientos.insert_one({
+            "id": uid(), "caja_id": caja["id"], "tipo": "gasto",
+            "concepto": f"Recepción {folio_rcp} · {proveedor_nombre or 'S/D'}",
+            "monto": round(total, 2), "referencia": folio_rcp,
+            "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()})
+    await log_audit(user, "recepcion_crear", "recepcion", rid,
+                    f"{folio_rcp} orden {orden.get('folio')} total {total}")
+    return result
+
+@api.get("/compras/recepciones")
+async def recepciones_list(desde: Optional[str] = None, hasta: Optional[str] = None,
+                           proveedor: Optional[str] = None, orden: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+    docs = await db.compras_recepciones.find({}, {"_id": 0}).to_list(100000)
+    if desde:
+        docs = [d for d in docs if (d.get("fecha") or "")[:10] >= desde]
+    if hasta:
+        docs = [d for d in docs if (d.get("fecha") or "")[:10] <= hasta]
+    if proveedor:
+        docs = [d for d in docs if d.get("proveedor_id") == proveedor or
+                proveedor.lower() in (d.get("proveedor_nombre") or "").lower()]
+    if orden:
+        docs = [d for d in docs if d.get("orden_id") == orden or
+                orden.lower() in (d.get("orden_folio") or "").lower()]
+    docs.sort(key=lambda d: d.get("fecha") or "", reverse=True)
+    return docs
+
+@api.get("/compras/recepciones/{recepcion_id}")
+async def recepcion_detail(recepcion_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.compras_recepciones.find_one({"id": recepcion_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Recepción no encontrada")
+    return doc
+
+# =========================================================================
+# CENTROS DE COSTO
+# =========================================================================
+@api.get("/centros-costo")
+async def centros_costo_list(user: dict = Depends(get_current_user)):
+    docs = await db.centros_costo.find({}, {"_id": 0}).to_list(5000)
+    docs.sort(key=lambda d: (0 if d.get("activo", True) else 1, (d.get("nombre") or "").lower()))
+    return docs
+
+@api.post("/centros-costo")
+async def centro_costo_create(data: CentroCostoInput, user: dict = Depends(get_current_user)):
+    cid = uid()
+    doc = {"id": cid, "codigo": data.codigo or f"CC{cid[:4].upper()}",
+           "nombre": data.nombre, "descripcion": data.descripcion or "",
+           "activo": data.activo, "created_at": iso_now(),
+           "usuario_id": user["id"], "usuario_nombre": user["name"]}
+    await db.centros_costo.insert_one(doc)
+    await log_audit(user, "centro_costo_crear", "centro_costo", cid, data.nombre)
+    return doc
+
+@api.put("/centros-costo/{centro_id}")
+async def centro_costo_update(centro_id: str, data: CentroCostoInput,
+                              user: dict = Depends(get_current_user)):
+    if not await db.centros_costo.find_one({"id": centro_id}):
+        raise HTTPException(404, "Centro de costo no encontrado")
+    up = {"id": centro_id, "codigo": data.codigo, "nombre": data.nombre,
+          "descripcion": data.descripcion or "", "activo": data.activo,
+          "updated_at": iso_now()}
+    await db.centros_costo.update_one({"id": centro_id}, {"$set": up})
+    await log_audit(user, "centro_costo_editar", "centro_costo", centro_id, data.nombre)
+    return up
+
+@api.patch("/centros-costo/{centro_id}/estado")
+async def centro_costo_estado(centro_id: str, activo: bool,
+                              user: dict = Depends(get_current_user)):
+    await db.centros_costo.update_one({"id": centro_id},
+                                      {"$set": {"activo": activo, "updated_at": iso_now()}})
+    return {"ok": True}
+
+# =========================================================================
+# PRESUPUESTOS
+# =========================================================================
+@api.get("/presupuestos")
+async def presupuestos_list(periodo: Optional[str] = None, categoria: Optional[str] = None,
+                            user: dict = Depends(get_current_user)):
+    docs = await db.presupuestos.find({}, {"_id": 0}).to_list(5000)
+    if periodo:
+        docs = [d for d in docs if d.get("periodo") == periodo]
+    if categoria:
+        docs = [d for d in docs if d.get("categoria") == categoria]
+    docs.sort(key=lambda d: (d.get("periodo") or "", d.get("categoria") or ""))
+    return docs
+
+@api.get("/presupuestos/resumen")
+async def presupuestos_resumen(periodo: Optional[str] = None,
+                               user: dict = Depends(get_current_user)):
+    docs = await db.presupuestos.find({}, {"_id": 0}).to_list(5000)
+    if periodo:
+        docs = [d for d in docs if d.get("periodo") == periodo]
+    gastos = await db.compras.find({"estado": "confirmada", "tipo": "gasto"}, {"_id": 0}).to_list(100000)
+    mes = periodo or now_utc().strftime("%Y-%m")
+    gastos_mes = [d for d in gastos if (d.get("fecha_recepcion") or "")[:7] == mes]
+    def _gasto_clave(d):
+        return (d.get("categoria") or "Sin categoría", d.get("centro_costo_nombre") or "")
+    por_clave = {}
+    for d in gastos_mes:
+        k = _gasto_clave(d)
+        por_clave[k] = round(por_clave.get(k, 0) + float(d.get("total", 0) or 0), 2)
+    result = []
+    for p in docs:
+        monto = float(p.get("monto", 0) or 0)
+        gastado = por_clave.get((p.get("categoria") or "Sin categoría", p.get("centro_costo_nombre") or ""), 0.0)
+        disponible = round(monto - gastado, 2)
+        result.append({
+            "id": p["id"], "categoria": p.get("categoria"), "periodo": p.get("periodo"),
+            "centro_costo_id": p.get("centro_costo_id"), "centro_costo_nombre": p.get("centro_costo_nombre"),
+            "sucursal_id": p.get("sucursal_id"), "monto": monto, "gastado": gastado,
+            "disponible": disponible, "excedido": disponible < 0, "notas": p.get("notas"),
+        })
+    result.sort(key=lambda x: (x["excedido"], -x["gastado"]))
+    return {"periodo": mes, "presupuestos": result,
+            "total_presupuestado": round(sum(x["monto"] for x in result), 2),
+            "total_gastado": round(sum(x["gastado"] for x in result), 2),
+            "total_disponible": round(sum(x["disponible"] for x in result), 2)}
+
+@api.post("/presupuestos")
+async def presupuesto_create(data: PresupuestoInput, user: dict = Depends(get_current_user)):
+    if not data.periodo:
+        raise HTTPException(400, "Indica el periodo (YYYY-MM)")
+    pid = uid()
+    doc = {"id": pid, "categoria": data.categoria or "Sin categoría",
+           "sucursal_id": data.sucursal_id, "centro_costo_id": data.centro_costo_id,
+           "centro_costo_nombre": data.centro_costo_nombre, "periodo": data.periodo,
+           "monto": round(float(data.monto), 2), "notas": data.notas or "",
+           "created_at": iso_now(), "usuario_id": user["id"], "usuario_nombre": user["name"]}
+    await db.presupuestos.insert_one(doc)
+    await log_audit(user, "presupuesto_crear", "presupuesto", pid,
+                    f"{data.categoria} {data.periodo} {data.monto}")
+    return doc
+
+@api.put("/presupuestos/{presupuesto_id}")
+async def presupuesto_update(presupuesto_id: str, data: PresupuestoInput,
+                             user: dict = Depends(get_current_user)):
+    if not await db.presupuestos.find_one({"id": presupuesto_id}):
+        raise HTTPException(404, "Presupuesto no encontrado")
+    up = {"id": presupuesto_id, "categoria": data.categoria or "Sin categoría",
+          "sucursal_id": data.sucursal_id, "centro_costo_id": data.centro_costo_id,
+          "centro_costo_nombre": data.centro_costo_nombre, "periodo": data.periodo,
+          "monto": round(float(data.monto), 2), "notas": data.notas or "",
+          "updated_at": iso_now()}
+    await db.presupuestos.update_one({"id": presupuesto_id}, {"$set": up})
+    await log_audit(user, "presupuesto_editar", "presupuesto", presupuesto_id, data.categoria)
+    return up
+
+# =========================================================================
+# GASTOS / COMPRAS RECURRENTES
+# =========================================================================
+@api.get("/recurrentes")
+async def recurrentes_list(activos: Optional[bool] = None,
+                           user: dict = Depends(get_current_user)):
+    docs = await db.recurrentes.find({}, {"_id": 0}).to_list(5000)
+    if activos is not None:
+        docs = [d for d in docs if d.get("activo") == activos]
+    docs.sort(key=lambda d: (d.get("categoria") or "", d.get("concepto") or ""))
+    return docs
+
+@api.post("/recurrentes")
+async def recurrente_create(data: RecurrenteInput, user: dict = Depends(get_current_user)):
+    rid = uid()
+    proveedor_nombre = data.proveedor_nombre or ""
+    if data.proveedor_id:
+        prov = await db.proveedores.find_one({"id": data.proveedor_id}, {"_id": 0})
+        if prov:
+            proveedor_nombre = prov.get("nombre") or proveedor_nombre
+    doc = {"id": rid, "tipo": data.tipo, "proveedor_id": data.proveedor_id,
+           "proveedor_nombre": proveedor_nombre, "concepto": data.concepto or "",
+           "categoria": data.categoria or "", "importe": round(float(data.importe), 2),
+           "frecuencia": data.frecuencia, "dia": max(1, min(31, int(data.dia or 1))),
+           "cuenta_bancaria_id": data.cuenta_bancaria_id, "recordatorio": data.recordatorio,
+           "sucursal_id": data.sucursal_id, "centro_costo_id": data.centro_costo_id,
+           "centro_costo_nombre": data.centro_costo_nombre, "activo": data.activo,
+           "notas": data.notas or "", "created_at": iso_now(),
+           "usuario_id": user["id"], "usuario_nombre": user["name"]}
+    await db.recurrentes.insert_one(doc)
+    await log_audit(user, "recurrente_crear", "recurrente", rid, data.concepto)
+    return doc
+
+@api.put("/recurrentes/{recurrente_id}")
+async def recurrente_update(recurrente_id: str, data: RecurrenteInput,
+                            user: dict = Depends(get_current_user)):
+    if not await db.recurrentes.find_one({"id": recurrente_id}):
+        raise HTTPException(404, "Recurrente no encontrado")
+    proveedor_nombre = data.proveedor_nombre or ""
+    if data.proveedor_id:
+        prov = await db.proveedores.find_one({"id": data.proveedor_id}, {"_id": 0})
+        if prov:
+            proveedor_nombre = prov.get("nombre") or proveedor_nombre
+    up = {"id": recurrente_id, "tipo": data.tipo, "proveedor_id": data.proveedor_id,
+          "proveedor_nombre": proveedor_nombre, "concepto": data.concepto or "",
+          "categoria": data.categoria or "", "importe": round(float(data.importe), 2),
+          "frecuencia": data.frecuencia, "dia": max(1, min(31, int(data.dia or 1))),
+          "cuenta_bancaria_id": data.cuenta_bancaria_id, "recordatorio": data.recordatorio,
+          "sucursal_id": data.sucursal_id, "centro_costo_id": data.centro_costo_id,
+          "centro_costo_nombre": data.centro_costo_nombre, "activo": data.activo,
+          "notas": data.notas or "", "updated_at": iso_now()}
+    await db.recurrentes.update_one({"id": recurrente_id}, {"$set": up})
+    await log_audit(user, "recurrente_editar", "recurrente", recurrente_id, data.concepto)
+    return up
+
+@api.patch("/recurrentes/{recurrente_id}/estado")
+async def recurrente_estado(recurrente_id: str, activo: bool,
+                            user: dict = Depends(get_current_user)):
+    await db.recurrentes.update_one({"id": recurrente_id},
+                                    {"$set": {"activo": activo, "updated_at": iso_now()}})
+    return {"ok": True}
+
+# =========================================================================
+# CUENTAS POR PAGAR (CxP)
+# =========================================================================
+@api.get("/compras/cxp")
+async def compras_cxp(desde: Optional[str] = None, hasta: Optional[str] = None,
+                      user: dict = Depends(get_current_user)):
+    docs = await db.compras.find({"estado": {"$in": ["confirmada", "pagada"]}}, {"_id": 0}).to_list(100000)
+    if desde:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] >= desde]
+    if hasta:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] <= hasta]
+    hoy = now_utc().date().isoformat()
+    dentro7 = (now_utc().date() + timedelta(days=7)).isoformat()
+    pendientes = [d for d in docs if float(d.get("saldo_pendiente", 0) or 0) > 0]
+    vencidas = [d for d in pendientes if (d.get("fecha_vencimiento") or "")[:10] and (d.get("fecha_vencimiento") or "")[:10] < hoy]
+    proximas = [d for d in pendientes if (d.get("fecha_vencimiento") or "")[:10] and
+                hoy <= (d.get("fecha_vencimiento") or "")[:10] <= dentro7]
+    saldo_total = round(sum(float(d.get("saldo_pendiente", 0) or 0) for d in pendientes), 2)
+    # Pagos realizados en el periodo.
+    pagos = []
+    for d in docs:
+        for p in d.get("pagos", []):
+            if desde and (p.get("fecha") or "")[:10] < desde:
+                continue
+            if hasta and (p.get("fecha") or "")[:10] > hasta:
+                continue
+            pagos.append({"compra_id": d["id"], "folio": d.get("folio"),
+                          "proveedor_nombre": d.get("proveedor_nombre"),
+                          "fecha": p.get("fecha"), "monto": p.get("monto"),
+                          "metodo_pago": p.get("metodo_pago"), "referencia": p.get("referencia")})
+    pagos.sort(key=lambda x: x.get("fecha") or "", reverse=True)
+    pendientes.sort(key=lambda d: (d.get("fecha_vencimiento") or "")[:10] or "9999", reverse=False)
+    return {
+        "saldo_total": saldo_total,
+        "facturas_pendientes": len(pendientes),
+        "vencidas": [{"id": d["id"], "folio": d.get("folio"), "proveedor_nombre": d.get("proveedor_nombre"),
+                      "factura_numero": d.get("factura_numero"), "fecha_vencimiento": d.get("fecha_vencimiento"),
+                      "saldo": float(d.get("saldo_pendiente", 0) or 0)} for d in vencidas],
+        "vencidas_total": round(sum(float(d.get("saldo_pendiente", 0) or 0) for d in vencidas), 2),
+        "proximas_vencer": [{"id": d["id"], "folio": d.get("folio"), "proveedor_nombre": d.get("proveedor_nombre"),
+                             "factura_numero": d.get("factura_numero"), "fecha_vencimiento": d.get("fecha_vencimiento"),
+                             "saldo": float(d.get("saldo_pendiente", 0) or 0)} for d in proximas],
+        "pagos": pagos,
+        "facturas": [{"id": d["id"], "folio": d.get("folio"), "tipo": d.get("tipo"),
+                      "proveedor_id": d.get("proveedor_id"), "proveedor_nombre": d.get("proveedor_nombre"),
+                      "factura_numero": d.get("factura_numero"), "fecha_recepcion": d.get("fecha_recepcion"),
+                      "fecha_vencimiento": d.get("fecha_vencimiento"), "total": float(d.get("total", 0) or 0),
+                      "abonado": float(d.get("abonado", 0) or 0), "saldo": float(d.get("saldo_pendiente", 0) or 0),
+                      "metodo_pago": d.get("metodo_pago"), "sucursal_id": d.get("sucursal_id")} for d in pendientes],
+    }
+
+# Alias section under Cuenta por pagar (CxP) - nueva navegación
+@api.get("/cxp")
+async def cxp_list(desde: Optional[str] = None, hasta: Optional[str] = None,
+                   user: dict = Depends(get_current_user)):
+    """Vista simplificada de Cuentas por pagar para el módulo CxP."""
+    return await compras_cxp(desde=desde, hasta=hasta, user=user)
+
+
+# ---- Exportación CxP (Excel + PDF) ----
+CXP_EXPORT_HEADERS = ["Folio", "Proveedor", "Factura", "Vencimiento",
+                      "Total", "Abonado", "Saldo", "Estado"]
+
+
+def _cxp_export_rows(facturas) -> list:
+    rows = []
+    for d in facturas:
+        saldo = float(d.get("saldo", 0) or 0)
+        total = float(d.get("total", 0) or 0)
+        abonado = float(d.get("abonado", 0) or 0)
+        rows.append({
+            "Folio": d.get("folio"),
+            "Proveedor": d.get("proveedor_nombre"),
+            "Factura": d.get("factura_numero") or "—",
+            "Vencimiento": (d.get("fecha_vencimiento") or "")[:10],
+            "Total": round(total, 2),
+            "Abonado": round(abonado, 2),
+            "Saldo": round(saldo, 2),
+            "Estado": "Pendiente" if saldo > 0 else "Pagada",
+        })
+    return rows
+
+
+def _cxp_filtros_dict(desde, hasta):
+    vals = {"Período desde": desde, "Período hasta": hasta}
+    return {k: v for k, v in vals.items() if v not in (None, "", "all")}
+
+
+@api.get("/cxp/exportar.xlsx")
+async def cxp_export_excel(desde: Optional[str] = None, hasta: Optional[str] = None,
+                           user: dict = Depends(require_permission("exportar"))):
+    res = await compras_cxp(desde=desde, hasta=hasta, user=user)
+    rows = _cxp_export_rows(res.get("facturas", []))
+    data = exports.excel_bytes(rows, CXP_EXPORT_HEADERS,
+                               sheet_name="Cuentas por pagar", title="CUENTAS POR PAGAR - GRUPO RYSA")
+    return StreamingResponse(io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=cxp.xlsx"})
+
+
+@api.get("/cxp/exportar.pdf")
+async def cxp_export_pdf(desde: Optional[str] = None, hasta: Optional[str] = None,
+                         user: dict = Depends(require_permission("exportar"))):
+    res = await compras_cxp(desde=desde, hasta=hasta, user=user)
+    rows = _cxp_export_rows(res.get("facturas", []))
+    sett = await db.settings.find_one({"_id": "app"}) or {}
+    filt = _cxp_filtros_dict(desde, hasta)
+    data = exports.pdf_bytes("REPORTE DE CUENTAS POR PAGAR", CXP_EXPORT_HEADERS,
+                             [[r[h] for h in CXP_EXPORT_HEADERS] for r in rows],
+                             settings=sett, user_name=user.get("name"), filtros=filt)
+    return StreamingResponse(io.BytesIO(data), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=cxp.pdf"})
+
+@api.post("/cxp/{compra_id}/pagar")
+async def cxp_pagar(compra_id: str, data: CompraPagoInput,
+                    user: dict = Depends(get_current_user)):
+    """Pago de factura vía Cuenta por pagar."""
+    return await compras_pagar(compra_id, data, user)
+
+@api.post("/compras/{compra_id}/pagar")
+async def compras_pagar(compra_id: str, data: CompraPagoInput,
+                        user: dict = Depends(get_current_user)):
+    compra = await db.compras.find_one({"id": compra_id})
+    if not compra:
+        raise HTTPException(404, "Compra no encontrada")
+    pend = float(compra.get("saldo_pendiente", 0) or 0)
+    if pend <= 0:
+        raise HTTPException(409, "La factura ya está pagada")
+    if data.monto <= 0:
+        raise HTTPException(400, "El monto debe ser mayor a cero")
+    if data.monto > pend + 0.001:
+        raise HTTPException(400, f"El monto excede el saldo pendiente ({pend})")
+    monto = round(float(data.monto), 2)
+    nuevo_saldo = round(pend - monto, 2)
+    pago = {"id": uid(), "fecha": data.fecha or iso_now()[:10], "monto": monto,
+            "metodo_pago": data.metodo_pago, "cuenta_bancaria_id": data.cuenta_bancaria_id,
+            "referencia": data.referencia or "", "notas": data.notas or "",
+            "usuario_id": user["id"], "usuario_nombre": user["name"], "created_at": iso_now()}
+    pagos = list(compra.get("pagos", []) or []) + [pago]
+    abonado = round(float(compra.get("abonado", 0) or 0) + monto, 2)
+    estado = "pagada" if nuevo_saldo <= 0 else compra.get("estado", "confirmada")
+    await db.compras.update_one({"id": compra_id}, {"$set": {
+        "saldo_pendiente": nuevo_saldo, "abonado": abonado, "pagos": pagos, "estado": estado}})
+    # Salida de efectivo si se paga en efectivo (afecta el arqueo de caja).
+    caja = await caja_abierta_de(user["id"]) if data.metodo_pago == "efectivo" else None
+    if caja:
+        await db.caja_movimientos.insert_one({
+            "id": uid(), "caja_id": caja["id"], "tipo": "gasto",
+            "concepto": f"Pago CxP {compra.get('folio')} · {compra.get('proveedor_nombre') or 'S/D'}",
+            "monto": monto, "referencia": compra.get("folio"),
+            "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()})
+    await log_audit(user, "cxp_pagar", "compra", compra_id,
+                    f"{compra.get('folio')} monto {monto} saldo {nuevo_saldo}")
+    return {"id": compra_id, "folio": compra.get("folio"), "abonado": abonado,
+            "saldo_pendiente": nuevo_saldo, "estado": estado, "pago": pago}
+
+# =========================================================================
+# REPORTES DE COMPRAS Y GASTOS
+# =========================================================================
+def _reporte_compras_agregado(docs: list, desde: str = "", hasta: str = "") -> dict:
+    compras = [d for d in docs if d.get("tipo") != "gasto"]
+    gastos = [d for d in docs if d.get("tipo") == "gasto"]
+    total_compras = round(sum(float(d.get("total", 0) or 0) for d in compras), 2)
+    total_gastos = round(sum(float(d.get("total", 0) or 0) for d in gastos), 2)
+
+    por_proveedor = {}
+    por_producto = {}
+    gastos_cat = {}
+    gastos_suc = {}
+    gastos_cc = {}
+    for d in docs:
+        prov = d.get("proveedor_nombre") or "S/D"
+        por_proveedor[prov] = round(por_proveedor.get(prov, 0) + float(d.get("total", 0) or 0), 2)
+        if d.get("tipo") == "gasto":
+            cat = d.get("categoria") or "Sin categoría"
+            gastos_cat[cat] = round(gastos_cat.get(cat, 0) + float(d.get("total", 0) or 0), 2)
+            suc = d.get("sucursal_id") or ""
+            gastos_suc[suc] = round(gastos_suc.get(suc, 0) + float(d.get("total", 0) or 0), 2)
+            cc = d.get("centro_costo_nombre") or ""
+            gastos_cc[cc] = round(gastos_cc.get(cc, 0) + float(d.get("total", 0) or 0), 2)
+        for it in d.get("items", []):
+            if not it.get("afecta_inventario"):
+                continue
+            k = it.get("product_id") or it.get("codigo")
+            e = por_producto.setdefault(k, {"product_id": it.get("product_id"),
+                                            "codigo": it.get("codigo"),
+                                            "descripcion": it.get("descripcion"),
+                                            "cantidad": 0.0, "costo_total": 0.0})
+            e["cantidad"] = round(e["cantidad"] + float(it.get("cantidad", 0) or 0), 3)
+            e["costo_total"] = round(e["costo_total"] + float(it.get("importe") or 0) or
+                                     float(it.get("cantidad", 0)) * float(it.get("costo", 0)), 2)
+    hoy = now_utc().date().isoformat()
+    pend = [d for d in docs if float(d.get("saldo_pendiente", 0) or 0) > 0]
+    vencidas = [d for d in pend if (d.get("fecha_vencimiento") or "")[:10] and (d.get("fecha_vencimiento") or "")[:10] < hoy]
+    pagos = []
+    for d in docs:
+        for p in d.get("pagos", []):
+            pagos.append({"fecha": p.get("fecha"), "monto": p.get("monto"),
+                          "metodo_pago": p.get("metodo_pago"), "folio": d.get("folio")})
+    pagos.sort(key=lambda x: x.get("fecha") or "", reverse=True)
+    return {
+        "desde": desde, "hasta": hasta,
+        "compras_periodo": total_compras, "gastos_periodo": total_gastos,
+        "total_periodo": round(total_compras + total_gastos, 2),
+        "facturas": len([d for d in docs if d.get("factura_numero")]),
+        "por_proveedor": sorted(por_proveedor.items(), key=lambda x: x[1], reverse=True),
+        "por_producto": sorted(por_producto.values(), key=lambda x: x["costo_total"], reverse=True)[:30],
+        "gastos_por_categoria": sorted(gastos_cat.items(), key=lambda x: x[1], reverse=True),
+        "gastos_por_sucursal": sorted(gastos_suc.items(), key=lambda x: x[1], reverse=True),
+        "gastos_por_centro_costo": sorted(gastos_cc.items(), key=lambda x: x[1], reverse=True),
+        "cxp_saldo": round(sum(float(d.get("saldo_pendiente", 0) or 0) for d in pend), 2),
+        "vencidas": [{"folio": d.get("folio"), "proveedor_nombre": d.get("proveedor_nombre"),
+                      "fecha_vencimiento": d.get("fecha_vencimiento"),
+                      "saldo": float(d.get("saldo_pendiente", 0) or 0)} for d in vencidas],
+        "vencidas_total": round(sum(float(d.get("saldo_pendiente", 0) or 0) for d in vencidas), 2),
+        "pagos_realizados": pagos[:100],
+        "pagos_total": round(sum(float(p["monto"]) for p in pagos), 2),
+    }
+
+@api.get("/compras/reportes")
+async def compras_reportes(desde: Optional[str] = None, hasta: Optional[str] = None,
+                           tipo: Optional[str] = None, proveedor: Optional[str] = None,
+                           producto: Optional[str] = None, categoria: Optional[str] = None,
+                           sucursal: Optional[str] = None, centro_costo: Optional[str] = None,
+                           usuario: Optional[str] = None, estado: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+    docs = await db.compras.find({"estado": {"$ne": "borrador"}}, {"_id": 0}).to_list(100000)
+    if desde:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] >= desde]
+    if hasta:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] <= hasta]
+    if tipo and tipo != "todos":
+        docs = [d for d in docs if d.get("tipo") == tipo]
+    if proveedor:
+        docs = [d for d in docs if d.get("proveedor_id") == proveedor or
+                proveedor.lower() in (d.get("proveedor_nombre") or "").lower()]
+    if producto:
+        docs = [d for d in docs if any(producto.lower() in (it.get("descripcion") or "").lower() or
+                producto.lower() == str(it.get("codigo") or "").lower() for it in d.get("items", []))]
+    if categoria and categoria != "todos":
+        docs = [d for d in docs if d.get("categoria") == categoria]
+    if sucursal:
+        docs = [d for d in docs if d.get("sucursal_id") == sucursal]
+    if centro_costo:
+        docs = [d for d in docs if d.get("centro_costo_id") == centro_costo or
+                centro_costo.lower() in (d.get("centro_costo_nombre") or "").lower()]
+    if usuario:
+        docs = [d for d in docs if d.get("usuario_id") == usuario]
+    if estado and estado != "todos":
+        docs = [d for d in docs if d.get("estado") == estado]
+    return {"registros": len(docs), **_reporte_compras_agregado(docs, desde, hasta)}
+
+@api.get("/compras/reportes/export")
+async def compras_reportes_export(fmt: str = "excel", desde: Optional[str] = None,
+                                  hasta: Optional[str] = None, tipo: Optional[str] = None,
+                                  proveedor: Optional[str] = None, producto: Optional[str] = None,
+                                  categoria: Optional[str] = None, sucursal: Optional[str] = None,
+                                  centro_costo: Optional[str] = None,
+                                  user: dict = Depends(get_current_user)):
+    docs = await db.compras.find({"estado": {"$ne": "borrador"}}, {"_id": 0}).to_list(100000)
+    if desde:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] >= desde]
+    if hasta:
+        docs = [d for d in docs if (d.get("fecha_recepcion") or "")[:10] <= hasta]
+    if tipo and tipo != "todos":
+        docs = [d for d in docs if d.get("tipo") == tipo]
+    if proveedor:
+        docs = [d for d in docs if d.get("proveedor_id") == proveedor or
+                proveedor.lower() in (d.get("proveedor_nombre") or "").lower()]
+    if producto:
+        docs = [d for d in docs if any(producto.lower() in (it.get("descripcion") or "").lower() or
+                producto.lower() == str(it.get("codigo") or "").lower() for it in d.get("items", []))]
+    if categoria and categoria != "todos":
+        docs = [d for d in docs if d.get("categoria") == categoria]
+    if sucursal:
+        docs = [d for d in docs if d.get("sucursal_id") == sucursal]
+    if centro_costo:
+        docs = [d for d in docs if d.get("centro_costo_id") == centro_costo or
+                centro_costo.lower() in (d.get("centro_costo_nombre") or "").lower()]
+    rep = _reporte_compras_agregado(docs, desde, hasta)
+    filtros = f"Periodo: {desde or 'inicio'} a {hasta or 'hoy'} | Registros: {len(docs)}"
+    nombre = f"reporte_compras_{desde or 'inicio'}_{hasta or 'hoy'}.{fmt}"
+    if fmt == "pdf":
+        rows_prov = [[p, f"${m:,.2f}"] for p, m in rep["por_proveedor"][:20]]
+        rows_cat = [[c, f"${m:,.2f}"] for c, m in rep["gastos_por_categoria"]]
+        rows_prod = [[r["codigo"], r["descripcion"], r["cantidad"], f"${r['costo_total']:,.2f}"]
+                     for r in rep["por_producto"]]
+        pdf = _tabla_pdf_bytes(
+            "Reporte de Compras y Gastos", filtros,
+            [("Concepto", "$"), ("Proveedor", "Total")], rows_prov,
+            extra_sections=[("Gastos por categoría", ("Categoría", "Total"), rows_cat),
+                            ("Productos comprados", ("Código", "Descripción", "Cant.", "Costo total"), rows_prod)])
+        media = "application/pdf"
+    else:
+        pdf = _reporte_compras_excel(rep)
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return StreamingResponse(io.BytesIO(pdf), media_type=media,
+                             headers={"Content-Disposition": f"attachment; filename={nombre}"})
+
+@api.get("/compras/{compra_id}")
+async def compras_detail(compra_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.compras.find_one({"id": compra_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Compra no encontrada")
+    return doc
+
+
+@api.get("/compras/{compra_id}/pdf")
+async def compra_pdf(compra_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.compras.find_one({"id": compra_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Compra no encontrada")
+    proveedor = None
+    if doc.get("proveedor_id"):
+        proveedor = await db.proveedores.find_one({"id": doc["proveedor_id"]}, {"_id": 0})
+    settings = await db.settings.find_one({"_id": "app"}) or {}
+    data = storage.build_compra_pdf(doc, settings, proveedor)
+    return StreamingResponse(io.BytesIO(data), media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename=compra-{doc.get("folio", compra_id)}.pdf'})
+
+def _reporte_compras_excel(rep: dict) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    wb = Workbook()
+    hd = Font(bold=True, color="FFFFFF")
+    fill = PatternFill("solid", fgColor="B3401E")
+    def hoja(ws, cols, rows):
+        ws.append(cols)
+        for c in ws[1]:
+            c.font = hd; c.fill = fill; c.alignment = Alignment(horizontal="center")
+        for r in rows:
+            ws.append(r)
+        for col in ws.columns:
+            mx = max(len(str(c.value or "")) for c in col) + 2
+            ws.column_dimensions[col[0].column_letter].width = min(mx, 45)
+    ws = wb.active; ws.title = "Resumen"
+    hoja(ws, ["Métrica", "Valor"], [
+        ["Compras del periodo", rep["compras_periodo"]], ["Gastos del periodo", rep["gastos_periodo"]],
+        ["Total", rep["total_periodo"]], ["Facturas", rep["facturas"]],
+        ["CxP saldo pendiente", rep["cxp_saldo"]], ["Vencidas total", rep["vencidas_total"]],
+        ["Pagos realizados", rep["pagos_total"]],
+    ])
+    ws2 = wb.create_sheet("Por proveedor")
+    hoja(ws2, ["Proveedor", "Total"], rep["por_proveedor"])
+    ws3 = wb.create_sheet("Productos")
+    hoja(ws3, ["Código", "Descripción", "Cantidad", "Costo total"],
+         [[r["codigo"], r["descripcion"], r["cantidad"], r["costo_total"]] for r in rep["por_producto"]])
+    ws4 = wb.create_sheet("Gastos por categoría")
+    hoja(ws4, ["Categoría", "Total"], rep["gastos_por_categoria"])
+    ws5 = wb.create_sheet("Cuentas por pagar")
+    hoja(ws5, ["Folio", "Proveedor", "Vencimiento", "Saldo"],
+         [[v["folio"], v["proveedor_nombre"], v["fecha_vencimiento"], v["saldo"]] for v in rep["vencidas"]])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+def _tabla_pdf_bytes(titulo: str, meta: str, columns, rows, extra_sections=None) -> bytes:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+    from reportlab.lib.enums import TA_LEFT
+    buf = io.BytesIO()
+    st = getSampleStyleSheet()
+    st["Title"].fontName = "Helvetica-Bold"; st["Title"].fontSize = 15
+    st["Title"].textColor = colors.HexColor("#8B3A2A"); st["Title"].alignment = TA_LEFT
+    subt = ParagraphStyle("subt", parent=st["Normal"], fontSize=8, textColor=colors.HexColor("#666666"), spaceAfter=6)
+    doc = SimpleDocTemplate(buf, pagesize=letter)
+    flow = []
+    logo_path = os.path.join(os.path.dirname(__file__), "brand", "logotipo.png")
+    if os.path.isfile(logo_path):
+        try:
+            flow.append(Image(logo_path, width=100, height=100 * (545 / 1157)))
+        except Exception:
+            pass
+    flow.append(Paragraph(titulo, st["Title"]))
+    flow.append(Paragraph(f"{meta} &nbsp;|&nbsp; Generado: {now_utc().strftime('%d/%m/%Y %H:%M')}", subt))
+    flow.append(Spacer(1, 6))
+    def add_tabla(cols, rows_):
+        if not rows_:
+            flow.append(Paragraph("Sin registros.", subt))
+            return
+        data = [list(cols)] + [[str(c or "") for c in r] for r in rows_]
+        t = Table(data, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#B3401E")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CCCCCC")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F5EFEB")]),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        flow.append(t)
+        flow.append(Spacer(1, 8))
+    add_tabla(columns, rows)
+    for name, cols, rows_ in (extra_sections or []):
+        flow.append(Paragraph(f"<b>{name}</b>", subt))
+        add_tabla(cols, rows_)
+    doc.build(flow)
+    buf.seek(0)
+    return buf.getvalue()
 
 # =========================================================================
 # DASHBOARD
@@ -2385,6 +4127,131 @@ async def dashboard(user: dict = Depends(get_current_user)):
     return base
 
 
+@api.get("/finanzas")
+async def finanzas_resumen(desde: Optional[str] = None, hasta: Optional[str] = None,
+                           user: dict = Depends(get_current_user)):
+    """Resumen financiero consolidado con filtro por rango de fechas.
+    Base para la página Finanzas y para la exportación a PDF/Excel."""
+    es_global = "*" in effective_permissions(user)
+    hoy = now_utc().date().isoformat()
+    d = desde[:10] if desde else (hoy[0:8] + "01")  # default: mes actual
+    h = hasta[:10] if hasta else hoy
+
+    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(300000)
+    if not es_global:
+        sales = [s for s in sales if s.get("usuario_id") == user["id"]]
+    sales = [s for s in sales if d <= (s.get("fecha") or "")[:10] <= h]
+
+    ventas_total = round(sum(float(s.get("total", 0) or 0) for s in sales), 2)
+    utilidad = 0.0
+    for s in sales:
+        for it in (s.get("items") or []):
+            cant = float(it.get("cantidad", 0) or 0)
+            costo = float(it.get("costo") or 0)
+            importe = float(it.get("importe_bruto") or it.get("importe") or
+                            (cant * float(it.get("precio") or 0)) or 0)
+            utilidad += max(0, importe - cant * costo)
+    utilidad = round(utilidad, 2)
+    num_ventas = len(sales)
+    efectivo = round(sum(float(p.get("monto", 0) or 0)
+                         for s in sales for p in (s.get("pagos") or []) if p.get("metodo") == "efectivo"), 2)
+
+    compras = await db.compras.find({"estado": "confirmada"}, {"_id": 0}).to_list(200000)
+    compras = [c for c in compras if d <= (c.get("fecha_recepcion") or "")[:10] <= h]
+    compras_total = round(sum(float(c.get("total", 0) or 0) for c in compras if c.get("tipo") != "gasto"), 2)
+    gastos_total = round(sum(float(c.get("total", 0) or 0) for c in compras if c.get("tipo") == "gasto"), 2)
+
+    cxv = await db.sales.find({"condicion": "credito", "estado": "confirmada", "saldo": {"$gt": 0}},
+                              {"_id": 0, "saldo": 1, "fecha": 1, "cliente_id": 1}).to_list(200000)
+    cartera = round(sum(float(c.get("saldo", 0) or 0) for c in cxv), 2)
+    cli_dias = {}
+    for cli in await db.clients.find({}, {"_id": 0, "id": 1, "dias_credito": 1}).to_list(200000):
+        cli_dias[cli["id"]] = int(cli.get("dias_credito", 0) or 0)
+    vencido = 0.0
+    for c in cxv:
+        try:
+            dv, _ = _dias_vencido(c.get("fecha", ""), cli_dias.get(c.get("cliente_id"), 0), now_utc().date())
+        except Exception:
+            dv = 0
+        if dv > 0:
+            vencido += float(c.get("saldo", 0) or 0)
+    vencido = round(vencido, 2)
+
+    cxp_docs = await db.compras.find({"estado": {"$in": ["confirmada", "pagada"]}}, {"_id": 0}).to_list(100000)
+    cxp_total = round(sum(float(c.get("saldo_pendiente", 0) or 0)
+                          for c in cxp_docs if float(c.get("saldo_pendiente", 0) or 0) > 0), 2)
+
+    # Serie mensual de ingresos vs gastos dentro del rango
+    serie = {}
+    serie_d = {}
+    for s in sales:
+        m = (s.get("fecha") or "")[:7]
+        serie[m] = serie.get(m, 0) + float(s.get("total", 0) or 0)
+    for c in compras:
+        m = (c.get("fecha_recepcion") or "")[:7]
+        serie_d[m] = serie_d.get(m, 0) + float(c.get("total", 0) or 0)
+    serie_out = sorted({**serie, **serie_d}.keys())
+    serie_rows = [{"mes": m, "ingresos": round(serie.get(m, 0), 2),
+                   "egresos": round(serie_d.get(m, 0), 2)} for m in serie_out]
+
+    return {
+        "desde": d, "hasta": h,
+        "ventas_total": ventas_total, "num_ventas": num_ventas,
+        "utilidad_bruta": utilidad, "efectivo": efectivo,
+        "compras_total": compras_total, "gastos_total": gastos_total,
+        "cartera_cxc": cartera, "vencido_cxc": vencido,
+        "cuentas_por_pagar": cxp_total,
+        "resultado_neto": round(ventas_total - (compras_total + gastos_total), 2),
+        "serie": serie_rows,
+    }
+
+
+@api.get("/finanzas/export")
+async def finanzas_export(fmt: str = "excel", desde: Optional[str] = None, hasta: Optional[str] = None,
+                          user: dict = Depends(require_permission("exportar"))):
+    r = await finanzas_resumen(desde=desde, hasta=hasta, user=user)
+    filtros = "Periodo: {} a {}".format(r["desde"], r["hasta"])
+    if fmt == "pdf":
+        headers = ["Métrica", "Valor"]
+        rows = [
+            ["Ingresos (ventas)", round(r["ventas_total"], 2)],
+            ["N° ventas", r["num_ventas"]],
+            ["Efectivo recibido", round(r["efectivo"], 2)],
+            ["Utilidad bruta", round(r["utilidad_bruta"], 2)],
+            ["Compras de mercancía", round(r["compras_total"], 2)],
+            ["Gastos operativos", round(r["gastos_total"], 2)],
+            ["Resultado neto", round(r["resultado_neto"], 2)],
+            ["Cuentas por cobrar (cartera)", round(r["cartera_cxc"], 2)],
+            ["Vencido CxC", round(r["vencido_cxc"], 2)],
+            ["Cuentas por pagar", round(r["cuentas_por_pagar"], 2)],
+        ]
+        data = exports.pdf_bytes("REPORTE FINANCIERO", headers,
+                                 [list(x) for x in rows], settings=await db.settings.find_one({"_id": "app"}) or {},
+                                 user_name=user.get("name"), filtros=filtros,
+                                 col_weights=[3, 2], wrap_cols=[0])
+        media = "application/pdf"
+        nombre = f"finanzas_{r['desde']}_{r['hasta']}.pdf"
+    else:
+        headers = ["Métrica", "Valor"]
+        rows = [
+            {"Métrica": "Ingresos (ventas)", "Valor": round(r["ventas_total"], 2)},
+            {"Métrica": "N° ventas", "Valor": r["num_ventas"]},
+            {"Métrica": "Efectivo recibido", "Valor": round(r["efectivo"], 2)},
+            {"Métrica": "Utilidad bruta", "Valor": round(r["utilidad_bruta"], 2)},
+            {"Métrica": "Compras de mercancía", "Valor": round(r["compras_total"], 2)},
+            {"Métrica": "Gastos operativos", "Valor": round(r["gastos_total"], 2)},
+            {"Métrica": "Resultado neto", "Valor": round(r["resultado_neto"], 2)},
+            {"Métrica": "Cuentas por cobrar (cartera)", "Valor": round(r["cartera_cxc"], 2)},
+            {"Métrica": "Vencido CxC", "Valor": round(r["vencido_cxc"], 2)},
+            {"Métrica": "Cuentas por pagar", "Valor": round(r["cuentas_por_pagar"], 2)},
+        ]
+        data = exports.excel_bytes(rows, headers, sheet_name="Finanzas", title="REPORTE FINANCIERO - GRUPO RYSA")
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        nombre = f"finanzas_{r['desde']}_{r['hasta']}.xlsx"
+    return StreamingResponse(io.BytesIO(data), media_type=media,
+                             headers={"Content-Disposition": f"attachment; filename={nombre}"})
+
+
 async def _dashboard_global_breakdown() -> dict:
     """Desglose global: ventas por caja y por usuario (solo admin/propietario)."""
     sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(100000)
@@ -2457,32 +4324,145 @@ def df_to_excel_bytes(df: pd.DataFrame) -> bytes:
     buf.seek(0)
     return buf.read()
 
-@api.get("/products/export/excel")
-async def export_products(estado: Optional[str] = None, q: Optional[str] = None,
-                          user: dict = Depends(require_permission("exportar"))):
+def _product_export_query(estado=None, q=None, categoria=None, sku=None, linea=None,
+                          unidad_medida=None, proveedor=None, min_costo=None,
+                          max_costo=None, min_precio=None, max_precio=None):
+    """Construye el query combinate de filtros de productos (coincide con la UI)."""
     query = {}
     if estado:
         query["estado"] = estado
+    if categoria:
+        query["clasificacion"] = categoria
+    if linea:
+        query["linea"] = linea
+    if unidad_medida:
+        query["unidad_medida"] = unidad_medida
+    if min_costo is not None or max_costo is not None:
+        r = {}
+        if min_costo is not None:
+            r["$gte"] = float(min_costo)
+        if max_costo is not None:
+            r["$lte"] = float(max_costo)
+        query["costo"] = r
+    if min_precio is not None or max_precio is not None:
+        r = {}
+        if min_precio is not None:
+            r["$gte"] = float(min_precio)
+        if max_precio is not None:
+            r["$lte"] = float(max_precio)
+        query["precios.0.precio_con_iva"] = r
+    if sku:
+        query["sku"] = {"$regex": sanitize_search_term(sku), "$options": "i"}
+    if proveedor:
+        rx = {"$regex": sanitize_search_term(proveedor), "$options": "i"}
+        query["$and"] = query.get("$and", []) + [{"$or": [{"proveedor": rx}, {"proveedores": rx}]}]
     if q:
         rx = {"$regex": sanitize_search_term(q), "$options": "i"}
-        query["$or"] = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx},
-                        {"linea": rx}, {"clasificacion": rx}, {"sinonimos": rx},
-                        {"codigos_barras": rx}]
-    products = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).to_list(100000)
+        qor = [{"codigo": rx}, {"descripcion": rx}, {"sku": rx}, {"linea": rx},
+               {"clasificacion": rx}, {"sinonimos": rx}, {"codigos_barras": rx}]
+        query["$and"] = query.get("$and", []) + [{"$or": qor}]
+    return query
+
+
+async def _all_products(estado=None, q=None, categoria=None, sku=None, linea=None,
+                        unidad_medida=None, proveedor=None, min_costo=None, max_costo=None,
+                        min_precio=None, max_precio=None, filtro=None):
+    """Devuelve TODOS los productos que cumplen los filtros (sin paginación)."""
+    query = _product_export_query(estado, q, categoria, sku, linea, unidad_medida,
+                                  proveedor, min_costo, max_costo, min_precio, max_precio)
+    docs = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).to_list(100000)
+    if filtro == "bajo_stock":
+        docs = [p for p in docs if 0 < float(p.get("existencia", 0) or 0) <= float(p.get("stock_minimo", 0) or 0)]
+    elif filtro == "sin_existencia":
+        docs = [p for p in docs if float(p.get("existencia", 0) or 0) <= 0]
+    return docs
+
+
+def _product_export_rows(docs):
     rows = []
-    for p in products:
+    for p in docs or []:
+        precio = (p.get("precios") or [{}])
         rows.append({
-            "codigo": p.get("codigo"), "descripcion": p.get("descripcion"),
-            "linea": p.get("linea"), "clasificacion": p.get("clasificacion"),
-            "costo": p.get("costo"), "existencia": p.get("existencia"),
-            "unidad_medida": p.get("unidad_medida"), "stock_minimo": p.get("stock_minimo"),
-            "precio_1": (p.get("precios") or [{}])[0].get("precio_con_iva") if p.get("precios") else 0,
-            "estado": p.get("estado"),
+            "ID": p.get("id"), "Código": p.get("codigo"), "SKU": p.get("sku"),
+            "Código de barras": ", ".join(p.get("codigos_barras") or []),
+            "Nombre": p.get("descripcion"), "Descripción": p.get("descripcion_larga") or "",
+            "Categoría": p.get("clasificacion") or "", "Línea": p.get("linea") or "",
+            "Clasificación": p.get("clasificacion") or "", "Costo": p.get("costo"),
+            "Precio": (precio[0].get("precio_con_iva") if p.get("precios") else 0),
+            "Existencia": p.get("existencia"), "Stock mínimo": p.get("stock_minimo"),
+            "Unidad de medida": p.get("unidad_medida") or "PZA",
+            "Proveedor": ", ".join(p.get("proveedores") or []) or p.get("proveedor") or "",
+            "Sucursal": "", "Estado": p.get("estado") or "activo",
         })
-    data = df_to_excel_bytes(pd.DataFrame(rows or [{c: None for c in PROD_COLS}]))
+    return rows
+
+
+PRODUCT_EXPORT_HEADERS = ["ID", "Código", "SKU", "Código de barras", "Nombre", "Descripción",
+                          "Categoría", "Línea", "Clasificación", "Costo", "Precio", "Existencia",
+                          "Stock mínimo", "Unidad de medida", "Proveedor", "Sucursal", "Estado"]
+
+PRODUCT_FILTER_LABEL = {
+    "estado": "Estado", "categoria": "Categoría", "sku": "SKU", "linea": "Línea",
+    "unidad_medida": "Unidad de medida", "proveedor": "Proveedor",
+    "min_costo": "Costo desde", "max_costo": "Costo hasta",
+    "min_precio": "Precio desde", "max_precio": "Precio hasta",
+    "filtro": "Stock", "q": "Búsqueda",
+}
+
+
+async def _product_filtros_dict(estado, q, categoria, sku, linea, unidad_medida,
+                                proveedor, min_costo, max_costo, min_precio, max_precio, filtro):
+    vals = {
+        "Estado": estado, "Categoría": categoria, "SKU": sku, "Línea": linea,
+        "Unidad de medida": unidad_medida, "Proveedor": proveedor,
+        "Búsqueda": q, "Stock": {"bajo_stock": "Bajo stock", "sin_existencia": "Sin existencia"}.get(filtro),
+    }
+    if min_costo is not None or max_costo is not None:
+        vals["Rango de costo"] = f"{min_costo or 0} - {max_costo or '∞'}"
+    if min_precio is not None or max_precio is not None:
+        vals["Rango de precio"] = f"{min_precio or 0} - {max_precio or '∞'}"
+    return {k: v for k, v in vals.items() if v not in (None, "", "all", 0, "0")}
+
+
+@api.get("/products/export/excel")
+async def export_products(estado: Optional[str] = None, q: Optional[str] = None,
+                          categoria: Optional[str] = None, sku: Optional[str] = None,
+                          linea: Optional[str] = None, unidad_medida: Optional[str] = None,
+                          proveedor: Optional[str] = None, min_costo: Optional[float] = None,
+                          max_costo: Optional[float] = None, min_precio: Optional[float] = None,
+                          max_precio: Optional[float] = None, filtro: Optional[str] = None,
+                          user: dict = Depends(require_permission("exportar"))):
+    docs = await _all_products(estado, q, categoria, sku, linea, unidad_medida, proveedor,
+                               min_costo, max_costo, min_precio, max_precio, filtro)
+    data = exports.excel_bytes(_product_export_rows(docs), PRODUCT_EXPORT_HEADERS,
+                               sheet_name="Productos", title="CATÁLOGO DE PRODUCTOS - GRUPO RYSA")
     return StreamingResponse(io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=productos.xlsx"})
+
+
+@api.get("/products/export/pdf")
+async def export_products_pdf(estado: Optional[str] = None, q: Optional[str] = None,
+                              categoria: Optional[str] = None, sku: Optional[str] = None,
+                              linea: Optional[str] = None, unidad_medida: Optional[str] = None,
+                              proveedor: Optional[str] = None, min_costo: Optional[float] = None,
+                              max_costo: Optional[float] = None, min_precio: Optional[float] = None,
+                              max_precio: Optional[float] = None, filtro: Optional[str] = None,
+                              user: dict = Depends(require_permission("exportar"))):
+    docs = await _all_products(estado, q, categoria, sku, linea, unidad_medida, proveedor,
+                               min_costo, max_costo, min_precio, max_precio, filtro)
+    rows = _product_export_rows(docs)
+    sett = await db.settings.find_one({"_id": "app"}) or {}
+    filt = await _product_filtros_dict(estado, q, categoria, sku, linea, unidad_medida,
+                                       proveedor, min_costo, max_costo, min_precio, max_precio, filtro)
+    data = exports.pdf_bytes("REPORTE DE PRODUCTOS", PRODUCT_EXPORT_HEADERS,
+                             [ [r[h] for h in PRODUCT_EXPORT_HEADERS] for r in rows ],
+                             settings=sett, user_name=user.get("name"), filtros=filt,
+                             col_weights=[1, 1.2, 1.2, 1.4, 3.2, 4.5, 1.4, 1.3, 1.4, 1.3, 1.3, 1.2, 1.2, 1.2, 2.6, 2.4, 1],
+                             wrap_cols=[4, 5, 6, 7, 14, 15])
+    return StreamingResponse(io.BytesIO(data), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=productos.pdf"})
+
 
 @api.get("/products/plantilla/excel")
 async def plantilla_products(user: dict = Depends(get_current_user)):
@@ -2607,24 +4587,151 @@ async def import_confirm(payload: dict, user: dict = Depends(require_permission(
         await log_audit(user, "importar", "producto", "", f"{creados} creados, {actualizados} actualizados, {omitidos} omitidos")
     return {"creados": creados, "actualizados": actualizados, "omitidos": omitidos}
 
+def _client_export_query(q=None, estado=None, tipo=None, filtro=None, ciudad=None,
+                         vendedor=None, rfc=None, telefono=None, fecha_desde=None, fecha_hasta=None):
+    query = {}
+    if estado:
+        query["estado"] = estado
+    if tipo:
+        query["tipo"] = tipo
+    if filtro:
+        if filtro == "con_credito":
+            query["credito_autorizado"] = True
+        elif filtro == "sin_credito":
+            query["credito_autorizado"] = {"$ne": True}
+        elif filtro == "con_saldo":
+            query["saldo"] = {"$gt": 0}
+        elif filtro == "sin_saldo":
+            query["$or"] = query.get("$or", []) + [{"saldo": {"$lte": 0}}, {"saldo": {"$exists": False}}]
+        elif filtro in ("activo", "suspendido", "inactivo"):
+            query["estado"] = filtro
+        elif filtro == "con_ofertas":
+            query["ofertas"] = True
+        elif filtro == "sin_ofertas":
+            query["ofertas"] = {"$ne": True}
+    if ciudad:
+        query["ciudad"] = {"$regex": sanitize_search_term(ciudad), "$options": "i"}
+    if rfc:
+        query["rfc"] = {"$regex": sanitize_search_term(rfc), "$options": "i"}
+    if telefono:
+        rx = {"$regex": sanitize_search_term(telefono), "$options": "i"}
+        query["$and"] = query.get("$and", []) + [{"$or": [{"telefono": rx}, {"celular": rx},
+                                                          {"tel_oficina": rx}, {"whatsapp": rx}]}]
+    if vendedor:
+        query["vendedor"] = {"$regex": sanitize_search_term(vendedor), "$options": "i"}
+    if fecha_desde or fecha_hasta:
+        r = {}
+        if fecha_desde:
+            r["$gte"] = fecha_desde
+        if fecha_hasta:
+            r["$lte"] = fecha_hasta + "T23:59:59"
+        query["$and"] = query.get("$and", []) + [{"$or": [{"created_at": r}, {"fecha_alta": {"$gte": fecha_desde or "", "$lte": fecha_hasta or "9999"}}]}]
+    if q:
+        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
+        qor = [{"codigo": rx}, {"nombre": rx}, {"razon_social": rx}, {"rfc": rx},
+               {"representa": rx}, {"telefono": rx}, {"tel_oficina": rx}, {"celular": rx},
+               {"correo": rx}, {"correos": rx}, {"ciudad": rx}, {"estado_geo": rx}]
+        query["$and"] = query.get("$and", []) + [{"$or": qor}]
+    return query
+
+
+async def _all_clients(q=None, estado=None, tipo=None, filtro=None, ciudad=None,
+                       vendedor=None, rfc=None, telefono=None, fecha_desde=None, fecha_hasta=None):
+    query = _client_export_query(q=q, estado=estado, tipo=tipo, filtro=filtro, ciudad=ciudad,
+                                 vendedor=vendedor, rfc=rfc, telefono=telefono,
+                                 fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
+    return await db.clients.find(query, {"_id": 0}).sort("nombre", 1).to_list(100000)
+
+
+CLIENT_EXPORT_HEADERS = ["ID", "Código", "Nombre", "Razón social", "RFC", "Teléfono", "Email",
+                         "Dirección", "Ciudad", "Estado", "Sucursal", "Vendedor", "Tipo de cliente",
+                         "Crédito", "Saldo", "Estado", "Fecha de registro"]
+
+TIPO_CLIENTE_LABEL = {
+    "publico": "Público General", "menudeo": "Menudeo", "mayoreo": "Mayoreo", "especial": "Especial",
+}
+
+
+def _client_export_rows(clients):
+    rows = []
+    for c in clients or []:
+        direc = ", ".join(filter(None, [c.get("direccion"), c.get("colonia"),
+                                        c.get("numero_exterior"), c.get("cp")]))
+        rows.append({
+            "ID": c.get("id"), "Código": c.get("codigo"), "Nombre": c.get("nombre"),
+            "Razón social": c.get("razon_social") or "",
+            "RFC": c.get("rfc") or "",
+            "Teléfono": c.get("telefono") or c.get("celular") or c.get("whatsapp") or "",
+            "Email": c.get("correo") or c.get("correos") or "",
+            "Dirección": direc, "Ciudad": c.get("ciudad") or "",
+            "Estado": c.get("estado_geo") or "",
+            "Sucursal": c.get("almacen") or "",
+            "Vendedor": c.get("vendedor") or "",
+            "Tipo de cliente": TIPO_CLIENTE_LABEL.get(c.get("tipo"), c.get("tipo")) or "",
+            "Crédito": "Sí" if c.get("credito_autorizado") else "No",
+            "Saldo": round(float(c.get("saldo", 0) or 0), 2),
+            "Estado": c.get("estado") or "activo",
+            "Fecha de registro": (c.get("created_at") or c.get("fecha_alta") or "")[:10],
+        })
+    return rows
+
+
+async def _client_filtros_dict(q, estado, tipo, filtro, ciudad, vendedor, rfc,
+                               telefono, fecha_desde, fecha_hasta):
+    FILTRO_LABEL = {
+        "con_credito": "Con crédito", "sin_credito": "Sin crédito", "con_saldo": "Con saldo",
+        "sin_saldo": "Sin saldo", "activo": "Activos", "suspendido": "Suspendidos",
+        "inactivo": "Inactivos", "con_ofertas": "Con ofertas", "sin_ofertas": "Sin ofertas",
+    }
+    vals = {
+        "Búsqueda": q, "Estado": estado,
+        "Tipo": TIPO_CLIENTE_LABEL.get(tipo, tipo),
+        "Filtro rápido": FILTRO_LABEL.get(filtro), "Ciudad": ciudad, "Vendedor": vendedor,
+        "RFC": rfc, "Teléfono": telefono,
+        "Registro desde": fecha_desde, "Registro hasta": fecha_hasta,
+    }
+    return {k: v for k, v in vals.items() if v not in (None, "", "all")}
+
+
 @api.get("/clients/export/excel")
 async def export_clients(q: Optional[str] = None, estado: Optional[str] = None, tipo: Optional[str] = None,
-                         filtro: Optional[str] = None, user: dict = Depends(require_permission("exportar"))):
-    clients = await list_clients(q=q, estado=estado, tipo=tipo, filtro=filtro, user=user)
-    rows = []
-    for cl in clients:
-        row = {}
-        for legacy, (field, kind) in CLIENT_IMPORT_MAP.items():
-            v = cl.get(field, "")
-            if kind == "bool":
-                v = ".T." if v else ".F."
-            row[legacy] = v
-        rows.append(row)
-    df = pd.DataFrame(rows or [{c: None for c in CLIENT_LEGACY_ORDER}], columns=CLIENT_LEGACY_ORDER)
-    data = df_to_excel_bytes(df)
+                         filtro: Optional[str] = None, ciudad: Optional[str] = None,
+                         vendedor: Optional[str] = None, rfc: Optional[str] = None,
+                         telefono: Optional[str] = None, fecha_desde: Optional[str] = None,
+                         fecha_hasta: Optional[str] = None,
+                         user: dict = Depends(require_permission("exportar"))):
+    clients = await _all_clients(q=q, estado=estado, tipo=tipo, filtro=filtro, ciudad=ciudad,
+                                 vendedor=vendedor, rfc=rfc, telefono=telefono,
+                                 fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
+    data = exports.excel_bytes(_client_export_rows(clients), CLIENT_EXPORT_HEADERS,
+                               sheet_name="Clientes", title="CARTERA DE CLIENTES - GRUPO RYSA")
     return StreamingResponse(io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=clientes.xlsx"})
+
+
+@api.get("/clients/export/pdf")
+async def export_clients_pdf(q: Optional[str] = None, estado: Optional[str] = None, tipo: Optional[str] = None,
+                             filtro: Optional[str] = None, ciudad: Optional[str] = None,
+                             vendedor: Optional[str] = None, rfc: Optional[str] = None,
+                             telefono: Optional[str] = None, fecha_desde: Optional[str] = None,
+                             fecha_hasta: Optional[str] = None,
+                             user: dict = Depends(require_permission("exportar"))):
+    clients = await _all_clients(q=q, estado=estado, tipo=tipo, filtro=filtro, ciudad=ciudad,
+                                 vendedor=vendedor, rfc=rfc, telefono=telefono,
+                                 fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
+    rows = _client_export_rows(clients)
+    sett = await db.settings.find_one({"_id": "app"}) or {}
+    filt = await _client_filtros_dict(q, estado, tipo, filtro, ciudad, vendedor, rfc,
+                                      telefono, fecha_desde, fecha_hasta)
+    data = exports.pdf_bytes("REPORTE DE CLIENTES", CLIENT_EXPORT_HEADERS,
+                             [ [r[h] for h in CLIENT_EXPORT_HEADERS] for r in rows ],
+                             settings=sett, user_name=user.get("name"), filtros=filt,
+                             col_weights=[1, 1.2, 3, 3, 1.6, 1.6, 2.4, 4, 1.8, 1.6, 2, 2, 1.8, 1.3, 1.5, 1.2, 1.8],
+                             wrap_cols=[2, 3, 6, 7, 8, 10, 11])
+    return StreamingResponse(io.BytesIO(data), media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=clientes.pdf"})
+
 
 @api.get("/clients/plantilla/excel")
 async def plantilla_clients(user: dict = Depends(get_current_user)):
@@ -2993,6 +5100,31 @@ async def upload_image(file: UploadFile = File(...), user: dict = Depends(get_cu
     })
     return {"path": stored, "url": f"/api/files/{stored}"}
 
+@api.post("/uploads/document")
+async def upload_document(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    """Sube un documento (factura, evidencia, formato) al almacenamiento local.
+    Hasta 15 MB. Se registra en la colección de archivos para servirlo en /api/files."""
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "El documento no debe superar 15 MB.")
+    mime = storage.detect_mime_type(data)
+    if mime == "application/octet-stream":
+        mime = mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
+    safe_ext = mimetypes.guess_extension(mime) or ".bin"
+    path = f"documents/{uid()}{safe_ext}"
+    try:
+        result = storage.put_object(path, data, mime)
+    except Exception as e:
+        logger.error("Upload documento falló: %s", str(e)[:160])
+        raise HTTPException(502, "No se pudo subir el documento al almacenamiento local.")
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": uid(), "storage_path": stored, "original_filename": file.filename,
+        "content_type": mime, "size": result.get("size", len(data)),
+        "is_deleted": False, "created_at": iso_now(),
+    })
+    return {"path": stored, "url": f"/api/files/{stored}", "filename": file.filename}
+
 @api.get("/files/{path:path}")
 async def serve_file(path: str):
     # Defensa en profundidad: rechazo temprano de path traversal antes de tocar
@@ -3052,6 +5184,41 @@ async def sale_ticket_pdf(sale_id: str, user: dict = Depends(get_current_user)):
     stored = result.get("path", path)
     await db.files.insert_one({
         "id": uid(), "storage_path": stored, "original_filename": f"ticket-{sale.get('folio')}.pdf",
+        "content_type": "application/pdf", "size": result.get("size", len(pdf_bytes)),
+        "sale_id": sale_id, "is_deleted": False, "created_at": iso_now(),
+    })
+    return {"path": stored, "url": f"/api/files/{stored}"}
+
+
+@api.post("/sales/{sale_id}/letter-pdf")
+async def sale_letter_pdf(sale_id: str, user: dict = Depends(get_current_user)):
+    """Genera el comprobante comercial RYSA en formato carta (Letter 8.5x11)."""
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
+    if not sale:
+        raise HTTPException(404, "Venta no encontrada")
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    cliente = None
+    if sale.get("cliente_id"):
+        c = await db.clients.find_one({"id": sale["cliente_id"]}, {"_id": 0})
+        if c:
+            cliente = {
+                "nombre": c.get("nombre"), "rfc": c.get("rfc"),
+                "telefono": c.get("telefono") or c.get("celular") or c.get("whatsapp"),
+                "correo": c.get("correo") or c.get("correos"),
+                "direccion": c.get("direccion"), "colonia": c.get("colonia"),
+                "ciudad": c.get("ciudad"), "estado_geo": c.get("estado_geo"), "cp": c.get("cp"),
+            }
+    try:
+        pdf_bytes = storage.build_letter_pdf(sale, settings, cliente)
+        folio_clean = "".join(c for c in sale.get('folio', 'sale') if c.isalnum())
+        path = f"tickets/{folio_clean}-{uid()[:8]}-carta.pdf"
+        result = storage.put_object(path, pdf_bytes, "application/pdf")
+    except Exception as e:
+        logger.error("Formato carta PDF falló: %s", str(e)[:200])
+        raise HTTPException(502, "No se pudo generar el comprobante en formato carta.")
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": uid(), "storage_path": stored, "original_filename": f"carta-{sale.get('folio')}.pdf",
         "content_type": "application/pdf", "size": result.get("size", len(pdf_bytes)),
         "sale_id": sale_id, "is_deleted": False, "created_at": iso_now(),
     })
@@ -3456,7 +5623,7 @@ async def _build_reporte(desde, hasta, group, vendedor_id=None, q=None,
             # Reportes históricos: usan el snapshot congelado en la venta
             # (importe_neto/bruto e IVA por línea). Las ventas antiguas (sin
             # snapshot) se reconstruyen tratando `precio` como bruto (legacy).
-            tasa = 1 + float(it.get("iva_tasa", 16)) / 100
+            tasa = 1 + float(it.get("iva_tasa", 8)) / 100
             if it.get("importe_neto") is not None:
                 neto = float(it["importe_neto"])
                 if it.get("importe_bruto") is not None:
@@ -3943,12 +6110,14 @@ async def reporte_centro(desde: Optional[str] = None, hasta: Optional[str] = Non
             pass
         for p in s.get("pagos", []):
             m = p.get("metodo", "otros")
+            if m == "tarjeta" and p.get("card_type") in ("debito", "credito"):
+                m = f"tarjeta_{p['card_type']}"
             por_metodo[m] = por_metodo.get(m, 0) + float(p.get("monto", 0) or 0)
         for it in s.get("items", []):
             if it.get("importe_neto") is not None:
                 ingreso_neto += float(it["importe_neto"])
             else:
-                t = 1 + float(it.get("iva_tasa", 16)) / 100
+                t = 1 + float(it.get("iva_tasa", 8)) / 100
                 ingreso_neto += max(0.0, float(it["cantidad"]) * float(it["precio"]) - float(it.get("descuento", 0) or 0)) / t if t else 0
             costo_total += float(it.get("costo") or 0) * float(it.get("cantidad", 0) or 0)
 
@@ -4081,7 +6250,7 @@ async def startup():
         await db.settings.insert_one({
             "_id": "app", "empresa_nombre": "Grupo RYSA", "rfc": "", "telefono": "",
             "correo": "contacto@gruporysa.com", "direccion": "", "ciudad": "", "estado": "",
-            "cp": "", "iva_tasa": 16.0, "moneda": "MXN",
+            "cp": "", "iva_tasa": 8.0, "moneda": "MXN",
             "listas_precios_nombres": ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"],
             "sucursales": [{"nombre": "Matriz", "direccion": "", "ciudad": "", "estado": "",
                             "cp": "", "telefono": "", "activa": True}]})

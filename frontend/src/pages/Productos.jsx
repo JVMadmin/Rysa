@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import ProductForm from "@/components/ProductForm";
 import { TableScroller } from "@/components/TableScroller";
 import { toast } from "sonner";
-import { Plus, Search, Download, Upload, Pencil, History, Loader2, Boxes, FileDown, ArrowDownUp, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Search, Upload, Pencil, History, Loader2, Boxes, FileDown, FileSpreadsheet, FileText, ArrowDownUp, ArrowUp, ArrowDown, SlidersHorizontal } from "lucide-react";
 const dot = (p) => {
   const ex = Number(p.existencia || 0), min = Number(p.stock_minimo || 0);
   if (ex <= 0) return ["bg-red-500", "Sin existencia"];
@@ -40,6 +40,15 @@ export default function Productos() {
   const [estado, setEstado] = useState("all");
   const [filtro, setFiltro] = useState("all");
   const [categoria, setCategoria] = useState(location.state?.categoria || "all");
+  const [fSku, setFSku] = useState("");
+  const [fLinea, setFLinea] = useState("");
+  const [fUM, setFUM] = useState("");
+  const [fProv, setFProv] = useState("");
+  const [fCostMin, setFCostMin] = useState("");
+  const [fCostMax, setFCostMax] = useState("");
+  const [fPriceMin, setFPriceMin] = useState("");
+  const [fPriceMax, setFPriceMax] = useState("");
+  const [exporting, setExporting] = useState(null);
   const [categorias, setCategorias] = useState([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -81,13 +90,27 @@ export default function Productos() {
   }
   const fileRef = useRef();
 
+  const makeParams = () => {
+    const p = {};
+    if (q) p.q = q;
+    if (estado !== "all") p.estado = estado;
+    if (filtro !== "all") p.filtro = filtro;
+    if (categoria !== "all") p.categoria = categoria;
+    if (fSku) p.sku = fSku;
+    if (fLinea) p.linea = fLinea;
+    if (fUM) p.unidad_medida = fUM;
+    if (fProv) p.proveedor = fProv;
+    if (fCostMin) p.min_costo = fCostMin;
+    if (fCostMax) p.max_costo = fCostMax;
+    if (fPriceMin) p.min_precio = fPriceMin;
+    if (fPriceMax) p.max_precio = fPriceMax;
+    return p;
+  };
+  const hasFilters = () => Object.keys(makeParams()).length > 0;
+
   const load = async () => {
     setLoading(true);
-    const params = { skip: page * pageSize, limit: pageSize };
-    if (q) params.q = q;
-    if (estado !== "all") params.estado = estado;
-    if (filtro !== "all") params.filtro = filtro;
-    if (categoria !== "all") params.categoria = categoria;
+    const params = { skip: page * pageSize, limit: pageSize, ...makeParams() };
     const res = await api.get("/products", { params });
     setRows(res.data);
     setTotal(Number(res.headers["x-total-count"] ?? res.data.length));
@@ -176,11 +199,20 @@ export default function Productos() {
     } catch (e) { toast.error("Error al exportar"); }
   };
 
-  const exportExcel = () => {
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (estado !== "all") params.set("estado", estado);
-    download(`/products/export/excel?${params}`, "productos.xlsx");
+  const runExport = async (fmt) => {
+    const params = new URLSearchParams(makeParams());
+    const todo = !hasFilters();
+    setExporting(fmt);
+    toast.info(todo ? "Exportando todos los registros..." : "Generando archivo...");
+    try {
+      const res = await api.get(`/products/export/${fmt}`, { responseType: "blob", params });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(res.data);
+      link.download = fmt === "excel" ? "productos.xlsx" : "productos.pdf";
+      link.click();
+      toast.success("Exportación completada.");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setExporting(null); }
   };
 
   const onFile = async (e) => {
@@ -234,47 +266,72 @@ export default function Productos() {
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => download("/products/plantilla/excel", "plantilla_productos.xlsx")} data-testid="plantilla-btn"><FileDown className="w-4 h-4 mr-1" /> Plantilla</Button>
           {can("importar") && <Button variant="outline" onClick={() => fileRef.current.click()} data-testid="import-btn"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
-          <Button variant="outline" onClick={exportExcel} data-testid="export-btn"><Download className="w-4 h-4 mr-1" /> Exportar</Button>
+          <Button variant="outline" onClick={() => runExport("excel")} disabled={!!exporting} data-testid="export-excel-btn">
+            {exporting === "excel" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-1 text-green-700" />} Exportar Excel
+          </Button>
+          <Button variant="outline" onClick={() => runExport("pdf")} disabled={!!exporting} data-testid="export-pdf-btn">
+            {exporting === "pdf" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileText className="w-4 h-4 mr-1 text-red-700" />} Exportar PDF
+          </Button>
           <Button variant="outline" onClick={openGlobal} data-testid="movimientos-btn"><ArrowDownUp className="w-4 h-4 mr-1" /> Movimientos</Button>
           {can("producto.crear") && <Button onClick={() => { setEditing(null); setFormOpen(true); }} data-testid="nuevo-producto-btn" className="bg-[#C1401E] hover:bg-[#A03316]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center card-soft p-3">
-        <div className="relative flex-1 min-w-[220px]">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <Input placeholder="Buscar por código, descripción, SKU, línea..." value={q}
-            onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()}
-            className="pl-9" data-testid="buscar-producto" />
+      <div className="card-soft p-3 space-y-3">
+        <div className="flex flex-wrap gap-2 items-center">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Input placeholder="Buscar por código, descripción, SKU, línea..." value={q}
+              onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doSearch()}
+              className="pl-9" data-testid="buscar-producto" />
+          </div>
+          <Select value={estado} onValueChange={(v) => { setEstado(v); setPage(0); }}>
+            <SelectTrigger className="w-44" data-testid="filtro-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos</SelectItem>
+              <SelectItem value="activo">Activos</SelectItem>
+              <SelectItem value="baja">Baja</SelectItem>
+              <SelectItem value="suspendido">Suspendidos</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filtro} onValueChange={(v) => { setFiltro(v); setPage(0); }}>
+            <SelectTrigger className="w-40" data-testid="filtro-stock"><SelectValue placeholder="Stock" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todo stock</SelectItem>
+              <SelectItem value="bajo_stock">Bajo stock</SelectItem>
+              <SelectItem value="sin_existencia">Sin existencia</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={categoria} onValueChange={(v) => { setCategoria(v); setPage(0); }}>
+            <SelectTrigger className="w-48" data-testid="filtro-categoria"><SelectValue placeholder="Categoría" /></SelectTrigger>
+            <SelectContent className="max-h-72">
+              <SelectItem value="all">Todas las categorías</SelectItem>
+              {categorias.map((c) => (
+                <SelectItem key={c.nombre} value={c.nombre}>{c.nombre} ({c.count})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" onClick={doSearch} data-testid="prod-buscar"><Search className="w-4 h-4" /> Buscar</Button>
+          <Button variant="ghost" size="sm" onClick={() => { setQ(""); setEstado("all"); setFiltro("all"); setCategoria("all"); setFSku(""); setFLinea(""); setFUM(""); setFProv(""); setFCostMin(""); setFCostMax(""); setFPriceMin(""); setFPriceMax(""); setPage(0); setNonce((n) => n + 1); }} data-testid="prod-limpiar-filtros">Limpiar filtros</Button>
         </div>
-        <Select value={estado} onValueChange={(v) => { setEstado(v); setPage(0); }}>
-          <SelectTrigger className="w-40" data-testid="filtro-estado"><SelectValue placeholder="Estado" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="activo">Activos</SelectItem>
-            <SelectItem value="baja">Baja</SelectItem>
-            <SelectItem value="suspendido">Suspendidos</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filtro} onValueChange={(v) => { setFiltro(v); setPage(0); }}>
-          <SelectTrigger className="w-40" data-testid="filtro-stock"><SelectValue placeholder="Stock" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todo stock</SelectItem>
-            <SelectItem value="bajo_stock">Bajo stock</SelectItem>
-            <SelectItem value="sin_existencia">Sin existencia</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={categoria} onValueChange={(v) => { setCategoria(v); setPage(0); }}>
-          <SelectTrigger className="w-48" data-testid="filtro-categoria"><SelectValue placeholder="Categoría" /></SelectTrigger>
-          <SelectContent className="max-h-72">
-            <SelectItem value="all">Todas las categorías</SelectItem>
-            {categorias.map((c) => (
-              <SelectItem key={c.nombre} value={c.nombre}>{c.nombre} ({c.count})</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button variant="outline" onClick={doSearch}><Search className="w-4 h-4" /></Button>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2 items-center">
+          <Input placeholder="SKU" value={fSku} onChange={(e) => setFSku(e.target.value)} className="h-9" data-testid="prod-f-sku" />
+          <Input placeholder="Línea" value={fLinea} onChange={(e) => setFLinea(e.target.value)} className="h-9" data-testid="prod-f-linea" />
+          <Input placeholder="Unidad de medida" value={fUM} onChange={(e) => setFUM(e.target.value)} className="h-9" data-testid="prod-f-um" />
+          <Input placeholder="Proveedor" value={fProv} onChange={(e) => setFProv(e.target.value)} className="h-9" data-testid="prod-f-proveedor" />
+          <div className="flex items-center gap-1">
+            <Input type="number" placeholder="Costo mín." value={fCostMin} onChange={(e) => setFCostMin(e.target.value)} className="h-9" data-testid="prod-f-costmin" />
+            <span className="text-slate-400 text-xs">a</span>
+            <Input type="number" placeholder="máx." value={fCostMax} onChange={(e) => setFCostMax(e.target.value)} className="h-9" data-testid="prod-f-costmax" />
+          </div>
+          <div className="flex items-center gap-1">
+            <Input type="number" placeholder="Precio" value={fPriceMin} onChange={(e) => setFPriceMin(e.target.value)} className="h-9" data-testid="prod-f-pricemin" />
+            <span className="text-slate-400 text-xs">a</span>
+            <Input type="number" placeholder="máx." value={fPriceMax} onChange={(e) => setFPriceMax(e.target.value)} className="h-9" data-testid="prod-f-pricemax" />
+          </div>
+        </div>
       </div>
 
       {/* Alertas de stock con acceso directo al filtro */}

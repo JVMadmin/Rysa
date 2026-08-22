@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { api, formatApiError, money } from "@/lib/api";
+import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useBranding } from "@/hooks/useBranding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock, MessageCircle, FileText, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock, MessageCircle, FileText, ArrowUp, ArrowDown, ArrowUpDown, Download, Printer, Share2 } from "lucide-react";
 
 const METODOS = [["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferencia", "Transferencia"], ["deposito", "Depósito"], ["otros", "Otros"]];
 
@@ -26,6 +27,7 @@ const Card = ({ label, value, icon: Ic, iconCls = "text-slate-500", valueCls = "
 
 export default function CuentasPorCobrar() {
   const { can } = useAuth();
+  const { logo, empresa_nombre } = useBranding();
   const [data, setData] = useState({ totales: {}, clientes: [] });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -57,6 +59,9 @@ export default function CuentasPorCobrar() {
   const [abonoCli, setAbonoCli] = useState(null);
   const [abono, setAbono] = useState({ monto: "", metodo: "efectivo", referencia: "", nota: "" });
   const [saving, setSaving] = useState(false);
+  // Comprobante de abono (tras guardar / reimpresión)
+  const [comp, setComp] = useState(null); // { abono, cliente }
+  const [compBusy, setCompBusy] = useState(false);
   // Detalle
   const [detCli, setDetCli] = useState(null);
   const [detalle, setDetalle] = useState(null);
@@ -80,12 +85,38 @@ export default function CuentasPorCobrar() {
     setSaving(true);
     try {
       const { data } = await api.post(`/cxc/${abonoCli.cliente_id}/abono`, { ...abono, monto });
-      toast.success(`Abono ${data.folio} · saldo actual ${money(data.saldo_actual)}${data.caja_afectada ? " · entró a caja" : ""}`);
+      toast.success("Abono registrado correctamente");
       setAbonoCli(null); load();
       if (detCli && detCli.cliente_id === abonoCli.cliente_id) openDetalle(abonoCli);
+      setComp({ abono: data.abono || { folio: data.folio, cliente_nombre: abonoCli.nombre, monto, metodo: abono.metodo, referencia: abono.referencia, saldo_anterior: data.saldo_anterior, saldo_restante: data.saldo_actual }, cliente: abonoCli });
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setSaving(false); }
   };
+
+  // Comprobante de abono: generar PDF real + acciones
+  const genCompPdf = async (abono) => {
+    setCompBusy(true);
+    try { const { data } = await api.post(`/abonos/${abono.id}/pdf`); return data; }
+    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); return null; }
+    finally { setCompBusy(false); }
+  };
+  const descargarComp = async (abono) => { const d = await genCompPdf(abono); if (d) { const a = document.createElement("a"); a.href = fileUrl(d.url); a.download = d.filename; document.body.appendChild(a); a.click(); a.remove(); } };
+  const compartirComp = async (abono) => {
+    const d = await genCompPdf(abono); if (!d) return;
+    const link = fileUrl(d.url);
+    if (navigator.share) { try { await navigator.share({ title: `Comprobante ${abono.folio}`, text: `Comprobante ${abono.folio}`, url: link }); } catch {} }
+    else { try { await navigator.clipboard.writeText(link); toast.success("Enlace copiado"); } catch { window.open(link, "_blank"); } }
+  };
+  const enviarCompWhatsApp = async (abono) => {
+    const d = await genCompPdf(abono); if (!d) return;
+    const link = fileUrl(d.url);
+    const tel = (comp?.cliente?.whatsapp || comp?.cliente?.celular || comp?.cliente?.telefono || "").replace(/\D/g, "");
+    const phone = tel ? (tel.length === 10 ? "52" + tel : tel) : "";
+    const msg = `Hola ${abono.cliente_nombre || ""}, aquí está tu comprobante de abono ${abono.folio} de ${money(abono.monto)}. Descárgalo aquí: ${link}`;
+    window.open(phone ? `https://wa.me/${phone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+    toast.success("Comprobante listo, abriendo WhatsApp…");
+  };
+  const imprimirComp = () => { window.print(); };
 
   const openDetalle = async (c) => {
     setDetCli(c); setDetalle(null);
@@ -299,10 +330,10 @@ export default function CuentasPorCobrar() {
                 <div className="border border-slate-200 rounded-md overflow-hidden">
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50"><tr className="text-left text-slate-500 uppercase tracking-wider">
-                      <th className="p-2">Folio</th><th className="p-2">Fecha</th><th className="p-2 text-right">Monto</th><th className="p-2">Método</th><th className="p-2">Referencia</th>
+                      <th className="p-2">Folio</th><th className="p-2">Fecha</th><th className="p-2 text-right">Monto</th><th className="p-2">Método</th><th className="p-2">Referencia</th><th className="p-2"></th>
                     </tr></thead>
                     <tbody>
-                      {detalle.abonos.length === 0 && <tr><td colSpan={5} className="p-4 text-center text-slate-400">Aún no hay abonos.</td></tr>}
+                      {detalle.abonos.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-slate-400">Aún no hay abonos.</td></tr>}
                       {detalle.abonos.map((a) => (
                         <tr key={a.id} className="border-t border-slate-100">
                           <td className="p-2 font-medium">{a.folio}</td>
@@ -310,6 +341,11 @@ export default function CuentasPorCobrar() {
                           <td className="p-2 text-right font-semibold text-green-700">{money(a.monto)}</td>
                           <td className="p-2 capitalize">{a.metodo}</td>
                           <td className="p-2 text-slate-500">{a.referencia || "—"}</td>
+                          <td className="p-2">
+                            <Button size="sm" variant="ghost" onClick={() => setComp({ abono: a, cliente: detCli })} data-testid={`abono-comprobante-${a.folio}`}>
+                              <FileText className="w-4 h-4 text-[#C1401E]" />
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -327,6 +363,59 @@ export default function CuentasPorCobrar() {
               <Button className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setDetCli(null); openAbono(detCli); }} data-testid="detalle-abonar"><HandCoins className="w-4 h-4 mr-1" /> Registrar abono</Button>}
             <Button variant="outline" onClick={() => setDetCli(null)}>Cerrar</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Comprobante de abono */}
+      <Dialog open={!!comp} onOpenChange={(o) => !o && setComp(null)}>
+        <DialogContent className="max-w-md" data-testid="comprobante-abono-dialog">
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Receipt className="w-5 h-5 text-[#C1401E]" /> Abono registrado correctamente</DialogTitle></DialogHeader>
+          {comp && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-[#E5E0DA] overflow-hidden" data-testid="comprobante-abono-cuerpo">
+                {/* Encabezado RYSA */}
+                <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-[#C1401E]">
+                  <img src={logo} alt="logo" className="h-12 w-12 object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                  <div className="flex-1">
+                    <div className="font-display font-extrabold text-[#C1401E] leading-none">{empresa_nombre}</div>
+                    <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 mt-0.5">Comprobante de Abono</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-lg font-display font-black text-[#C1401E]">{comp.abono.folio}</div>
+                    <div className="text-[11px] text-slate-500">{(comp.abono.fecha || new Date().toISOString()).slice(0, 10)} {(comp.abono.fecha || "").slice(11, 16)}</div>
+                  </div>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="text-sm"><span className="text-slate-400 text-xs">Cliente:</span> <b>{comp.abono.cliente_nombre || comp.cliente?.nombre}</b></div>
+                  <div className="rounded-lg bg-[#F4ECE7] p-3 space-y-2">
+                    <div className="flex justify-between text-sm"><span className="text-slate-500">Saldo anterior</span><span className="font-semibold">{money(comp.abono.saldo_anterior)}</span></div>
+                    <div className="flex justify-between text-base font-bold text-[#C1401E] border-t border-[#E5D5CC] pt-2"><span>ABONO</span><span>{money(comp.abono.monto)}</span></div>
+                    <div className="flex justify-between text-base font-black border-t-2 border-[#C1401E] pt-2"><span>SALDO RESTANTE</span><span>{money(comp.abono.saldo_restante)}</span></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
+                    <div><span className="text-slate-400">Método:</span> <span className="capitalize font-medium text-slate-700">{comp.abono.metodo}</span></div>
+                    {comp.abono.referencia && <div><span className="text-slate-400">Referencia:</span> <span className="font-medium text-slate-700">{comp.abono.referencia}</span></div>}
+                    {comp.abono.usuario_nombre && <div><span className="text-slate-400">Usuario:</span> <span className="font-medium text-slate-700">{comp.abono.usuario_nombre}</span></div>}
+                    {comp.abono.documento && <div><span className="text-slate-400">Documento:</span> <span className="font-medium text-slate-700">{comp.abono.documento}</span></div>}
+                  </div>
+                  <div className="text-center font-bold text-[#C1401E] pt-1">¡GRACIAS POR SU PAGO!</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center">
+                <Button size="sm" variant="outline" onClick={() => descargarComp(comp.abono)} disabled={compBusy} data-testid="abono-descargar-pdf">
+                  {compBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Download className="w-4 h-4 mr-1" />} PDF
+                </Button>
+                <Button size="sm" variant="outline" onClick={imprimirComp} data-testid="abono-imprimir"><Printer className="w-4 h-4 mr-1" /> Imprimir</Button>
+                <Button size="sm" variant="outline" onClick={() => compartirComp(comp.abono)} disabled={compBusy} data-testid="abono-compartir"><Share2 className="w-4 h-4 mr-1" /> Compartir</Button>
+                <Button size="sm" className="bg-[#25D366] hover:bg-[#1ebe57]" onClick={() => enviarCompWhatsApp(comp.abono)} disabled={compBusy} data-testid="abono-whatsapp">
+                  <MessageCircle className="w-4 h-4 mr-1" /> WhatsApp
+                </Button>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" className="w-full" onClick={() => setComp(null)}>Cerrar</Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -112,6 +112,9 @@ ROLE_PERMISSIONS = {
         "cliente.crear", "cliente.editar", "reportes.ver", "reportes.global",
         "importar", "exportar", "config", "credito.autorizar",
         "inventario.autorizar_negativo",
+        "proveedor.ver", "proveedor.crear", "proveedor.editar",
+        "compra.ver", "compra.crear", "compra.cancelar",
+        "abono.ver", "abono.comprobante", "cuentas.ver",
     },
     "vendedor": {
         "venta.crear", "venta.descuento", "cliente.crear", "cliente.editar",
@@ -128,6 +131,8 @@ ROLE_PERMISSIONS = {
         "cliente.crear", "cliente.editar", "cliente.baja",
         "reportes.ver", "reportes.global", "exportar", "importar",
         "cxc.ver", "caja.entrada", "credito.autorizar",
+        "compra.ver", "compra.crear", "compra.cancelar", "abono.ver",
+        "abono.comprobante", "proveedor.ver", "cuentas.ver",
         "visita.crear", "visita.editar", "visita.ver", "visita.cancelar",
         "supervision.ver", "supervision.mapa", "supervision.cartera",
         "supervision.cxc", "supervision.actividad",
@@ -188,6 +193,23 @@ MODULES = {
         "label": "Centro de Supervisión Comercial",
         "perms": {"supervision.ver", "supervision.mapa", "supervision.cartera",
                   "supervision.cxc", "supervision.actividad"},
+    },
+    "proveedores": {
+        "label": "Proveedores",
+        "perms": {"proveedor.ver", "proveedor.crear", "proveedor.editar"},
+    },
+    "compras": {
+        "label": "Compras y Gastos",
+        "perms": {"compra.ver", "compra.crear", "compra.cancelar", "compra.autorizar",
+                  "proveedor.ver"},
+    },
+    "cuentas_bancarias": {
+        "label": "Cuentas bancarias",
+        "perms": {"cuentas.ver", "cuentas.editar"},
+    },
+    "abonos": {
+        "label": "Abonos y comprobantes",
+        "perms": {"abono.ver", "abono.comprobante"},
     },
 }
 
