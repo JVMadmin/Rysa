@@ -71,6 +71,22 @@ export default function Ventas() {
     finally { setBusy(""); }
   };
 
+  // Rango de fechas efectivo (espejo del filtro del backend) para cruzar abonos.
+  const rangoFechas = () => {
+    const hoy = new Date();
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (rango === "rango") return { d: desde || null, h: hasta || null };
+    if (rango === "hoy") return { d: iso(hoy), h: iso(hoy) };
+    if (rango === "semana") { const x = new Date(hoy); x.setDate(x.getDate() - 6); return { d: iso(x), h: iso(hoy) }; }
+    if (rango === "mes") return { d: iso(hoy).slice(0, 8) + "01", h: iso(hoy) };
+    if (rango === "mes_anterior") {
+      const ini = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+      const fin = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
+      return { d: iso(ini), h: iso(fin) };
+    }
+    return { d: null, h: null }; // all
+  };
+
   const load = async () => {
     setLoading(true);
     const params = {};
@@ -79,8 +95,46 @@ export default function Ventas() {
     if (estado !== "all") params.estado = estado;
     if (vendedorId !== "all") params.vendedor_id = vendedorId;
     if (q) params.q = q;
-    const { data } = await api.get("/sales", { params });
-    setRows(data); setSel([]); setLoading(false);
+    try {
+      const [{ data }, abonosRes] = await Promise.all([
+        api.get("/sales", { params }),
+        api.get("/abonos").catch(() => ({ data: [] })),
+      ]);
+      // Abonos como concepto "Abono a cuenta": se muestran cronológicamente
+      // junto a las ventas pero NO cuentan como ventas ni son facturables/
+      // cancelables desde aquí (eso vive en Cuentas por cobrar).
+      let abonoRows = [];
+      if (estado === "all") {
+        const { d, h } = rangoFechas();
+        abonoRows = (Array.isArray(abonosRes.data) ? abonosRes.data : [])
+          .filter((a) => a.estado !== "cancelado")
+          .filter((a) => (!d || (a.fecha || "").slice(0, 10) >= d) && (!h || (a.fecha || "").slice(0, 10) <= h))
+          .map((a) => ({
+            id: "AB-" + a.id,
+            folio: a.folio,
+            tipo_venta: "abono_cuenta",
+            concepto: "Abono a cuenta",
+            cliente_id: a.cliente_id,
+            cliente_nombre: a.cliente_nombre || "",
+            usuario_nombre: a.usuario_nombre || "",
+            fecha: a.fecha,
+            hora: (a.fecha || "").slice(11, 16),
+            condicion: a.metodo || "",
+            total: Number(a.monto || 0),
+            estado: "abono",
+            facturado: false,
+            _abono: true,
+            _raw: a,
+          }));
+      }
+      setRows([...(data || []), ...abonoRows]);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+      setRows([]);
+    } finally {
+      setSel([]);
+      setLoading(false);
+    }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [rango, estado, vendedorId, desde, hasta]);
 
@@ -268,9 +322,13 @@ export default function Ventas() {
             {!loading && sorted.map((s) => {
               const facturable = s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion";
               return (
-              <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`venta-row-${s.folio}`}>
+              <tr key={s.id} className={`border-t border-slate-100 hover:bg-slate-50 ${s._abono ? "bg-blue-50/40" : ""}`} data-testid={`venta-row-${s.folio}`}>
                 <td className="p-3">{can("venta.facturar") && facturable ? <input type="checkbox" checked={sel.includes(s.id)} onChange={() => toggleSel(s.id)} data-testid={`sel-${s.folio}`} /> : null}</td>
-                <td className="p-3"><Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : s.estado === "cotizacion" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge></td>
+                <td className="p-3">
+                  {s._abono
+                    ? <Badge className="bg-blue-100 text-blue-700">Abono a cuenta</Badge>
+                    : <Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : s.estado === "cotizacion" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge>}
+                </td>
                 <td className="p-3 font-medium text-[#C1401E]">{s.folio}</td>
                 <td className="p-3 text-slate-500">{s.fecha?.slice(0, 10)} {s.hora}</td>
                 <td className="p-3">{s.cliente_nombre}</td>
@@ -281,12 +339,14 @@ export default function Ventas() {
                 <td className="p-3">
                   <div className="flex gap-1 justify-end">
                     <Button size="icon" variant="ghost" onClick={() => setDetalle(s)} data-testid={`ver-${s.folio}`}><Eye className="w-4 h-4" /></Button>
-                    <Button size="icon" variant="ghost" title="Reimprimir PDF (ticket)" onClick={() => reimprimir(s)} data-testid={`reimprimir-${s.folio}`}><Printer className="w-4 h-4" /></Button>
-                    <Button size="icon" variant="ghost" title="Reenviar por WhatsApp" onClick={() => reenviar(s)} disabled={busy === `wa-${s.id}`} data-testid={`reenviar-${s.folio}`}>{busy === `wa-${s.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}</Button>
-                    {s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion" &&
-                      <Button size="sm" variant="outline" onClick={() => abrirFacturar(s)} title="Facturar" data-testid={`facturar-venta-${s.folio}`}><FileText className="w-4 h-4 mr-1" /> Facturar</Button>}
-                    <Button size="sm" variant="outline" onClick={() => setRemitirSale(s)} title="Remitir" data-testid={`remitir-${s.folio}`}><Copy className="w-4 h-4 mr-1" /> Remitir</Button>
-                    {s.estado === "confirmada" && can("venta.cancelar") && <Button size="icon" variant="ghost" onClick={() => setCancelSale(s)} className="text-red-500" data-testid={`cancelar-${s.folio}`}><XCircle className="w-4 h-4" /></Button>}
+                    {!s._abono && <>
+                      <Button size="icon" variant="ghost" title="Reimprimir PDF (ticket)" onClick={() => reimprimir(s)} data-testid={`reimprimir-${s.folio}`}><Printer className="w-4 h-4" /></Button>
+                      <Button size="icon" variant="ghost" title="Reenviar por WhatsApp" onClick={() => reenviar(s)} disabled={busy === `wa-${s.id}`} data-testid={`reenviar-${s.folio}`}>{busy === `wa-${s.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}</Button>
+                      {s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion" &&
+                        <Button size="sm" variant="outline" onClick={() => abrirFacturar(s)} title="Facturar" data-testid={`facturar-venta-${s.folio}`}><FileText className="w-4 h-4 mr-1" /> Facturar</Button>}
+                      <Button size="sm" variant="outline" onClick={() => setRemitirSale(s)} title="Remitir" data-testid={`remitir-${s.folio}`}><Copy className="w-4 h-4 mr-1" /> Remitir</Button>
+                      {s.estado === "confirmada" && can("venta.cancelar") && <Button size="icon" variant="ghost" onClick={() => setCancelSale(s)} className="text-red-500" data-testid={`cancelar-${s.folio}`}><XCircle className="w-4 h-4" /></Button>}
+                    </>}
                   </div>
                 </td>
               </tr>
@@ -298,6 +358,34 @@ export default function Ventas() {
       {/* Detalle */}
       <Dialog open={!!detalle} onOpenChange={(o) => !o && setDetalle(null)}>
         <DialogContent data-testid="venta-detalle">
+          {detalle?._abono ? (
+            <>
+              <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Badge className="bg-blue-100 text-blue-700">Abono a cuenta</Badge> {detalle.folio}</DialogTitle></DialogHeader>
+              <div className="text-sm space-y-3" data-testid="abono-detalle">
+                <div className="text-slate-500">{detalle.fecha?.slice(0, 16).replace("T", " ")} · Cliente: <b className="text-slate-800">{detalle.cliente_nombre}</b>{detalle.usuario_nombre ? <> · Recibió: <b className="text-slate-800">{detalle.usuario_nombre}</b></> : null}</div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Método</div><div className="font-semibold capitalize">{detalle.condicion || "—"}</div></div>
+                  <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Monto</div><div className="font-display font-black text-green-700">{money(detalle.total)}</div></div>
+                </div>
+                {detalle._raw?.referencia && <p className="text-xs text-slate-500">Referencia: {detalle._raw.referencia}</p>}
+                {(detalle._raw?.aplicaciones || []).length > 0 && (
+                  <div className="border rounded-md overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50"><tr className="text-left text-slate-500"><th className="p-2">Venta (FIFO)</th><th className="p-2 text-right">Aplicado</th></tr></thead>
+                      <tbody>
+                        {detalle._raw.aplicaciones.map((ap, k) => (
+                          <tr key={k} className="border-t border-slate-100"><td className="p-2 font-medium">{ap.folio}</td><td className="p-2 text-right">{money(ap.monto)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-400">Para cancelar un abono ve a Cuentas por cobrar → estado de cuenta del cliente.</p>
+              </div>
+              <DialogFooter><Button variant="outline" onClick={() => setDetalle(null)}>Cerrar</Button></DialogFooter>
+            </>
+          ) : (
+          <>
           <DialogHeader><DialogTitle className="font-display">Venta {detalle?.folio}</DialogTitle></DialogHeader>
           {detalle && (
             <div className="text-sm">
@@ -336,6 +424,8 @@ export default function Ventas() {
             <Button variant="outline" onClick={() => descargarCarta(detalle)}><FileText className="w-4 h-4 mr-1" /> Carta PDF</Button>
             <Button variant="outline" onClick={() => reenviar(detalle)} disabled={busy === `wa-${detalle?.id}`}>{busy === `wa-${detalle?.id}` ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <><Send className="w-4 h-4 mr-1" /> Reenviar</>}</Button>
           </DialogFooter>
+          </>
+          )}
         </DialogContent>
       </Dialog>
 

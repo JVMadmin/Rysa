@@ -277,6 +277,119 @@ def _item_lines(it, max_w, size):
     return n
 
 
+def build_entrega_pdf(mov: dict, caja: dict, settings: dict,
+                      efectivo_en_caja=None) -> bytes:
+    """Ticket térmico (80 mm) de ENTREGA DE EFECTIVO u otro movimiento de caja.
+
+    Incluye: datos de empresa, folio RET-xxxxxx, fecha/hora, cajero, concepto,
+    referencia, monto destacado, efectivo restante en caja y líneas de firma
+    (Entregó / Recibí). El descuento en caja ocurre al registrar el movimiento;
+    este comprobante lo documenta."""
+    from reportlab.lib.pagesizes import letter  # noqa: F401
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as _canvas
+
+    tc = (settings or {}).get("ticket_config", {}) or {}
+    empresa = settings.get("empresa_nombre", "Grupo RYSA")
+
+    tipo = (mov.get("tipo") or "").lower()
+    titulos = {"retiro": "ENTREGA DE EFECTIVO", "entrada": "ENTRADA DE EFECTIVO",
+               "gasto": "COMPROBANTE DE GASTO", "devolucion": "DEVOLUCIÓN"}
+    titulo = titulos.get(tipo, "COMPROBANTE DE CAJA")
+
+    W = 80 * mm
+    margin = 6 * mm
+    line = 11.5          # alto por línea de texto normal
+    # Estimar altura dinámica del ticket.
+    concepto_lines = _wrap_lines(mov.get("concepto") or "", W - 2 * margin - 4, 9)
+    h = 26 * mm                     # encabezado empresa
+    h += 8 * mm                     # título + línea punteada
+    h += len(concepto_lines) * 4.2 * mm + 22 * mm   # cuerpo + montos
+    h += 16 * mm                    # firmas
+    h += 10 * mm                    # pie
+    buf = io.BytesIO()
+    c = _canvas.Canvas(buf, pagesize=(W, h))
+    x = margin
+    w = W - 2 * margin
+    y = h - margin
+
+    def txt(t, size=8.5, bold=False, align="left", dy=0):
+        nonlocal y
+        y -= (line if dy == 0 else dy)
+        f = "Helvetica-Bold" if bold else "Helvetica"
+        c.setFont(f, size)
+        t = str(t)
+        if align == "center":
+            c.drawCentredString(W / 2, y, t)
+        elif align == "right":
+            c.drawRightString(x + w, y, t)
+        else:
+            c.drawString(x, y, t)
+
+    def dashed():
+        nonlocal y
+        y -= 7
+        c.setDash(2, 2)
+        c.setLineWidth(0.5)
+        c.line(x, y, x + w, y)
+        c.setDash()
+        y -= 5
+
+    # --- Encabezado empresa ---
+    txt(empresa, size=12, bold=True, align="center")
+    sub = [settings.get("rfc") and f"RFC: {settings['rfc']}",
+           settings.get("direccion"),
+           settings.get("telefono") and f"Tel: {settings['telefono']}"]
+    for s in filter(None, sub):
+        txt(str(s), size=7, align="center", dy=line - 3)
+    dashed()
+
+    # --- Título ---
+    txt(titulo, size=12.5, bold=True, align="center")
+    y -= 4
+
+    # --- Datos ---
+    fecha = mov.get("fecha") or ""
+    txt(f"Folio: {mov.get('folio') or '—'}", size=8.5, bold=True)
+    txt(f"Fecha: {fecha[:10]}  Hora: {fecha[11:16]}", size=8.5)
+    txt(f"Caja: {(caja or {}).get('caja_nombre') or '—'}", size=8.5)
+    txt(f"Entregó: {mov.get('usuario_nombre') or '—'}", size=8.5)
+    txt("Concepto:", size=8.5)
+    for ln in concepto_lines:
+        txt(ln, size=9, dy=10.5)
+    if mov.get("referencia"):
+        txt(f"Referencia: {mov.get('referencia')}", size=8.5)
+    dashed()
+
+    # --- Monto ---
+    txt("MONTO", size=8, bold=True, align="center")
+    monto_txt = _money(mov.get("monto"))
+    c.setFont("Helvetica-Bold", 17)
+    y -= 24
+    c.drawCentredString(W / 2, y, monto_txt)
+    if efectivo_en_caja is not None:
+        txt(f"Efectivo en caja después: {_money(efectivo_en_caja)}",
+            size=8, align="center", dy=20)
+    dashed()
+
+    # --- Firmas ---
+    y -= 14
+    c.setFont("Helvetica", 8)
+    c.drawString(x + 2 * mm, y, "_______________")
+    c.drawRightString(x + w - 2 * mm, y, "_______________")
+    y -= 10
+    c.drawString(x + 2 * mm, y, "Entregó")
+    c.drawRightString(x + w - 2 * mm, y, "Recibí")
+
+    # --- Pie ---
+    pie = tc.get("pie") or "¡Gracias por su confianza!"
+    txt(pie, size=7.5, align="center", dy=line + 4)
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
 def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
     """Genera un PDF del ticket según la configuración.
 

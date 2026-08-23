@@ -10,6 +10,7 @@ Expone la misma API asíncrona que usa server.py (find_one, find, insert_one,
 update_one, delete_one, count_documents, aggregate, next_counter) para que el
 monolito funcione sobre PostgreSQL.
 """
+import os
 import re
 import json
 import uuid
@@ -78,8 +79,33 @@ def build_index_ddl(collection: str) -> str:
     return f'CREATE INDEX IF NOT EXISTS idx_{collection}_id ON {_quote(collection)} ("id")'
 
 
+# DDL automático en runtime. En producción el esquema debe aplicarse con
+# Alembic (alembic upgrade head); aquí solo se permite como red de seguridad:
+#   ENVIRONMENT=production  ->  DESHABILITADO por defecto
+#                               (forzar con RYSA_RUNTIME_DDL=1 si se quiere)
+#   desarrollo              ->  habilitado (comodidad de dev)
+_RUNTIME_DDL = (
+    os.environ.get("RYSA_RUNTIME_DDL", "").strip()
+    or ("0" if os.environ.get("ENVIRONMENT", "").lower() == "production" else "1")
+) == "1"
+
+# Si un DDL falla (p. ej. usuario sin privilegios), NO reintentar en cada
+# petición: cooldown de 60 s antes de volver a intentar.
+_DDL_FAILED = {}
+_DDL_COOLDOWN_S = 60
+
+import time as _time
+
+
 async def _ensure_table(collection: str):
     if collection in DDL_CACHE:
+        return
+    failed_at = _DDL_FAILED.get(collection)
+    if failed_at and (_time.monotonic() - failed_at) < _DDL_COOLDOWN_S:
+        return  # asumir que la tabla existe; la query real dirá la verdad
+    if not _RUNTIME_DDL:
+        # Producción: el esquema lo aplica Alembic; no tocar DDL por request.
+        DDL_CACHE.add(collection)
         return
     eng = get_engine()
     # Advisory lock de transacción: serializa la migración de esquema de cada
@@ -87,17 +113,22 @@ async def _ensure_table(collection: str):
     # concurrentes bloquean la misma tabla en modo SHARE (CREATE INDEX) y luego
     # ambas intentan subir a AccessExclusiveLock (ALTER TABLE), causando
     # deadlock (share->exclusive upgrade).
-    async with eng.begin() as conn:
-        await conn.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
-            {"k": f"rysa_ddl:{collection}"})
-        await conn.execute(text(build_create_table(collection)))
-        await conn.execute(text(build_index_ddl(collection)))
-        # Migración idempotente: agregar columnas NUMERIC faltantes a tablas
-        # existentes (p. ej. 'vendidas' agregado posteriormente en products).
-        for c in _typed_cols(collection):
-            await conn.execute(text(
-                f'ALTER TABLE {_quote(collection)} ADD COLUMN IF NOT EXISTS "{c}" numeric'))
+    try:
+        async with eng.begin() as conn:
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                {"k": f"rysa_ddl:{collection}"})
+            await conn.execute(text(build_create_table(collection)))
+            await conn.execute(text(build_index_ddl(collection)))
+            # Migración idempotente: agregar columnas NUMERIC faltantes a tablas
+            # existentes (p. ej. 'vendidas' agregado posteriormente en products).
+            for c in _typed_cols(collection):
+                await conn.execute(text(
+                    f'ALTER TABLE {_quote(collection)} ADD COLUMN IF NOT EXISTS "{c}" numeric'))
+    except Exception:
+        _DDL_FAILED[collection] = _time.monotonic()
+        raise
+    _DDL_FAILED.pop(collection, None)
     DDL_CACHE.add(collection)
 
 
@@ -109,7 +140,23 @@ def _field_expr(field: str) -> str:
     """Expresión SQL: usa columna tipada o extracción JSONB de texto."""
     if field in ("_id", "id"):
         return f't."{field}"'
-    return f"t.doc->>'{field}'"
+    return _json_text_expr(field)
+
+
+def _json_text_expr(field: str) -> str:
+    """Extracción JSONB->texto. Soporta rutas anidadas con punto
+    (p. ej. 'controles.permitir_venta' -> doc#>>'{controles,permitir_venta}').
+    Antes estos filtros se descartaban SILENCIOSAMENTE."""
+    parts = str(field).split(".")
+    if len(parts) == 1 or not all(_IDENT_RE.match(p) for p in parts):
+        return f"t.doc->>'{field}'"
+    path = ",".join(parts)
+    return f"t.doc#>>'{{{path}}}'"
+
+# Un texto representa un número válido (evita que CAST(text AS numeric)
+# lance 22P02 y rompa la consulta completa cuando el doc traja basura).
+_NUM_RE_SQL = "'^-?[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$'"
+_BOOL_RE_SQL = "'^(true|false)$'"
 
 
 def _typed_col(col, field) -> Optional[str]:
@@ -121,7 +168,7 @@ def _expr_for(field, col) -> str:
         return f't."{field}"'
     if field in _typed_cols(col):
         return f't."{field}"'
-    return f"t.doc->>'{field}'"
+    return _json_text_expr(field)
 
 
 def compile_filter(collection, flt, p) -> str:
@@ -143,7 +190,9 @@ def compile_filter(collection, flt, p) -> str:
             p[key] = field
             conds.append("(" + (" AND " if field == "$and" else " OR ").join(sub) + ")")
             continue
-        if not _IDENT_RE.match(str(field)):
+        # Acepta campos simples y rutas anidadas 'a.b.c' (todas ident válidas).
+        parts = str(field).split(".")
+        if not all(_IDENT_RE.match(pt) for pt in parts):
             continue
         expr = _expr_for(field, collection)
 
@@ -170,13 +219,20 @@ def compile_filter(collection, flt, p) -> str:
                 if op in spec:
                     k = f"f{len(p)}"; p[k] = spec[op]
                     sqlop = {"$gt": ">", "$gte": ">=", "$lt": "<", "$lte": "<="}[op]
-                    conds.append(f"CAST(({expr}) AS numeric) {sqlop} :{k}")
+                    # Guard de formato: si el texto no es numérico no participa
+                    # (antes un CAST sobre basura rompía la consulta completa).
+                    conds.append(
+                        f"(({expr}) ~ {_NUM_RE_SQL} AND CAST(({expr}) AS numeric) {sqlop} :{k})")
                     continue
             if "$ne" in spec:
                 v = spec["$ne"]
                 if isinstance(v, bool):
                     k = f"f{len(p)}"; p[k] = v
-                    conds.append(f"CAST(({expr}) AS boolean) IS DISTINCT FROM :{k}")
+                    # $ne bool: también coinciden los docs SIN el campo o con
+                    # valor no booleano (misma semántica que el original).
+                    conds.append(
+                        f"(({expr}) IS NULL OR NOT (({expr}) ~ {_BOOL_RE_SQL} "
+                        f"AND CAST(({expr}) AS boolean) IS NOT DISTINCT FROM :{k}))")
                 else:
                     k = f"f{len(p)}"; p[k] = v
                     conds.append(f"({expr} IS DISTINCT FROM :{k})")
@@ -186,10 +242,11 @@ def compile_filter(collection, flt, p) -> str:
         # Comparación de igualdad con tipado según el valor.
         if isinstance(spec, bool):
             k = f"f{len(p)}"; p[k] = spec
-            conds.append(f"CAST(({expr}) AS boolean) = :{k}")
+            conds.append(f"(({expr}) ~ {_BOOL_RE_SQL} AND CAST(({expr}) AS boolean) = :{k})")
         elif isinstance(spec, (int, float)):
             k = f"f{len(p)}"; p[k] = spec
-            conds.append(f"(CAST(({expr}) AS numeric) = :{k} OR {expr} = CAST(:{k} AS text))")
+            conds.append(f"((({expr}) ~ {_NUM_RE_SQL} AND CAST(({expr}) AS numeric) = :{k})"
+                         f" OR {expr} = CAST(:{k} AS text))")
         else:
             k = f"f{len(p)}"; p[k] = spec
             conds.append(f"{expr} = :{k}")
@@ -570,7 +627,16 @@ class PGDatabase:
 # --------------------------------------------------------------------------- #
 # Secuencias / folios (concurrencia segura con row-locking)                    #
 # --------------------------------------------------------------------------- #
+_SEQUENCES_READY = False
+
+
 async def ensure_sequences_table():
+    """Crea la tabla de secuencias UNA sola vez por proceso (antes ejecutaba
+    CREATE TABLE IF NOT EXISTS en CADA asignación de folio: lock innecesario
+    por venta/abono)."""
+    global _SEQUENCES_READY
+    if _SEQUENCES_READY:
+        return
     eng = get_engine()
     async with eng.connect() as conn:
         await conn.execute(text(
@@ -578,6 +644,7 @@ async def ensure_sequences_table():
             '  "name" TEXT PRIMARY KEY, "seq" BIGINT NOT NULL DEFAULT 0)'
         ))
         await conn.commit()
+    _SEQUENCES_READY = True
 
 
 async def pg_next_counter(name: str, prefix: str = "", padding: int = 5) -> str:

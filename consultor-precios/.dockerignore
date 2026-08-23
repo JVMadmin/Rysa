@@ -1,0 +1,9 @@
+node_modules
+build
+.git
+*.log
+# Los archivos .env reales (con secretos) nunca entran a la imagen.
+.env
+.env.local
+.env.development
+.env.production

@@ -115,10 +115,12 @@ ROLE_PERMISSIONS = {
         "proveedor.ver", "proveedor.crear", "proveedor.editar",
         "compra.ver", "compra.crear", "compra.cancelar",
         "abono.ver", "abono.comprobante", "cuentas.ver",
+        "pedido.gestionar", "cxp.pagar",
     },
     "vendedor": {
         "venta.crear", "venta.descuento", "cliente.crear", "cliente.editar",
         "exportar", "visita.crear", "visita.editar", "visita.ver",
+        "pedido.gestionar",
     },
     "cajero": {
         "venta.crear", "exportar",
@@ -133,6 +135,7 @@ ROLE_PERMISSIONS = {
         "cxc.ver", "caja.entrada", "credito.autorizar",
         "compra.ver", "compra.crear", "compra.cancelar", "abono.ver",
         "abono.comprobante", "proveedor.ver", "cuentas.ver",
+        "pedido.gestionar", "cxp.pagar",
         "visita.crear", "visita.editar", "visita.ver", "visita.cancelar",
         "supervision.ver", "supervision.mapa", "supervision.cartera",
         "supervision.cxc", "supervision.actividad",
@@ -210,6 +213,10 @@ MODULES = {
     "abonos": {
         "label": "Abonos y comprobantes",
         "perms": {"abono.ver", "abono.comprobante"},
+    },
+    "pedidos": {
+        "label": "Pedidos",
+        "perms": {"pedido.gestionar"},
     },
 }
 

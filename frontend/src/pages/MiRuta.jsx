@@ -119,12 +119,12 @@ export default function MiRuta() {
   const ruta = useMemo(() => ordenarRuta(pts), [pts]);
   const bounds = useMemo(() => {
     const all = pts;
-    if (!all.length) return [[20.59, -100.39]];
+    if (!all.length) return [[17.5095, -91.9827]]; // Palenque, Chiapas
     const lats = all.map((p) => p[0]), lngs = all.map((p) => p[1]);
     return [[Math.min(...lats), Math.min(...lngs)], [Math.max(...lats), Math.max(...lngs)]];
   }, [pts]);
   const center = useMemo(() => {
-    if (!pts.length) return [20.59, -100.39];
+    if (!pts.length) return [17.5095, -91.9827];
     const la = pts.reduce((s, p) => s + p[0], 0) / pts.length;
     const ln = pts.reduce((s, p) => s + p[1], 0) / pts.length;
     return [la, ln];

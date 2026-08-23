@@ -1,0 +1,91 @@
+# Grupo RYSA ERP - Docker Compose LOCAL (aislado para esta PC)
+# NO toca el stack existente (docker-compose.yml / rysa_*) ni el VPS.
+# Red, volúmenes y contenedores propios con prefijo rysa_local_.
+# Puertos (host) verificados libres: frontend 5174, backend 8002, postgres 5433.
+# Copia .env.docker.example -> .env.docker.local y ajusta antes de levantar
+# o usa el .env.docker.local ya provisto.
+
+services:
+  postgres:
+    image: postgres:17
+    container_name: rysa_local_postgres
+    restart: unless-stopped
+    env_file:
+      - ./.env.docker.local
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rysa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rysa_dev_only_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-rysa_local}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - rysa_local_network
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rysa} -d ${POSTGRES_DB:-rysa_local}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rysa_local_backend
+    restart: unless-stopped
+    env_file:
+      - ./.env.docker.local
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      # Dentro del contenedor se conecta por el nombre de servicio Docker.
+      DATABASE_URL: ${BACKEND_DATABASE_URL:-postgresql+asyncpg://rysa:rysa_dev_only_change_me@postgres:5432/rysa_local}
+      UPLOAD_DIR: /app/uploads
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5174,http://127.0.0.1:5174}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rysa_local_network
+    ports:
+      - "${BACKEND_PORT:-8002}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket;socket.create_connection(('127.0.0.1',8000),timeout=3).close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: [
+      "sh", "-c",
+      "alembic upgrade head && uvicorn server:app --host 0.0.0.0 --port 8000"
+    ]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Frontend estático propio: apunta al backend LOCAL publicado en el host.
+        REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://localhost:8002}
+    container_name: rysa_local_frontend
+    restart: unless-stopped
+    networks:
+      - rysa_local_network
+    ports:
+      - "${FRONTEND_PORT:-5174}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+networks:
+  rysa_local_network:
+    driver: bridge
+    name: rysa_local_network
+
+volumes:
+  pgdata:
+    name: rysa_local_pgdata
+  uploads:
+    name: rysa_local_uploads

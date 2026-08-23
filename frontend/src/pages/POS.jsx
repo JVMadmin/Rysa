@@ -175,33 +175,40 @@ export default function POS({ windowId, windowLabel }) {
     el.textContent = `@page { size: ${size}; margin: 0; }`;
   }, []);
 
-  const printThermal = useCallback(() => {
-    injectPageSize("80mm auto");
-    document.body.classList.remove("print-mode-invoice");
-    const src = document.getElementById("thermal-ticket");
-    let wrap = document.getElementById("thermal-print-clone");
-    if (!wrap) { wrap = document.createElement("div"); wrap.id = "thermal-print-clone"; document.body.appendChild(wrap); }
+  // Impresión por clonado: se copia SOLO la plantilla a un wrapper hijo directo
+  // de <body> y el CSS oculta todo lo demás con display:none (sin conservar
+  // espacio de layout). Esto evita las páginas en blanco del método anterior
+  // (visibility:hidden mantenía la altura completa del POS ~14 pantallas).
+  const printClone = useCallback((elementId, pageSpec, cls = "") => {
+    injectPageSize(pageSpec);
+    let wrap = document.getElementById("print-clone");
+    if (!wrap) { wrap = document.createElement("div"); wrap.id = "print-clone"; document.body.appendChild(wrap); }
+    wrap.className = cls;
+    const src = document.getElementById(elementId);
+    wrap.innerHTML = "";
     if (src) {
       const clone = src.cloneNode(true);
-      wrap.innerHTML = "";
+      // Los botones de acción nunca se imprimen.
+      clone.querySelectorAll(".letter-actions").forEach((n) => n.remove());
       wrap.appendChild(clone);
     }
     setTimeout(() => { window.print(); }, 60);
   }, [injectPageSize]);
 
+  const printThermal = useCallback(() => {
+    try { printClone("thermal-ticket", "80mm auto", "thermal-width"); setPrintFail(false); return true; }
+    catch { setPrintFail(true); return false; }
+  }, [printClone]);
+
   const printInvoice = useCallback(() => {
-    injectPageSize("Letter portrait");
-    document.body.classList.add("print-mode-invoice");
-    document.body.classList.remove("print-mode-letter");
-    setTimeout(() => { window.print(); document.body.classList.remove("print-mode-invoice"); }, 50);
-  }, [injectPageSize]);
+    try { printClone("invoice-template", "letter portrait", "letter-width"); setPrintFail(false); return true; }
+    catch { setPrintFail(true); return false; }
+  }, [printClone]);
 
   const printLetter = useCallback(() => {
-    injectPageSize("Letter portrait");
-    document.body.classList.remove("print-mode-invoice");
-    document.body.classList.add("print-mode-letter");
-    setTimeout(() => { window.print(); document.body.classList.remove("print-mode-letter"); }, 50);
-  }, [injectPageSize]);
+    try { printClone("letter-template", "letter portrait", "letter-width"); setPrintFail(false); return true; }
+    catch { setPrintFail(true); return false; }
+  }, [printClone]);
 
   // --- Impresoras configuradas: destino real por tipo de documento ---
   const printerById = (id) => (settings.printers?.lista || []).find((p) => p.id === id);
@@ -716,8 +723,8 @@ export default function POS({ windowId, windowLabel }) {
       try {
         // refresca clientes para actualizar saldo mostrado
         const { data: cl } = await api.get("/clients", { params: { estado: "activo" } });
-        setClients(cl.data);
-        const pub = cl.data.find((c) => c.codigo === "PUBLICO");
+        setClients(cl);
+        const pub = (cl || []).find((c) => c.codigo === "PUBLICO");
         if (pub && !clienteId) setClienteId(pub.id);
       } catch { /* el refresco de clientes no debe impedir el comprobante */ }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }

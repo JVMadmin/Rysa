@@ -20,6 +20,8 @@ const dotIcon = (bg) =>
   });
 
 const MAP_THEME = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+// Centro por defecto: Palenque, Chiapas.
+const PALENQUE = [17.5095, -91.9827];
 
 export default function ClientesEnCampo() {
   const { can } = useAuth();
@@ -28,9 +30,10 @@ export default function ClientesEnCampo() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
-  const [fVend, setFVend] = useState("");
+  const [fVend, setFVend] = useState("all");
   const [fAdeudo, setFAdeudo] = useState("todos");
   const [vendedores, setVendedores] = useState([]);
+  const [lastUpdate, setLastUpdate] = useState(null);
 
   const load = async () => {
     setLoading(true); setErr("");
@@ -43,6 +46,7 @@ export default function ClientesEnCampo() {
         const { data } = await api.get("/seller/clients");
         setRows(data || []);
       }
+      setLastUpdate(new Date());
     } catch (e) {
       setErr("No se pudieron cargar los clientes en campo.");
       setRows([]);
@@ -50,10 +54,15 @@ export default function ClientesEnCampo() {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [isSup]);
+  // Auto-refresco cada 60 s para mantener saldos/GPS frescos sin tocar nada.
+  useEffect(() => {
+    const iv = setInterval(() => { load(); }, 60000);
+    return () => clearInterval(iv);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtrados = useMemo(() => rows.filter((c) => {
     if (q && !`${c.nombre} ${c.codigo} ${c.telefono || ""} ${c.ciudad || ""}`.toLowerCase().includes(q.toLowerCase())) return false;
-    if (fVend && c.vendedor_id !== fVend) return false;
+    if (fVend !== "all" && c.vendedor_id !== fVend) return false;
     if (fAdeudo === "vencido" && !(Number(c.vencido || 0) > 0)) return false;
     if (fAdeudo === "saldo" && !(Number(c.saldo || 0) > 0)) return false;
     if (fAdeudo === "limpio" && (Number(c.saldo || 0) > 0)) return false;
@@ -71,6 +80,9 @@ export default function ClientesEnCampo() {
         </div>
         <Button variant="outline" className="h-9" onClick={load}><RefreshCw className="w-4 h-4 mr-1" /> Actualizar</Button>
       </div>
+      <p className="text-[11px] text-slate-400 -mt-3">
+        {lastUpdate ? `Actualizado ${lastUpdate.toLocaleTimeString("es-MX")} · se refresca solo cada minuto` : "Cargando…"}
+      </p>
 
       <div className="flex flex-wrap items-end gap-3 card-soft p-3">
         <div className="flex-1 min-w-[200px]">
@@ -83,7 +95,7 @@ export default function ClientesEnCampo() {
             <Select value={fVend} onValueChange={setFVend}>
               <SelectTrigger className="w-44 mt-1 h-9"><SelectValue placeholder="Todos" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Todos</SelectItem>
+                <SelectItem value="all">Todos</SelectItem>
                 {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
               </SelectContent>
             </Select>
@@ -111,7 +123,7 @@ export default function ClientesEnCampo() {
           {geoloc.length > 0 && (
             <div className="card-soft p-2">
               <div className="h-[300px] rounded-lg overflow-hidden border border-slate-200">
-                <MapContainer center={geoloc[0] && [Number(geoloc[0].latitud), Number(geoloc[0].longitud)] || [20.6668, -103.3918]} zoom={12} style={{ height: "100%", width: "100%" }}>
+                <MapContainer center={geoloc[0] && [Number(geoloc[0].latitud), Number(geoloc[0].longitud)] || PALENQUE} zoom={13} style={{ height: "100%", width: "100%" }}>
                   <TileLayer url={MAP_THEME} attribution="&copy; OpenStreetMap" />
                   {geoloc.map((c) => (
                     <Marker key={c.id} position={[Number(c.latitud), Number(c.longitud)]} icon={dotIcon(Number(c.vencido || 0) > 0 ? "#DC2626" : Number(c.saldo || 0) > 0 ? "#D97706" : "#C1401E")}>

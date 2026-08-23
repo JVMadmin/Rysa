@@ -28,10 +28,12 @@ export default function Facturacion() {
   const loadTimbres = () => api.get("/facturacion/timbres").then((r) => setTimbres(r.data)).catch(() => {});
   const loadAll = async () => {
     setLoading(true);
-    const [f, v] = await Promise.all([api.get("/facturacion"), api.get("/facturacion/facturables")]);
-    setFacturas(f.data); setFacturables(v.data);
-    if (puedeConfig) { try { const c = await api.get("/facturacion/config"); setCfg(c.data); } catch { /* */ } }
-    setLoading(false);
+    try {
+      const [f, v] = await Promise.all([api.get("/facturacion"), api.get("/facturacion/facturables")]);
+      setFacturas(f.data); setFacturables(v.data);
+      if (puedeConfig) { try { const c = await api.get("/facturacion/config"); setCfg(c.data); } catch { /* */ } }
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail) || "No se pudo cargar la facturación."); }
+    finally { setLoading(false); }
   };
   useEffect(() => { loadTimbres(); loadAll(); /* eslint-disable-next-line */ }, []);
 

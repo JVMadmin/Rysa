@@ -1,0 +1,64 @@
+# ================================================================
+# RYSA Consultor de Precios - servicio Docker INDEPENDIENTE
+# No modifica el ERP ni sus contenedores. Solo usa la PostgreSQL del
+# ERP (SOLO LECTURA) y se conecta a la misma red Docker del principal.
+#
+# Requisito: primero levantar el ERP para que existan la red
+# `rysa_net` y el contenedor `rysa_postgres`:
+#   docker compose up -d
+#
+# Desplegar el consultor:
+#   copy .env.docker.price-checker.example .env.docker.price-checker
+#   docker compose -f docker-compose.price-checker.yml --env-file .env.docker.price-checker up -d
+#
+# El kiosco queda en http://localhost:8081
+# ================================================================
+
+services:
+  rysa_price_checker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rysa_price_checker
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: ${PRICE_DATABASE_URL:-postgresql+asyncpg://rysa:rysa_dev_only_change_me@rysa_postgres:5432/rysa_dev}
+      PRICE_API_TOKEN: ${PRICE_API_TOKEN:-}
+      PRICE_IMG_BASE: ${PRICE_IMG_BASE:-}
+      PRICE_ALLOWED_ORIGINS: ${PRICE_ALLOWED_ORIGINS:-*}
+    # SOLO LECTURA: sin alembic (el ERP ya aplicó el esquema/migraciones).
+    command: ["uvicorn", "price_checker:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/public-price/health', timeout=4)\""]
+      interval: 15s
+      timeout: 6s
+      retries: 5
+      start_period: 20s
+    networks:
+      - rysa_net
+
+  rysa_price_frontend:
+    build:
+      context: ./consultor-precios
+      dockerfile: Dockerfile
+      args:
+        # Ruta relativa: el SPA habla con su mismo origen (/api -> rysa_price_checker).
+        REACT_APP_PRICE_API_URL: ""
+        REACT_APP_IMG_BASE: ${PRICE_IMG_BASE:-}
+        REACT_APP_SUCURSAL: ${PRICE_SUCURSAL:-}
+        REACT_APP_PRICE_TOKEN: ${PRICE_API_TOKEN:-}
+    container_name: rysa_price_frontend
+    restart: unless-stopped
+    ports:
+      - "${PRICE_HTTP_PORT:-8081}:80"
+    depends_on:
+      rysa_price_checker:
+        condition: service_healthy
+    networks:
+      - rysa_net
+
+networks:
+  rysa_net:
+    external: true
+    name: rysa_net

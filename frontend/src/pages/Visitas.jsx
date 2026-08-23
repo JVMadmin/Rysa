@@ -169,7 +169,7 @@ export default function Visitas() {
       ...clientesMap.map((c) => [Number(c.latitud), Number(c.longitud)]),
       ...sellers.filter((s) => s.ultima_ubicacion).map((s) => [Number(s.ultima_ubicacion.latitud), Number(s.ultima_ubicacion.longitud)]),
     ].filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
-    return pts.length ? pts : [[20.59, -100.39]];
+    return pts.length ? pts : [[17.5095, -91.9827]]; // Palenque, Chiapas
   }, [clientesMap, sellers]);
 
   const center = useMemo(() => {
@@ -362,9 +362,9 @@ export default function Visitas() {
             </div>
             {isSup && vendedores.length > 0 && (
               <div><Label className="text-xs text-slate-500">Vendedor asignado</Label>
-                <Select value={form.vendedor_id} onValueChange={(v) => setForm((s) => ({ ...s, vendedor_id: v }))}>
+                <Select value={form.vendedor_id || "__yo__"} onValueChange={(v) => setForm((s) => ({ ...s, vendedor_id: v === "__yo__" ? "" : v }))}>
                   <SelectTrigger className="mt-1" data-testid="visita-vendedor"><SelectValue placeholder="Yo (autenticado)" /></SelectTrigger>
-                  <SelectContent><SelectItem value="">Yo (autenticado)</SelectItem>{vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
+                  <SelectContent><SelectItem value="__yo__">Yo (autenticado)</SelectItem>{vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}

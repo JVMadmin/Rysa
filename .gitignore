@@ -110,5 +110,8 @@ test_reports/
 backend/uploads/
 backend/brand/
 
+# Consultor de Precios (app independiente)
+consultor-precios/build/
+
 # Logs
 *.log

@@ -1,0 +1,17 @@
+{
+  "short_name": "RYSA Precios",
+  "name": "RYSA Consultor de Precios",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#8B3A1A",
+  "theme_color": "#8B3A1A",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "brand/ISOTIPO-Photoroom.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

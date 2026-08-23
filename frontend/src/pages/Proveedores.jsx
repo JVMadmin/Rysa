@@ -30,8 +30,15 @@ export default function Proveedores() {
 
   const load = async () => {
     setLoading(true);
-    const { data } = await api.get("/proveedores", { params: q ? { q } : {} });
-    setList(data); setLoading(false);
+    try {
+      const { data } = await api.get("/proveedores", { params: q ? { q } : {} });
+      setList(data);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "No se pudieron cargar los proveedores.");
+      setList([]);
+    } finally {
+      setLoading(false);
+    }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 

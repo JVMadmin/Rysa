@@ -706,7 +706,7 @@ def _estado_de(ult_actividad: Optional[datetime], ult_ubicacion: Optional[dateti
     return "sin_actividad"
 
 
-async def _metricas_vendedores(vendedores: list, fecha: Optional[str] = None) -> list:
+async def _metricas_vendedores(vendedores: list, fecha: Optional[str] = None) -> tuple:
     """Calcula métricas consolidadas de ventas/cobranza/visitas por vendedor."""
     now = now_utc()
     hoy = fecha or now.date().isoformat()

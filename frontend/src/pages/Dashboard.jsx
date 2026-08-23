@@ -33,9 +33,25 @@ const Kpi = ({ icon: Icon, label, value, color, testid, featured = false }) => (
 
 export default function Dashboard() {
   const [d, setD] = useState(null);
+  const [err, setErr] = useState("");
   const { can, isAdminOrOwner } = useAuth();
 
-  useEffect(() => { api.get("/dashboard").then((r) => setD(r.data)); }, []);
+  const load = () => {
+    setErr("");
+    api.get("/dashboard")
+      .then((r) => setD(r.data))
+      .catch((e) => setErr(e?.response?.data?.detail || "No se pudo cargar el dashboard."));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  if (err) {
+    return (
+      <div className="card-soft p-8 text-center" data-testid="dashboard-error">
+        <p className="text-red-600 mb-4">{err}</p>
+        <button className="px-4 py-2 rounded-xl bg-terracota text-white font-semibold" onClick={load}>Reintentar</button>
+      </div>
+    );
+  }
 
   if (!d) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-terracota" /></div>;
 

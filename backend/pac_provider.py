@@ -95,8 +95,10 @@ def _friendly_message(status, body):
     return f"Facty rechazó la operación (HTTP {status}): {text}"
 
 
-def _request(cfg, method, path, **kwargs):
-    """Cliente HTTP hacia la API de Facty con autenticación Bearer (API Key)."""
+async def _request(cfg, method, path, **kwargs):
+    """Cliente HTTP ASÍNCRONO hacia la API de Facty con Bearer (API Key).
+    Antes usaba httpx.Client síncrono dentro de endpoints async: cada timbrado
+    bloqueaba el event loop hasta 40 s para TODOS los usuarios."""
     key = api_key(cfg)
     if not key:
         raise HTTPException(400, "No hay API Key de Facty configurada. "
@@ -104,8 +106,8 @@ def _request(cfg, method, path, **kwargs):
     headers = {"Authorization": f"Bearer {key}", **kwargs.pop("headers", {})}
     url = base_url(cfg).rstrip("/") + path
     try:
-        with httpx.Client(headers=headers, timeout=40.0) as c:
-            r = c.request(method, url, **kwargs)
+        async with httpx.AsyncClient(headers=headers, timeout=40.0) as c:
+            r = await c.request(method, url, **kwargs)
     except httpx.TimeoutException:
         raise HTTPException(504, "Facty no respondió a tiempo. Verifica tu conexión e inténtalo de nuevo.")
     except httpx.RequestError as e:
@@ -124,19 +126,22 @@ def _request(cfg, method, path, **kwargs):
         return {"__raw__": r.text}
 
 
-def _download(cfg, path, media, signed_url=None, params=None):
-    """Descarga binario (XML/PDF) desde Facty. Si `signed_url` se pasa, la usa
-    directamente (URLs firmadas de 5 min que devuelve el detalle de la factura)."""
+async def _download(cfg, path, media, signed_url=None, params=None):
+    """Descarga binaria (XML/PDF) desde Facty de forma ASÍNCRONA. Si
+    `signed_url` se pasa, la usa directamente (URLs firmadas de 5 min que
+    devuelve el detalle de la factura)."""
     if signed_url:
         try:
-            r = httpx.get(signed_url, timeout=40.0)
+            async with httpx.AsyncClient(timeout=40.0) as c:
+                r = await c.get(signed_url)
         except httpx.RequestError as e:
             raise HTTPException(502, f"No se pudo descargar el archivo: {e}")
     else:
         key = api_key(cfg)
         url = base_url(cfg).rstrip("/") + path
         try:
-            r = httpx.get(url, headers={"Authorization": f"Bearer {key}"}, params=params, timeout=40.0)
+            async with httpx.AsyncClient(timeout=40.0) as c:
+                r = await c.get(url, headers={"Authorization": f"Bearer {key}"}, params=params)
         except httpx.RequestError as e:
             raise HTTPException(502, f"No se pudo descargar de Facty: {e}")
     if r.status_code >= 400:
@@ -210,7 +215,7 @@ def _payload_factura(sale, cliente, cfg, receptor=None):
 # ───────────────────── API genérica usada por server.py ─────────────────────
 async def listar_timbres(cfg):
     """Saldo de timbres disponibles de la cuenta de Facty (billing.read)."""
-    data = _request(cfg, "GET", PATH_BALANCE)
+    data = await _request(cfg, "GET", PATH_BALANCE)
     dato = data.get("available") or data.get("credits") or data.get("balance") \
         or data.get("timbres") or data.get("TotalTimbres") or 0
     return {"disponibles": int(dato or 0), "plan": None, "raw": data}
@@ -220,7 +225,7 @@ async def crear_factura(sale, cliente, cfg, receptor=None):
     """Timbra una factura de ingreso (CFDI 4.0). Consume un timbre.
     Devuelve {id, uuid, serie, folio, total}."""
     payload = _payload_factura(sale, cliente, cfg, receptor)
-    result = _request(cfg, "POST", PATH_CREAR, json=payload)
+    result = await _request(cfg, "POST", PATH_CREAR, json=payload)
     if not isinstance(result, dict) or result.get("__raw__"):
         return {"id": None, "uuid": None, "serie": payload.get("serie"),
                 "folio": None, "total": sale.get("total"), "raw": result}
@@ -243,27 +248,27 @@ async def cancelar_factura(doc, motivo, uuid_reemplazo, cfg):
     body = {"motivo": motivo}
     if uuid_reemplazo:
         body["folioSustitucion"] = uuid_reemplazo
-    return _request(cfg, "POST", PATH_CANCEL.format(id=pac_id), json=body)
+    return await _request(cfg, "POST", PATH_CANCEL.format(id=pac_id), json=body)
 
 
 async def descargar_xml(doc, cfg):
     pac_id = doc.get("pac_id") or doc.get("facturama_id")
     if not pac_id:
         raise HTTPException(404, "El CFDI no tiene identificador de PAC.")
-    return _download(cfg, PATH_XML.format(id=pac_id), "application/xml")
+    return await _download(cfg, PATH_XML.format(id=pac_id), "application/xml")
 
 
 async def descargar_pdf(doc, cfg):
     pac_id = doc.get("pac_id") or doc.get("facturama_id")
     if not pac_id:
         raise HTTPException(404, "El CFDI no tiene identificador de PAC.")
-    detalle = _request(cfg, "GET", PATH_DETALLE.format(id=pac_id),
-                       params={"includeDownloadUrls": "true"})
+    detalle = await _request(cfg, "GET", PATH_DETALLE.format(id=pac_id),
+                             params={"includeDownloadUrls": "true"})
     url = (detalle or {}).get("urls", {}).get("pdf") \
         or (detalle or {}).get("pdfUrl") or (detalle or {}).get("PDF")
     if not url:
         raise HTTPException(502, "Facty no devolvió la URL del PDF para este CFDI.")
-    return _download(cfg, PATH_DETALLE.format(id=pac_id), "application/pdf", signed_url=url)
+    return await _download(cfg, PATH_DETALLE.format(id=pac_id), "application/pdf", signed_url=url)
 
 
 async def emitir_complemento_pago(cfg, factura_padre, pago):
@@ -279,4 +284,4 @@ async def emitir_complemento_pago(cfg, factura_padre, pago):
         "formaPago": forma,
         "monto": _money(pago.get("monto", 0)),
     }
-    return _request(cfg, "POST", PATH_PAGOS.format(id=pac_id), json=body)
+    return await _request(cfg, "POST", PATH_PAGOS.format(id=pac_id), json=body)

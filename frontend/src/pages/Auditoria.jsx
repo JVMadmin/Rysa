@@ -6,11 +6,25 @@ import { Loader2, ScrollText } from "lucide-react";
 export default function Auditoria() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { api.get("/audit").then((r) => { setRows(r.data); setLoading(false); }); }, []);
+  const [err, setErr] = useState("");
+  const load = () => {
+    setLoading(true); setErr("");
+    api.get("/audit")
+      .then((r) => { setRows(r.data); setLoading(false); })
+      .catch(() => { setErr("No se pudo cargar el registro de auditoría."); setLoading(false); });
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
   return (
     <div className="space-y-5" data-testid="auditoria-page">
       <div><h1 className="font-display text-2xl font-black tracking-tight">Auditoría</h1><p className="text-slate-500 text-sm">Registro de acciones críticas del sistema</p></div>
+      {err && (
+        <div className="card-soft p-6 text-center text-red-600">
+          <p className="mb-3">{err}</p>
+          <button className="px-4 py-2 rounded-xl border border-slate-200 text-sm font-semibold" onClick={load}>Reintentar</button>
+        </div>
+      )}
+      {!err && (
       <div className="card-soft overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
@@ -31,6 +45,7 @@ export default function Auditoria() {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

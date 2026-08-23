@@ -37,7 +37,15 @@ def uid() -> str:
     return uuid.uuid4().hex
 
 
+_IDEMPOTENCY_READY = False
+
+
 async def ensure_idempotency_table():
+    """Crea la tabla de idempotencia UNA sola vez por proceso (evita un DDL
+    por cada venta)."""
+    global _IDEMPOTENCY_READY
+    if _IDEMPOTENCY_READY:
+        return
     eng = get_engine()
     async with eng.connect() as conn:
         await conn.execute(text(
@@ -46,6 +54,7 @@ async def ensure_idempotency_table():
             '  "created_at" TIMESTAMPTZ NOT NULL DEFAULT now())'
         ))
         await conn.commit()
+    _IDEMPOTENCY_READY = True
 
 
 async def _existing_by_key(idempotency_key: str):
@@ -339,11 +348,13 @@ async def cancela_venta_pg(*, user, sale_id: str, motivo: str):
                     {"s": float(pendiente), "s2": float(pendiente), "i": sale["cliente_id"]})
 
         # D) Marcar la venta como cancelada (idempotente: FOR UPDATE ya protegió
-        #    la doble cancelación simultánea).
+        #    la doble cancelación simultánea). Se actualiza la columna tipada
+        #    "saldo" JUNTO con el JSONB para que nunca diverjan.
         cancelacion = {"usuario": user_name, "usuario_id": user_id,
                        "fecha": now_iso(), "motivo": motivo}
         await conn.execute(
             text(f'UPDATE {_quote("sales")} SET '
+                 '"saldo" = 0, '
                  'doc = jsonb_set(jsonb_set(jsonb_set(doc, \'{estado}\', CAST(:est AS jsonb), true), '
                  '\'{cancelacion}\', CAST(:canc AS jsonb), true), '
                  '\'{saldo}\', CAST(CAST(0 AS numeric) AS text)::jsonb, true) '

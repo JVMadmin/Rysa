@@ -26,11 +26,11 @@ from typing import List, Optional
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 import pandas as pd
 from datetime import datetime, date, timedelta
 import httpx
-import base64
 import platform
 
 from deps import (
@@ -43,6 +43,7 @@ from deps import (
     es_rol_privilegiado,
 )
 import pgstore.pos as _pgpos
+import pgstore.cxc as _pgcxc
 import pgstore.compras as _pgcompras
 import storage
 import exports
@@ -256,8 +257,8 @@ def build_product_doc(d: dict) -> dict:
 # MODELOS
 # =========================================================================
 class LoginInput(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=128)  # límite anti-DoS contra bcrypt
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -493,10 +494,10 @@ class QuickToggle(BaseModel):
     valor: bool
 
 class AbonoInput(BaseModel):
-    monto: float
+    monto: float = Field(ge=0)
     metodo: str = "efectivo"  # efectivo | tarjeta | transferencia | deposito | otros
-    referencia: Optional[str] = ""
-    nota: Optional[str] = ""
+    referencia: Optional[str] = Field(default="", max_length=200)
+    nota: Optional[str] = Field(default="", max_length=500)
 
 # =========================================================================
 # PROVEEDORES
@@ -705,19 +706,19 @@ class CajaClose(BaseModel):
 
 class SaleItem(BaseModel):
     product_id: Optional[str] = None  # None para líneas sin inventario (p. ej. recargas)
-    codigo: str
-    descripcion: str
-    cantidad: float
+    codigo: str = Field(max_length=100)
+    descripcion: str = Field(max_length=500)
+    cantidad: float = Field(ge=0)      # >= 0: 0 se ignora aguas abajo; nunca negativo
     unidad: str = "PZA"
-    precio: float
-    iva_tasa: float = 8.0
-    descuento: float = 0.0  # monto de descuento por linea
-    comentario: str = ""
+    precio: float = Field(ge=0)
+    iva_tasa: float = Field(default=8.0, ge=0, le=100)
+    descuento: float = Field(default=0.0, ge=0)  # monto de descuento por linea
+    comentario: str = Field(default="", max_length=300)
     costo: Optional[float] = None  # costo unitario tomado del producto (snapshot)
 
 class Pago(BaseModel):
     metodo: str  # efectivo | tarjeta | transferencia | deposito | otros
-    monto: float
+    monto: float = Field(ge=0)
     card_type: Optional[str] = None  # debito | credito (solo cuando metodo == "tarjeta")
 
 class SaleInput(BaseModel):
@@ -1877,12 +1878,52 @@ async def caja_movimiento(data: CajaMovimiento, user: dict = Depends(require_per
     caja = await caja_abierta_de(user["id"])
     if not caja:
         raise HTTPException(400, "No tienes caja abierta")
-    doc = {"id": uid(), "caja_id": caja["id"], "tipo": data.tipo, "concepto": data.concepto,
+    # Las entregas de efectivo (retiros) llevan folio propio RET-xxxxxx para
+    # trazabilidad e impresión del ticket de entrega.
+    folio = ""
+    if data.tipo == "retiro":
+        folio = await next_counter("retiro", "RET", 6)
+    doc = {"id": uid(), "caja_id": caja["id"], "tipo": data.tipo,
+           "folio": folio, "concepto": data.concepto,
            "monto": abs(data.monto), "referencia": data.referencia,
            "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()}
     await db.caja_movimientos.insert_one(doc)
     await log_audit(user, "caja_movimiento", "caja", caja["id"], f"{data.tipo} {data.monto}")
-    return {"ok": True}
+    return {"ok": True, "movimiento": doc}
+
+
+@api.post("/caja/movimientos/{mov_id}/comprobante")
+async def caja_mov_comprobante(mov_id: str, user: dict = Depends(get_current_user)):
+    """Ticket (80 mm) de un movimiento de caja: entrega de efectivo, gasto,
+    entrada o devolución. Descuenta del efectivo esperado al registrarse; este
+    comprobante solo documenta la entrega con folio y firmas."""
+    mov = await db.caja_movimientos.find_one({"id": mov_id}, {"_id": 0})
+    if not mov:
+        raise HTTPException(404, "Movimiento no encontrado")
+    if not es_admin_sistema(user) and mov.get("usuario_id") != user["id"]:
+        raise HTTPException(403, "Solo puedes imprimir tus propios movimientos")
+    caja = await db.cajas.find_one({"id": mov.get("caja_id")}, {"_id": 0}) or {}
+    movs = await db.caja_movimientos.find({"caja_id": mov.get("caja_id")}, {"_id": 0}).to_list(3000)
+    res = resumen_caja(caja, movs)
+    settings_doc = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    try:
+        pdf_bytes = storage.build_entrega_pdf(mov, caja, settings_doc,
+                                              efectivo_en_caja=res.get("efectivo_esperado"))
+        nombre_base = (mov.get("folio") or mov_id[:8]).replace("/", "-")
+        path = f"caja/comprobante-{nombre_base}-{uid()[:8]}.pdf"
+        result = storage.put_object(path, pdf_bytes, "application/pdf")
+    except Exception as e:
+        logger.error("Comprobante de movimiento falló: %s", str(e)[:200])
+        raise HTTPException(502, "No se pudo generar el ticket de entrega.")
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": uid(), "storage_path": stored,
+        "original_filename": f"RYSA_Entrega_{mov.get('folio') or mov_id[:8]}.pdf",
+        "content_type": "application/pdf", "size": result.get("size", len(pdf_bytes)),
+        "movimiento_id": mov_id, "caja_id": mov.get("caja_id"),
+        "is_deleted": False, "created_at": iso_now()})
+    return {"path": stored, "url": f"/api/files/{stored}",
+            "filename": f"RYSA_Entrega_{mov.get('folio') or mov_id[:8]}.pdf"}
 
 @api.post("/caja/cerrar")
 async def cerrar_caja(data: CajaClose, user: dict = Depends(require_permission("caja.cerrar"))):
@@ -1902,10 +1943,17 @@ async def cerrar_caja(data: CajaClose, user: dict = Depends(require_permission("
     res = resumen_caja(caja, movs)
     diferencia = round(data.efectivo_contado - res["efectivo_esperado"], 2)
     cierre = {**res, "efectivo_contado": data.efectivo_contado, "diferencia": diferencia}
-    await db.cajas.update_one({"id": caja["id"]}, {"$set": {
-        "estado": "cerrada", "fecha_cierre": iso_now(), "cierre": cierre}})
+    # Guard de carrera: solo cierra si SIGUE abierta (evita doble cierre
+    # concurrente que sobrescriba el primer cierre con números ya obsoletos).
+    cerradas = await db.cajas.update_one(
+        {"id": caja["id"], "estado": "abierta"},
+        {"$set": {"estado": "cerrada", "fecha_cierre": iso_now(), "cierre": cierre}})
+    if not cerradas:
+        raise HTTPException(409, "La caja acaba de ser cerrada por otro usuario")
     await log_audit(user, "cerrar_caja", "caja", caja["id"], f"diferencia {diferencia}")
-    return {"cierre": cierre}
+    # Se devuelven los movimientos completos para que la UI muestre el
+    # reporte de cierre sin una segunda petición.
+    return {"cierre": cierre, "movimientos": movs}
 
 @api.get("/caja/operadores")
 async def caja_operadores(user: dict = Depends(require_permission("caja.ver"))):
@@ -1956,6 +2004,120 @@ async def caja_historial(desde: Optional[str] = None, hasta: Optional[str] = Non
         movs = await db.caja_movimientos.find({"caja_id": c["id"]}, {"_id": 0}).sort("fecha", 1).to_list(1000)
         c["movimientos"] = movs
     return cajas
+
+
+def _caja_reporte_data(caja: dict, movs: List[dict]) -> dict:
+    """Construye los datos del reporte de cierre: ledger con saldo corrido,
+    totales por tipo y desglose de ventas del turno por método de pago."""
+    fondo = float(caja.get("fondo_inicial", 0) or 0)
+    saldo = fondo
+    filas = []
+    totales = {}
+    for m in sorted(movs or [], key=lambda x: (x.get("fecha") or "")):
+        monto = float(m.get("monto", 0) or 0)
+        tipo = m.get("tipo") or ""
+        entrada = round(monto, 2) if tipo in ("venta", "entrada") else 0.0
+        salida = round(monto, 2) if tipo in ("retiro", "gasto", "devolucion") else 0.0
+        saldo = round(saldo + entrada - salida, 2)
+        totales[tipo] = round(totales.get(tipo, 0) + monto, 2)
+        fecha = (m.get("fecha") or "")
+        filas.append({
+            "hora": fecha[11:16] if len(fecha) >= 16 else fecha[:10],
+            "tipo": tipo, "concepto": m.get("concepto") or "",
+            "referencia": m.get("referencia") or "",
+            "usuario": m.get("usuario_nombre") or "",
+            "entrada": entrada, "salida": salida, "saldo": saldo,
+        })
+    # Ventas del turno agrupadas por método de pago.
+    ventas_metodo = {}
+    num_ventas = 0
+    return {"fondo": fondo, "filas": filas, "totales": totales,
+            "saldo_final": saldo, "ventas_metodo": ventas_metodo,
+            "num_ventas": num_ventas}
+
+
+async def _caja_reporte_payload(caja_id: str, user: dict) -> dict:
+    """Reúne caja + movimientos + resumen para el reporte exportable."""
+    caja = await db.cajas.find_one({"id": caja_id}, {"_id": 0})
+    if not caja:
+        raise HTTPException(404, "Corte de caja no encontrado")
+    if not es_admin_sistema(user) and caja.get("usuario_id") != user["id"]:
+        raise HTTPException(403, "Solo puedes consultar tus propios cortes")
+    movs = await db.caja_movimientos.find({"caja_id": caja_id}, {"_id": 0}).sort("fecha", 1).to_list(5000)
+    rep = _caja_reporte_data(caja, movs)
+    # Desglose de ventas del turno por método de pago.
+    vsales = await db.sales.find(
+        {"caja_id": caja_id, "estado": "confirmada"},
+        {"_id": 0, "pagos": 1, "total": 1}).to_list(20000)
+    metodos = {}
+    for s in vsales:
+        for p in (s.get("pagos") or []):
+            met = p.get("metodo") or "otros"
+            metodos[met] = round(metodos.get(met, 0) + float(p.get("monto", 0) or 0), 2)
+    settings_doc = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    return {"caja": caja, **rep, "metodos": metodos, "settings": settings_doc,
+            "user_name": user.get("name")}
+
+
+@api.get("/caja/{caja_id}/reporte.xlsx")
+async def caja_reporte_xlsx(caja_id: str, user: dict = Depends(require_permission("caja.ver"))):
+    d = await _caja_reporte_payload(caja_id, user)
+    caja = d["caja"]
+    headers = ["Hora", "Tipo", "Concepto", "Referencia", "Usuario", "Entrada", "Salida", "Saldo"]
+    rows = [{"Hora": f["hora"], "Tipo": f["tipo"], "Concepto": f["concepto"],
+             "Referencia": f["referencia"], "Usuario": f["usuario"],
+             "Entrada": f["entrada"] if f["entrada"] else "",
+             "Salida": f["salida"] if f["salida"] else "",
+             "Saldo": f["saldo"]} for f in d["filas"]]
+    rows.append({})
+    rows.append({"Concepto": "Fondo inicial", "Saldo": "", "Entrada": round(d["fondo"], 2)})
+    for tipo, monto in sorted(d["totales"].items()):
+        rows.append({"Concepto": f"Total {tipo}", "Entrada": round(monto, 2)})
+    rows.append({"Concepto": "EFECTIVO ESPERADO", "Entrada": round(float((caja.get("cierre") or {}).get("efectivo_esperado", d["saldo_final"])), 2)})
+    if caja.get("cierre"):
+        rows.append({"Concepto": "Efectivo contado", "Entrada": round(float(caja["cierre"].get("efectivo_contado", 0)), 2)})
+        rows.append({"Concepto": "DIFERENCIA", "Entrada": round(float(caja["cierre"].get("diferencia", 0)), 2)})
+    if d["metodos"]:
+        rows.append({})
+        rows.append({"Concepto": "Ventas por método de pago"})
+        for met, monto in sorted(d["metodos"].items()):
+            rows.append({"Concepto": f"  {met}", "Entrada": round(monto, 2)})
+    filtros = f"Caja: {caja.get('caja_nombre') or 'Caja'} · Cajero: {caja.get('usuario_nombre') or '—'} · Apertura: {(caja.get('fecha_apertura') or '')[:16].replace('T',' ')}"
+    data = exports.excel_bytes(rows, headers, sheet_name="Corte de caja",
+                               title="REPORTE DE CORTE DE CAJA - GRUPO RYSA")
+    stamp = (caja.get("fecha_apertura") or iso_now())[:10]
+    return StreamingResponse(io.BytesIO(data),
+                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f"attachment; filename=caja_{stamp}.xlsx"})
+
+
+@api.get("/caja/{caja_id}/reporte.pdf")
+async def caja_reporte_pdf(caja_id: str, user: dict = Depends(require_permission("caja.ver"))):
+    d = await _caja_reporte_payload(caja_id, user)
+    caja = d["caja"]
+    cierre = caja.get("cierre") or {}
+    mx = lambda v: f"${float(v or 0):,.2f}"  # noqa: E731
+    num_ventas = await db.sales.count_documents({"caja_id": caja_id, "estado": "confirmada"})
+    headers = ["Hora", "Tipo", "Concepto", "Ref.", "Entrada", "Salida", "Saldo"]
+    rows = [[f["hora"], f["tipo"], f["concepto"], f["referencia"],
+             round(f["entrada"], 2) if f["entrada"] else "",
+             round(f["salida"], 2) if f["salida"] else "",
+             round(f["saldo"], 2)] for f in d["filas"]]
+    filtros = (f"Caja: {caja.get('caja_nombre') or 'Caja'} · Cajero: {caja.get('usuario_nombre') or '—'} · "
+               f"Apertura: {(caja.get('fecha_apertura') or '')[:16].replace('T', ' ')} · "
+               + ("CERRADA" if caja.get("estado") == "cerrada" else "ABIERTA") +
+               f" · Fondo inicial: {mx(d['fondo'])} · Ventas del turno: {num_ventas}")
+    if cierre:
+        filtros += (f" · Esperado: {mx(cierre.get('efectivo_esperado'))} · "
+                    f"Contado: {mx(cierre.get('efectivo_contado'))} · Diferencia: {mx(cierre.get('diferencia'))}")
+    if d["metodos"]:
+        filtros += " · Métodos: " + ", ".join(f"{k} {mx(v)}" for k, v in sorted(d["metodos"].items()))
+    data = exports.pdf_bytes("REPORTE DE CORTE DE CAJA", headers, rows,
+                             settings=d["settings"], user_name=d["user_name"],
+                             filtros=filtros, col_weights=[1, 1.4, 3.2, 1.6, 1.4, 1.4, 1.6])
+    stamp = (caja.get("fecha_apertura") or iso_now())[:10]
+    return StreamingResponse(io.BytesIO(data), media_type="application/pdf",
+                             headers={"Content-Disposition": f"attachment; filename=caja_{stamp}.pdf"})
 
 # =========================================================================
 # VENTAS / POS
@@ -2273,7 +2435,7 @@ async def pedido_detail(ped_id: str, user: dict = Depends(get_current_user)):
 
 
 @api.post("/pedidos")
-async def pedido_create(data: PedidoInput, user: dict = Depends(get_current_user)):
+async def pedido_create(data: PedidoInput, user: dict = Depends(require_permission("pedido.gestionar"))):
     if not data.items:
         raise HTTPException(400, "Agrega al menos un producto al pedido")
     cliente = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0}) if data.cliente_id else None
@@ -2316,7 +2478,7 @@ async def pedido_create(data: PedidoInput, user: dict = Depends(get_current_user
 
 
 @api.put("/pedidos/{ped_id}")
-async def pedido_update(ped_id: str, data: PedidoInput, user: dict = Depends(get_current_user)):
+async def pedido_update(ped_id: str, data: PedidoInput, user: dict = Depends(require_permission("pedido.gestionar"))):
     ex = await db.pedidos.find_one({"id": ped_id})
     if not ex:
         raise HTTPException(404, "Pedido no encontrado")
@@ -2360,7 +2522,7 @@ async def pedido_update(ped_id: str, data: PedidoInput, user: dict = Depends(get
 
 
 @api.post("/pedidos/{ped_id}/estado")
-async def pedido_estado(ped_id: str, data: PedidoEstadoInput, user: dict = Depends(get_current_user)):
+async def pedido_estado(ped_id: str, data: PedidoEstadoInput, user: dict = Depends(require_permission("pedido.gestionar"))):
     ex = await db.pedidos.find_one({"id": ped_id})
     if not ex:
         raise HTTPException(404, "Pedido no encontrado")
@@ -2725,51 +2887,24 @@ async def cxc_recordatorio(client_id: str, user: dict = Depends(require_permissi
 
 @api.post("/cxc/{client_id}/abono")
 async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(require_permission("caja.entrada"))):
+    """Abono FIFO ATÓMICO (pgstore.cxc.abonar_pg): cliente y ventas se bloquean
+    con FOR UPDATE en una sola transacción; imposible dejar saldo negativo o
+    aplicaciones parciales."""
     cli = await db.clients.find_one({"id": client_id})
     if not cli:
         raise HTTPException(404, "Cliente no encontrado")
     monto = round(float(data.monto), 2)
     if monto <= 0:
         raise HTTPException(400, "El monto debe ser mayor a cero")
-    saldo_cli = round(float(cli.get("saldo", 0)), 2)
-    if saldo_cli <= 0:
-        raise HTTPException(400, "El cliente no tiene saldo pendiente")
-    if monto > saldo_cli + 0.01:
-        raise HTTPException(400, f"El abono ({monto}) excede el saldo del cliente ({saldo_cli})")
-    sales = await db.sales.find({"cliente_id": client_id, "condicion": "credito", "estado": "confirmada",
-                                 "saldo": {"$gt": 0}}, {"_id": 0}).sort("fecha", 1).to_list(20000)
-    restante = monto
-    aplicaciones = []
-    for s in sales:
-        if restante <= 0.001:
-            break
-        aplica = min(restante, round(float(s.get("saldo", 0)), 2))
-        if aplica <= 0:
-            continue
-        nuevo = round(float(s["saldo"]) - aplica, 2)
-        await db.sales.update_one({"id": s["id"]}, {"$set": {"saldo": nuevo}})
-        aplicaciones.append({"sale_id": s["id"], "folio": s["folio"], "monto": round(aplica, 2)})
-        restante = round(restante - aplica, 2)
-    await db.clients.update_one({"id": client_id}, {"$inc": {"saldo": -monto}})
     caja = await caja_abierta_de(user["id"])
     folio = await next_counter("abono", "AB", 6)
-    doc = {"id": uid(), "folio": folio, "cliente_id": client_id, "cliente_codigo": cli.get("codigo"),
-           "cliente_nombre": cli.get("nombre"), "monto": monto, "metodo": data.metodo,
-           "referencia": data.referencia or "", "nota": data.nota or "", "fecha": iso_now(),
-           "saldo_anterior": saldo_cli,
-           "saldo_restante": round(saldo_cli - monto, 2),
-           "aplicaciones": aplicaciones, "usuario_id": user["id"], "usuario_nombre": user["name"],
-           "caja_id": caja["id"] if caja else None, "estado": "confirmado"}
-    await db.abonos.insert_one(doc)
-    if caja and data.metodo == "efectivo":
-        await db.caja_movimientos.insert_one({
-            "id": uid(), "caja_id": caja["id"], "tipo": "entrada",
-            "concepto": f"Abono {folio} · {cli.get('nombre')}", "monto": monto, "referencia": folio,
-            "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()})
-    await log_audit(user, "abono", "cliente", client_id, f"{folio} monto {monto} metodo {data.metodo}")
-    return {"ok": True, "folio": folio, "saldo_anterior": saldo_cli,
-            "saldo_actual": round(saldo_cli - monto, 2), "aplicaciones": aplicaciones,
-            "caja_afectada": bool(caja and data.metodo == "efectivo"), "abono": doc}
+    try:
+        return await _pgcxc.abonar_pg(
+            client_id=client_id, monto=monto, metodo=data.metodo,
+            referencia=data.referencia or "", nota=data.nota or "",
+            user=user, caja=caja, folio=folio)
+    except _pgcxc.CxcError as e:
+        raise HTTPException(e.status, e.message)
 
 # =========================================================================
 # ABONOS: historial, comprobante PDF y cancelación auditada
@@ -2831,42 +2966,16 @@ async def abono_pdf(abono_id: str, user: dict = Depends(get_current_user)):
 
 @api.post("/abonos/{abono_id}/cancelar")
 async def abono_cancelar(abono_id: str, motivo: str = "Cancelación",
-                         user: dict = Depends(get_current_user)):
-    """Cancela un abono confirmado: recompone el saldo del cliente y sus ventas,
-    registra auditoría y conserva el comprobante/historial original. No elimina
-    físicamente el abono (doble reversión imposible)."""
-    abono = await db.abonos.find_one({"id": abono_id})
-    if not abono:
-        raise HTTPException(404, "Abono no encontrado")
-    if abono.get("estado") == "cancelado":
-        raise HTTPException(409, "El abono ya está cancelado")
-    if not abono.get("cliente_id"):
-        raise HTTPException(400, "El abono no tiene cliente asociado")
-    cli = await db.clients.find_one({"id": abono["cliente_id"]})
-    if not cli:
-        raise HTTPException(404, "Cliente no encontrado")
-    monto = round(float(abono.get("monto", 0) or 0), 2)
-    # Revertir aplicaciones: sumar de vuelta el saldo a cada venta.
-    for ap in abono.get("aplicaciones", []):
-        sal = float((await db.sales.find_one({"id": ap.get("sale_id")}, {"_id": 0}) or {}).get("saldo", 0) or 0)
-        await db.sales.update_one({"id": ap["sale_id"]},
-                                  {"$set": {"saldo": round(sal + float(ap.get("monto", 0) or 0), 2)}})
-    # Revertir saldo del cliente.
-    nuevo_saldo = round(float(cli.get("saldo", 0) or 0) + monto, 2)
-    await db.clients.update_one({"id": abono["cliente_id"]}, {"$set": {"saldo": nuevo_saldo}})
-    # Caja (si el abono fue efectivo, revertirlo).
-    if abono.get("caja_id"):
-        await db.caja_movimientos.insert_one({
-            "id": uid(), "caja_id": abono["caja_id"], "tipo": "retiro",
-            "concepto": f"Cancelación abono {abono.get('folio')}", "monto": monto,
-            "referencia": abono.get("folio"), "usuario_id": user["id"],
-            "usuario_nombre": user["name"], "fecha": iso_now()})
-    await db.abonos.update_one({"id": abono_id}, {"$set": {
-        "estado": "cancelado", "cancelacion": {"usuario": user["name"], "usuario_id": user["id"],
-                                               "fecha": iso_now(), "motivo": motivo}}})
-    await log_audit(user, "abono_cancelar", "abono", abono_id,
-                    f"{abono.get('folio')} monto {monto} motivo {motivo}")
-    return {"ok": True, "folio": abono.get("folio"), "saldo_recompuesto": nuevo_saldo}
+                         user: dict = Depends(require_permission("caja.entrada"))):
+    """Cancela un abono confirmado de forma ATÓMICA (pgstore.cxc.cancelar_abono_pg):
+    recompone saldos de ventas y cliente en una sola transacción. Requiere el
+    mismo permiso que crear un abono (antes cualquier usuario autenticado
+    podía cancelarlo)."""
+    try:
+        return await _pgcxc.cancelar_abono_pg(abono_id=abono_id,
+                                              motivo=motivo or "Cancelación", user=user)
+    except _pgcxc.CxcError as e:
+        raise HTTPException(e.status, e.message)
 
 # =========================================================================
 # PROVEEDORES
@@ -2884,7 +2993,7 @@ async def proveedores_list(q: Optional[str] = None,
     return docs
 
 @api.post("/proveedores")
-async def proveedor_create(data: ProveedorInput, user: dict = Depends(get_current_user)):
+async def proveedor_create(data: ProveedorInput, user: dict = Depends(require_permission("proveedor.crear"))):
     pid = uid()
     codigo = f"PRV{pid[:6].upper()}"
     doc = {"id": pid, "codigo": codigo, **data.model_dump(),
@@ -2897,7 +3006,7 @@ async def proveedor_create(data: ProveedorInput, user: dict = Depends(get_curren
 
 @api.put("/proveedores/{proveedor_id}")
 async def proveedor_update(proveedor_id: str, data: ProveedorInput,
-                           user: dict = Depends(get_current_user)):
+                           user: dict = Depends(require_permission("proveedor.editar"))):
     ex = await db.proveedores.find_one({"id": proveedor_id})
     if not ex:
         raise HTTPException(404, "Proveedor no encontrado")
@@ -2911,7 +3020,7 @@ async def proveedor_update(proveedor_id: str, data: ProveedorInput,
 
 @api.patch("/proveedores/{proveedor_id}/estado")
 async def proveedor_estado(proveedor_id: str, activo: bool,
-                           user: dict = Depends(get_current_user)):
+                           user: dict = Depends(require_permission("proveedor.editar"))):
     await db.proveedores.update_one({"id": proveedor_id},
                                     {"$set": {"activo": activo, "estado": "activo" if activo else "inactivo",
                                               "updated_at": iso_now()}})
@@ -2966,7 +3075,7 @@ async def cuentas_bancarias_list(user: dict = Depends(get_current_user)):
 
 @api.post("/cuentas-bancarias")
 async def cuenta_bancaria_create(data: CuentaBancariaInput,
-                                 user: dict = Depends(get_current_user)):
+                                 user: dict = Depends(require_permission("cuentas.editar"))):
     cid = uid()
     if data.predeterminada:
         for cta in await db.cuentas_bancarias.find({}, {"_id": 0}).to_list(5000):
@@ -2980,7 +3089,7 @@ async def cuenta_bancaria_create(data: CuentaBancariaInput,
 
 @api.put("/cuentas-bancarias/{cuenta_id}")
 async def cuenta_bancaria_update(cuenta_id: str, data: CuentaBancariaInput,
-                                 user: dict = Depends(get_current_user)):
+                                 user: dict = Depends(require_permission("cuentas.editar"))):
     if not await db.cuentas_bancarias.find_one({"id": cuenta_id}):
         raise HTTPException(404, "Cuenta no encontrada")
     if data.predeterminada:
@@ -2993,7 +3102,7 @@ async def cuenta_bancaria_update(cuenta_id: str, data: CuentaBancariaInput,
     return await db.cuentas_bancarias.find_one({"id": cuenta_id}, {"_id": 0})
 
 @api.patch("/cuentas-bancarias/{cuenta_id}/pagar")
-async def cuenta_bancaria_pagar(cuenta_id: str, user: dict = Depends(get_current_user)):
+async def cuenta_bancaria_pagar(cuenta_id: str, user: dict = Depends(require_permission("cuentas.editar"))):
     """Activa/desactiva una cuenta (nunca se elimina físicamente)."""
     cta = await db.cuentas_bancarias.find_one({"id": cuenta_id})
     if not cta:
@@ -3088,7 +3197,7 @@ async def compras_create(data: CompraInput, user: dict = Depends(get_current_use
 
 @api.post("/compras/{compra_id}/cancelar")
 async def compras_cancelar(compra_id: str, motivo: str = "Cancelación",
-                           user: dict = Depends(get_current_user)):
+                           user: dict = Depends(require_permission("compra.cancelar"))):
     try:
         result = await _pgcompras.cancela_compra_pg(user=user, compra_id=compra_id, motivo=motivo)
     except Exception as e:
@@ -3210,7 +3319,11 @@ async def compras_ocr(file: UploadFile = File(...), user: dict = Depends(get_cur
         {"_id": 0, "id": 1, "codigo": 1, "descripcion": 1, "costo": 1,
          "iva_tasa": 1, "unidad_medida": 1}).to_list(100000)
     try:
-        result = _ocr_invoice.process_factura(data, filename, products)
+        # OCR pesado (Tesseract + render PDF): corre en threadpool para NO
+        # bloquear el event loop (antes congelaba la API decenas de segundos).
+        result = await run_in_threadpool(_ocr_invoice.process_factura, data, filename, products)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("OCR factura falló: %s", str(e)[:200])
         raise HTTPException(422, str(e))
@@ -3766,13 +3879,13 @@ async def cxp_export_pdf(desde: Optional[str] = None, hasta: Optional[str] = Non
 
 @api.post("/cxp/{compra_id}/pagar")
 async def cxp_pagar(compra_id: str, data: CompraPagoInput,
-                    user: dict = Depends(get_current_user)):
+                    user: dict = Depends(require_permission("cxp.pagar"))):
     """Pago de factura vía Cuenta por pagar."""
     return await compras_pagar(compra_id, data, user)
 
 @api.post("/compras/{compra_id}/pagar")
 async def compras_pagar(compra_id: str, data: CompraPagoInput,
-                        user: dict = Depends(get_current_user)):
+                        user: dict = Depends(require_permission("cxp.pagar"))):
     compra = await db.compras.find_one({"id": compra_id})
     if not compra:
         raise HTTPException(404, "Compra no encontrada")
@@ -4929,7 +5042,7 @@ async def dev_errores(user: dict = Depends(_dev_only)):
     return {"errores": list(reversed(DEV_ERRORS))}
 
 @api.delete("/dev/errores")
-async def dev_buscar_errores(user: dict = Depends(_dev_only)):
+async def dev_limpiar_errores(user: dict = Depends(_dev_only)):
     DEV_ERRORS.clear()
     await log_audit(user, "dev_limpiar", "dev", "errores", "Bitácora de errores limpiada")
     return {"ok": True}
@@ -4952,6 +5065,139 @@ async def dev_info(user: dict = Depends(_dev_only)):
         "errores_en_memoria": len(DEV_ERRORS),
         "admin_system_roles": sorted(ADMIN_SYSTEM_ROLES),
     }
+
+
+# --- Datos demo de fuerza de ventas (SOLO DEV) --------------------------------
+# Crea cuentas de vendedores + clientes con GPS en Palenque, Chiapas, y
+# simula el track de ubicaciones del día + visitas. Idempotente: si los
+# vendedores demo ya existen solo regenera el track de HOY.
+_PALENQUE = (17.5095, -91.9827)  # centro de Palenque, Chiapas
+
+_DEMO_VENDEDORES = [
+    {"email": "ramiro.demo@rysa.dev", "name": "Ramiro Gómez"},
+    {"email": "lucia.demo@rysa.dev", "name": "Lucía Hernández"},
+    {"email": "pedro.demo@rysa.dev", "name": "Pedro Cruz"},
+]
+_DEMO_PASSWORD = "DemoVendedor2026"
+
+_DEMO_CLIENTES = [
+    ("Tienda La Esperanza", 0.004, 0.003), ("Abarrotes El Progreso", -0.005, 0.006),
+    ("Miscelánea Doña Mary", 0.007, -0.004), ("Farmacia San Juan", -0.008, -0.003),
+    ("Bodega Palenque Norte", 0.011, 0.009), ("Papelería Central", -0.002, 0.012),
+    ("Restaurante El Folclor", 0.009, -0.010), ("Distribuidora Maya", -0.012, 0.001),
+    ("Tiendita El Ahorro", 0.003, -0.013), ("Comercial Pakal", -0.006, -0.011),
+    ("Vinatería Los Comales", 0.013, -0.001), ("Abarrotes Pakal Na", -0.010, -0.008),
+]
+
+
+@api.post("/dev/seed-campo")
+async def dev_seed_campo(regenerar_track: bool = True, user: dict = Depends(_dev_only)):
+    """SIMULACIÓN (solo desarrollo): vendedores, clientes con GPS en Palenque,
+    track de ubicaciones de HOY y visitas. No crea ventas ni afecta finanzas."""
+    import random
+    random.seed(42)
+    lat0, lng0 = _PALENQUE
+    hoy = iso_now()[:10]
+    resumen = {"vendedores": [], "clientes_creados": 0, "ubicaciones_hoy": 0,
+               "visitas_creadas": 0}
+
+    # 1) Vendedores demo (rol vendedor, activos).
+    vids = {}
+    for dv in _DEMO_VENDEDORES:
+        ex = await db.users.find_one({"email": dv["email"]}, {"_id": 0})
+        if not ex:
+            doc = {"id": uid(), "email": dv["email"], "name": dv["name"],
+                   "password_hash": hash_password(_DEMO_PASSWORD), "role": "vendedor",
+                   "active": True, "token_version": 0,
+                   "modulos": ["clientes"], "created_at": iso_now()}
+            await db.users.insert_one(doc)
+            ex = doc
+            resumen["vendedores"].append(f"{dv['name']} (NUEVO · {_DEMO_PASSWORD})")
+        else:
+            resumen["vendedores"].append(f"{dv['name']} (ya existía)")
+        vids[ex["id"]] = ex["name"]
+    vid_list = list(vids.keys())
+
+    # 2) Clientes demo con coordenadas en Palenque, repartidos entre vendedores.
+    for i, (nombre, dlat, dlng) in enumerate(_DEMO_CLIENTES):
+        codigo = f"DEMO-{i+1:03d}"
+        if await db.clients.find_one({"codigo": codigo}):
+            continue
+        vid = vid_list[i % len(vid_list)]
+        await db.clients.insert_one({
+            "id": uid(), "codigo": codigo, "nombre": nombre,
+            "estado": "activo", "tipo": "menudeo",
+            "telefono": f"916{100000+i}", "ciudad": "Palenque",
+            "direccion": "Zona demo Palenque, Chiapas",
+            "latitud": round(lat0 + dlat, 6), "longitud": round(lng0 + dlng, 6),
+            "vendedor_id": vid, "vendedor": vids[vid],
+            "dias_credito": random.choice([8, 15, 30]),
+            "credito_autorizado": True, "limite_credito": 5000, "saldo": 0,
+            "lista_precios": 1, "created_at": iso_now()})
+        resumen["clientes_creados"] += 1
+
+    clientes = await db.clients.find({"codigo": {"$regex": "^DEMO-"}}, {"_id": 0}).to_list(100)
+
+    # 3) Track GPS de HOY por vendedor (08:30 → hora actual, entre clientes).
+    if regenerar_track:
+        now_h = now_utc().hour
+        for vid in vid_list:
+            # limpiar track previo de hoy para no duplicar
+            previos = await db.seller_locations.find(
+                {"vendedor_id": vid, "fecha": {"$regex": "^" + hoy}}, {"_id": 0}).to_list(500)
+            for p in previos:
+                await db.seller_locations.delete_one({"id": p["id"]})
+            mis_clientes = [c for c in clientes if c.get("vendedor_id") == vid] or clientes
+            puntos = []
+            hora_f = 8.5
+            paso_min = 35
+            while hora_f <= min(now_h + random.random(), 19.0):
+                c = random.choice(mis_clientes)
+                jitter = lambda v: round(v + random.uniform(-0.0006, 0.0006), 6)  # noqa: E731
+                hh = int(hora_f); mm = int((hora_f - hh) * 60)
+                puntos.append({
+                    "id": uid(), "vendedor_id": vid,
+                    "latitud": jitter(c.get("latitud") or lat0),
+                    "longitud": jitter(c.get("longitud") or lng0),
+                    "precision": round(random.uniform(5, 25), 1),
+                    "fuente": "gps",
+                    "velocidad_kmh": round(random.uniform(0, 45), 1),
+                    "bateria_pct": max(15, 95 - int(hora_f) * 5),
+                    "fecha": f"{hoy}T{hh:02d}:{mm:02d}:{random.randint(10,59):02d}",
+                })
+                hora_f += paso_min / 60.0
+                paso_min = random.randint(20, 50)
+            for p in reversed(puntos):  # insertar en orden cronológico
+                await db.seller_locations.insert_one(p)
+            resumen["ubicaciones_hoy"] += len(puntos)
+
+    # 4) Visitas de hoy (algunas realizadas, otras programadas más tarde).
+    for vid in vid_list:
+        ya = await db.visits.find(
+            {"vendedor_id": vid, "fecha": {"$regex": "^" + hoy}}, {"_id": 0}).to_list(200)
+        if ya:
+            continue
+        mis = [c for c in clientes if c.get("vendedor_id") == vid] or clientes
+        for k, c in enumerate(random.sample(mis, min(3, len(mis)))):
+            realizada = k == 0
+            estado = "realizada" if realizada else "programada"
+            await db.visits.insert_one({
+                "id": uid(), "cliente_id": c["id"], "cliente_nombre": c.get("nombre"),
+                "vendedor_id": vid, "vendedor_nombre": vids[vid],
+                "tipo": random.choice(["visita", "cobro", "seguimiento"]),
+                "estado": estado,
+                "fecha": f"{hoy}T{8+k}:00:00",
+                "fecha_programada": f"{hoy}T{14+k}:00:00",
+                "comentarios": "Visita demo generada automáticamente." if realizada else "",
+                "checkin": ({"latitud": c.get("latitud"), "longitud": c.get("longitud"),
+                             "hora": f"{hoy}T{8+k}:2{i}:00"} if realizada else None),
+                "usuario_id": user["id"], "created_at": iso_now(),
+                "updated_at": iso_now()})
+            resumen["visitas_creadas"] += 1
+
+    return {"ok": True, **resumen,
+            "login_demo": [{"email": e, "password": _DEMO_PASSWORD} for _, e in
+                           [(v["name"], v["email"]) for v in _DEMO_VENDEDORES]]}
 
 # =========================================================================
 # SUCURSALES

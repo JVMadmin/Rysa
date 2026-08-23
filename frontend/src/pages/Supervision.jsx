@@ -322,7 +322,8 @@ export default function Supervision() {
                       const pts = sellers.filter((s) => s.ultima_ubicacion).map((s) => [Number(s.ultima_ubicacion.latitud), Number(s.ultima_ubicacion.longitud)]);
                       const b = pts.length ? pts : [[20.59, -100.39]];
                       const lats = b.map((p) => p[0]), lngs = b.map((p) => p[1]);
-                      const center = pts.length ? [lats.reduce((a, x) => a + x, 0) / lats.length, lngs.reduce((a, x) => a + x, 0) / lngs.length] : [20.59, -100.39];
+                          const center = pts.length ? [lats.reduce((a, x) => a + x, 0) /
+                              lats.length, lngs.reduce((a, x) => a + x, 0) / lngs.length] : [17.5095, -91.9827];
                       const liveSellers = sellers.filter((s) => s.ultima_ubicacion);
                       return (
                         <div className="h-[440px] rounded-lg overflow-hidden border border-slate-200">
