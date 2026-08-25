@@ -304,8 +304,14 @@ export default function MiActividadCampo({ embedded = false }) {
 
   const openNew = async (presetCliente = null) => {
     setEditing(null);
-    setForm({ cliente_id: presetCliente ? presetCliente.id : "", cliente_nombre: presetCliente ? presetCliente.nombre : "", cliente_nombre: "", fecha_programada: new Date().toISOString().slice(0, 10), hora: new Date().toTimeString().slice(0, 5), tipo_visita: "visita", estado: "programada", comentarios: "" });
-    setClienteQuery(""); setClienteOpen(false);
+    setForm({
+      cliente_id: presetCliente ? presetCliente.id : "",
+      cliente_nombre: presetCliente ? presetCliente.nombre : "",
+      fecha_programada: new Date().toISOString().slice(0, 10), hora: new Date().toTimeString().slice(0, 5),
+      tipo_visita: "visita", estado: "programada", comentarios: "",
+    });
+    setClienteQuery(presetCliente ? `${presetCliente.codigo || ""} ${presetCliente.nombre}`.trim() : "");
+    setClienteOpen(false);
     await loadMetaClientes();
     setFormOpen(true);
   };

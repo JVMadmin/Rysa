@@ -144,6 +144,12 @@ export default function Compras() {
   const [prodOpen, setProdOpen] = useState(false);
   const [prodForm, setProdForm] = useState(prodBlank());
   const [prodSaving, setProdSaving] = useState(false);
+  // § Nuevo producto: categoría con todas+filtro, código de barras por lector/manual,
+  //   precio al público y unidades desde Configuración (fallback UNIDADES_FRONT).
+  const [categoriasLista, setCategoriasLista] = useState([]);
+  const [unidades, setUnidades] = useState(UNIDADES_FRONT);
+  const [catAbierta, setCatAbierta] = useState(false);
+  const [barrasInput, setBarrasInput] = useState("");
 
   // ---- Navegación por tabs ----
   const [tab, setTab] = useState("compras");
@@ -194,7 +200,14 @@ export default function Compras() {
   const loadProveedores = async () => { const { data } = await api.get("/proveedores"); setProveedores(data); };
   const loadCuentas = async () => { try { const { data } = await api.get("/cuentas-bancarias"); setCuentas(data); } catch { setCuentas([]); } };
   const loadProductos = async () => { try { const { data } = await api.get("/products", { params: { limit: 5000 } }); const arr = Array.isArray(data) ? data : (data.items || data.products || []); setProductos(arr); } catch { setProductos([]); } };
-  useEffect(() => { loadProveedores(); loadCuentas(); loadProductos(); /* eslint-disable-next-line */ }, []);
+  const loadCategorias = async () => { try { const { data } = await api.get("/categories"); setCategoriasLista(data || []); } catch { setCategoriasLista([]); } };
+  const loadUnidades = async () => {
+    try {
+      const { data } = await api.get("/settings");
+      if (Array.isArray(data?.unidades_medida) && data.unidades_medida.length) setUnidades(data.unidades_medida);
+    } catch { /* fallback UNIDADES_FRONT */ }
+  };
+  useEffect(() => { loadProveedores(); loadCuentas(); loadProductos(); loadCategorias(); loadUnidades(); /* eslint-disable-next-line */ }, []);
 
   const load = async () => {
     setLoading(true);
@@ -400,14 +413,21 @@ export default function Compras() {
         descripcion: prodForm.descripcion.trim(),
         codigo: prodForm.codigo.trim() || undefined,
         categoria: prodForm.categoria,
+        codigos_barras: (prodForm.codigos_barras || []).filter(Boolean),
         costo: Number(prodForm.costo || 0),
-        iva_tasa: Number(prodForm.iva_tasa || 8),
+        iva_tasa: 8,
         unidad_medida: prodForm.unidad_medida || "PZA",
         existencia: Number(prodForm.existencia || 0),
-        precios: [{ nombre: "Precio 1", utilidad_pct: 30, precio_con_iva: 0 }],
+        precios: [{ nombre: "Precio 1", precio_con_iva: Number(prodForm.precio_publico || 0) }],
       };
       const { data } = await api.post("/products", payload);
       await loadProductos();
+      // Si la categoría es nueva, registrarla en el catálogo
+      if (prodForm.categoria.trim() && !categoriasLista.some((c) => c.nombre === prodForm.categoria.trim())) {
+        api.post("/categories", { nombre: prodForm.categoria.trim() }).then(({ data: cat }) => {
+          setCategoriasLista((l) => [...l, cat]);
+        }).catch(() => {});
+      }
       addItem({ ...data, unidad: data.unidad_medida });
       setProdOpen(false);
       setProdForm(prodBlank());
@@ -1107,13 +1127,79 @@ export default function Compras() {
               <Input value={prodForm.descripcion} onChange={(e) => setProdForm((s) => ({ ...s, descripcion: e.target.value }))} className="mt-1" placeholder="Nombre del producto" />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Código / Código de barras</Label><Input value={prodForm.codigo} onChange={(e) => setProdForm((s) => ({ ...s, codigo: e.target.value }))} className="mt-1" placeholder="Código (vacío = automático)" /></div>
-              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Categoría</Label><Input value={prodForm.categoria} onChange={(e) => setProdForm((s) => ({ ...s, categoria: e.target.value }))} className="mt-1" placeholder="Categoría" /></div>
+              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Código interno</Label><Input value={prodForm.codigo} onChange={(e) => setProdForm((s) => ({ ...s, codigo: e.target.value }))} className="mt-1" placeholder="Código (vacío = automático)" /></div>
+              <div className="relative">
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Categoría</Label>
+                <Input
+                  value={prodForm.categoria}
+                  onChange={(e) => { setProdForm((s) => ({ ...s, categoria: e.target.value })); setCatAbierta(true); }}
+                  onFocus={() => setCatAbierta(true)}
+                  onBlur={() => setTimeout(() => setCatAbierta(false), 150)}
+                  className="mt-1"
+                  placeholder="Escribe para filtrar todas…"
+                  data-testid="prod-categoria" />
+                {catAbierta && categoriasLista.length > 0 && (
+                  <div className="absolute z-30 mt-1 w-full bg-white border border-slate-200 rounded-md shadow-lg max-h-52 overflow-y-auto">
+                    {categoriasLista
+                      .filter((c) => !prodForm.categoria || (c.nombre || "").toLowerCase().includes(prodForm.categoria.toLowerCase()))
+                      .slice(0, 50).map((c) => (
+                      <button key={c.id} type="button" onMouseDown={() => { setProdForm((s) => ({ ...s, categoria: c.nombre })); setCatAbierta(false); }}
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50">{c.nombre}</button>
+                    ))}
+                    {categoriasLista.filter((c) => !prodForm.categoria || (c.nombre || "").toLowerCase().includes(prodForm.categoria.toLowerCase())).length === 0 && (
+                      <div className="px-3 py-2 text-xs text-slate-400">Se creará como nueva categoría al guardar.</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-slate-500">Código de barras (lector o manual — Enter agrega)</Label>
+              <Input
+                value={barrasInput}
+                onChange={(e) => setBarrasInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.key === "Enter" || e.key === "Tab") && barrasInput.trim()) {
+                    e.preventDefault();
+                    const v = barrasInput.trim();
+                    if (!(prodForm.codigos_barras || []).includes(v)) {
+                      setProdForm((s) => ({ ...s, codigos_barras: [...(s.codigos_barras || []), v] }));
+                    }
+                    setBarrasInput("");
+                  }
+                }}
+                className="mt-1"
+                placeholder="Escanea con el lector o escribe y presiona Enter"
+                data-testid="prod-barras-input" />
+              {(prodForm.codigos_barras || []).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {prodForm.codigos_barras.map((b, i) => (
+                    <span key={`${b}-${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-xs font-mono">
+                      {b}
+                      <button type="button" onClick={() => setProdForm((s) => ({ ...s, codigos_barras: s.codigos_barras.filter((_, idx) => idx !== i) }))} className="text-slate-400 hover:text-red-600">×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs uppercase tracking-wider text-slate-500">Costo</Label><Input type="number" value={prodForm.costo} onChange={(e) => setProdForm((s) => ({ ...s, costo: e.target.value }))} className="mt-1" /></div>
-              <div><Label className="text-xs uppercase tracking-wider text-slate-500">IVA %</Label><Input type="number" value={prodForm.iva_tasa} onChange={(e) => setProdForm((s) => ({ ...s, iva_tasa: e.target.value }))} className="mt-1" /></div>
-              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Unidad</Label><Input value={prodForm.unidad_medida} onChange={(e) => setProdForm((s) => ({ ...s, unidad_medida: e.target.value }))} className="mt-1" /></div>
+              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Precio venta al público</Label><Input type="number" value={prodForm.precio_publico} onChange={(e) => setProdForm((s) => ({ ...s, precio_publico: e.target.value }))} className="mt-1" placeholder="Público general" data-testid="prod-precio-publico" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">IVA (predeterminado)</Label>
+                <div className="mt-1 h-9 rounded-md border bg-slate-50 flex items-center justify-center text-sm font-semibold text-slate-600">8%</div>
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Unidad de medida</Label>
+                <Select value={prodForm.unidad_medida || "PZA"} onValueChange={(v) => setProdForm((s) => ({ ...s, unidad_medida: v }))}>
+                  <SelectTrigger className="mt-1" data-testid="prod-unidad"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {unidades.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Existencia inicial</Label><Input type="number" value={prodForm.existencia} onChange={(e) => setProdForm((s) => ({ ...s, existencia: e.target.value }))} className="mt-1" /></div>
             <DialogFooter>

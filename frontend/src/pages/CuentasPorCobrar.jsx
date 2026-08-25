@@ -78,6 +78,18 @@ export default function CuentasPorCobrar() {
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [soloVencidos, estado, facturada]);
 
+  // Preselección desde "Mi Ruta" (botón Cobrar del mapa de campo).
+  useEffect(() => {
+    let pre = null;
+    try { pre = JSON.parse(sessionStorage.getItem("preselect_cxc")); } catch { pre = null; }
+    if (!pre?.id || loading) return;
+    sessionStorage.removeItem("preselect_cxc");
+    const row = (data.clientes || []).find((c) => c.cliente_id === pre.id);
+    if (row && puedeCobrar) openAbono(row);
+    else toast.info("Ese cliente no tiene saldos pendientes en CxC");
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [loading, data]);
+
   const openAbono = (c) => { setAbonoCli(c); setAbono({ monto: "", metodo: "efectivo", referencia: "", nota: "" }); };
   const guardarAbono = async () => {
     const monto = Number(abono.monto);
