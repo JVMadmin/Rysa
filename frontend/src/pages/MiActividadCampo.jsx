@@ -188,6 +188,109 @@ export default function MiActividadCampo({ embedded = false }) {
     return clientesMapa.filter((c) => ids.has(c.id));
   }, [visits, clientesMapa]);
 
+  /* ========== MI RUTA: filtros, captura de ubicación y ruta sugerida ===== */
+  const [filtroRuta, setFiltroRuta] = useState("todos");
+  const [rutaSugerida, setRutaSugerida] = useState(false);
+  const [capturando, setCapturando] = useState(null);
+  const [capQ, setCapQ] = useState("");
+  const [selCliCard, setSelCliCard] = useState(null);
+  const hoyISO = new Date().toISOString().slice(0, 10);
+
+  const cliEnriquecidos = useMemo(() => cartera.map((c) => {
+    const pos = (c.latitud != null && c.longitud != null)
+      ? [Number(c.latitud), Number(c.longitud)] : null;
+    const extra = (mapp?.clientes || []).find((x) => x.id === c.id) || {};
+    const visitadoHoy = visits.some((vi) => vi.cliente_id === c.id
+      && vi.estado === "realizada" && String(vi.fecha || "").slice(0, 10) === hoyISO);
+    return { ...c, pos,
+      ultima_visita: c.ultima_visita || extra.ultima_visita || "", visitadoHoy };
+  }), [cartera, mapp, visits, hoyISO]);
+
+  const sinUbicacionCount = useMemo(
+    () => cliEnriquecidos.filter((c) => !c.pos).length, [cliEnriquecidos]);
+
+  const cliMapaFiltrados = useMemo(() => cliEnriquecidos
+    .filter((c) => !!c.pos)
+    .filter((c) => filtroRuta !== "hoy" || c.visitadoHoy)
+    .filter((c) => filtroRuta !== "pend" || !c.visitadoHoy),
+  [cliEnriquecidos, filtroRuta]);
+
+  const rutaSugeridaPts = useMemo(() => {
+    if (!rutaSugerida) return [];
+    const pend = cliEnriquecidos.filter((c) => c.pos && !c.visitadoHoy);
+    if (!pend.length) return [];
+    let cur = gpsPos || miFlota.enMapa[0]?.pos || pend[0].pos.slice();
+    const rest = [...pend];
+    const out = [];
+    while (rest.length) {
+      let bi = 0, bd = Infinity;
+      rest.forEach((p, i) => {
+        const d = (p.pos[0] - cur[0]) ** 2 + (p.pos[1] - cur[1]) ** 2;
+        if (d < bd) { bd = d; bi = i; }
+      });
+      const nx = rest.splice(bi, 1)[0];
+      out.push({ id: nx.id, nombre: nx.nombre, pos: nx.pos });
+      cur = nx.pos;
+    }
+    return out;
+  }, [rutaSugerida, cliEnriquecidos, gpsPos, miFlota]);
+
+  const guardarUbicacionCapturada = async (pos) => {
+    if (!capturando?.cliente || !pos) return;
+    try {
+      await api.post("/clients/" + capturando.cliente.id + "/ubicacion", {
+        latitud: pos[0], longitud: pos[1], fuente: "gps_mapa",
+      });
+      toast.success("Ubicación guardada para " + capturando.cliente.nombre);
+      setCapturando(null); setCapQ(""); loadTodo();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  const usarGpsParaCaptura = () => {
+    if (!navigator.geolocation) return toast.error("GPS no disponible");
+    setGpsBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        setGpsBusy(false);
+        guardarUbicacionCapturada([
+          +p.coords.latitude.toFixed(6), +p.coords.longitude.toFixed(6)]);
+      },
+      () => { setGpsBusy(false); toast.error("No se pudo obtener tu ubicación"); },
+      { enableHighAccuracy: true, timeout: 15000 });
+  };
+
+  const iniciarVisitaDesde = async (cli) => {
+    await openNew(cli);
+    setTab("visitas");
+  };
+
+  // Alta de cliente nuevo tomando la ubicación actual
+  const [nuevoMapaOpen, setNuevoMapaOpen] = useState(false);
+  const [nuevoMapaForm, setNuevoMapaForm] = useState({ nombre: "", telefono: "" });
+  const [nuevoMapaSaving, setNuevoMapaSaving] = useState(false);
+  const guardarNuevoClienteMapa = async () => {
+    if (!nuevoMapaForm.nombre.trim()) return toast.error("El nombre es obligatorio");
+    setNuevoMapaSaving(true);
+    try {
+      let coords = null;
+      if (gpsPos) coords = { latitud: gpsPos[0], longitud: gpsPos[1] };
+      else {
+        coords = await new Promise((res) => navigator.geolocation.getCurrentPosition(
+          (p) => res({ latitud: +p.coords.latitude.toFixed(6), longitud: +p.coords.longitude.toFixed(6) }),
+          () => res(null), { enableHighAccuracy: true, timeout: 12000 }));
+      }
+      const { data } = await api.post("/clients", {
+        nombre: nuevoMapaForm.nombre.trim(),
+        telefono: nuevoMapaForm.telefono || "",
+        latitud: coords?.latitud, longitud: coords?.longitud,
+      });
+      toast.success("Cliente creado: " + data.nombre);
+      setNuevoMapaOpen(false); setNuevoMapaForm({ nombre: "", telefono: "" });
+      loadTodo();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setNuevoMapaSaving(false); }
+  };
+
   /* --------------------------- crear/editar visita ----------------------- */
   const loadMetaClientes = async () => {
     if (clientes.length) return;
@@ -199,9 +302,9 @@ export default function MiActividadCampo({ embedded = false }) {
              : clientes.slice(0, 50);
   }, [clienteQuery, clientes]);
 
-  const openNew = async () => {
+  const openNew = async (presetCliente = null) => {
     setEditing(null);
-    setForm({ cliente_id: "", cliente_nombre: "", fecha_programada: new Date().toISOString().slice(0, 10), hora: new Date().toTimeString().slice(0, 5), tipo_visita: "visita", estado: "programada", comentarios: "" });
+    setForm({ cliente_id: presetCliente ? presetCliente.id : "", cliente_nombre: presetCliente ? presetCliente.nombre : "", cliente_nombre: "", fecha_programada: new Date().toISOString().slice(0, 10), hora: new Date().toTimeString().slice(0, 5), tipo_visita: "visita", estado: "programada", comentarios: "" });
     setClienteQuery(""); setClienteOpen(false);
     await loadMetaClientes();
     setFormOpen(true);
@@ -239,6 +342,15 @@ export default function MiActividadCampo({ embedded = false }) {
       toast.success(editing ? "Visita actualizada" : "Visita creada");
       setFormOpen(false);
       loadVisitas(); loadTodo();
+      // § Ofrecer capturar ubicación si el cliente visitado no la tiene
+      if (!editing) {
+        const cliSin = cartera.find((cc) => cc.id === payload.cliente_id
+          && (cc.latitud == null || cc.longitud == null));
+        if (cliSin) {
+          setCapturando({ cliente: cliSin });
+          toast.info("Este cliente no tiene ubicación. Captúrala ahora en el mapa.");
+        }
+      }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setSaving(false); }
   };
@@ -417,18 +529,144 @@ export default function MiActividadCampo({ embedded = false }) {
                 ))}
               </div>
 
+              {/* Filtros del mapa + captura de ubicación */}
+              <div className="card-soft p-3 flex flex-wrap items-center gap-2">
+                {[
+                  ["todos", "Todos"], ["con", "Con ubicación"], ["sin", `Sin ubicación (${cartera.length - cliConPos.length})`],
+                  ["hoy", "Visitados hoy"], ["pend", "Pendientes"],
+                ].map(([k, label]) => (
+                  <button key={k} onClick={() => setFiltroRuta(k)}
+                    className={`px-3 py-1.5 rounded-full text-xs border font-medium ${filtroRuta === k ? "bg-[#C1401E] text-white border-[#C1401E]" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                    data-testid={`ruta-filtro-${k}`}>{label}</button>
+                ))}
+                <button onClick={() => setRutaSugerida((v) => !v)}
+                  className={`ml-auto px-3 py-1.5 rounded-full text-xs border font-medium ${rutaSugerida ? "bg-amber-500 text-white border-amber-500" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                  data-testid="ruta-sugerida">
+                  🧭 Ruta sugerida
+                </button>
+                <Button size="sm" variant={capturando ? "default" : "outline"}
+                  onClick={() => setCapturando(capturando ? null : { abrir: true })}
+                  className={capturando ? "bg-[#C1401E] hover:bg-[#A03316]" : ""}
+                  data-testid="ruta-capturar-btn">
+                  <Crosshair className="w-4 h-4 mr-1" /> Agregar ubicación de cliente
+                </Button>
+              </div>
+
+              {capturando && (
+                <div className="card-soft p-4 border-2 border-dashed border-[#C1401E]/40" data-testid="ruta-captura-panel">
+                  {!capturando.cliente ? (
+                    <>
+                      <p className="text-sm font-semibold mb-2">Selecciona el cliente al que quieres asignar ubicación:</p>
+                      <Input value={capQ} onChange={(e) => setCapQ(e.target.value)} placeholder="Buscar cliente sin ubicación…" className="mb-2 h-9" />
+                      <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 border rounded-md">
+                        {cartera.filter((c) => !(c.latitud != null && c.longitud != null))
+                          .filter((c) => !capQ || c.nombre.toLowerCase().includes(capQ.toLowerCase()) || (c.codigo || "").toLowerCase().includes(capQ.toLowerCase()))
+                          .slice(0, 30).map((c) => (
+                          <button key={c.id} onClick={() => setCapturando({ cliente: c })}
+                            className="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm flex justify-between">
+                            <span>{c.nombre}</span>
+                            <Badge variant="outline" className="text-[10px]">{c.codigo}</Badge>
+                          </button>
+                        ))}
+                        {cartera.filter((c) => !(c.latitud != null && c.longitud != null)).length === 0 && (
+                          <p className="p-3 text-sm text-slate-400 text-center">¡Todos tus clientes tienen ubicación!</p>
+                        )}
+                      </div>
+                      <Button size="sm" variant="outline" className="mt-2" onClick={() => setNuevoMapaOpen(true)} data-testid="nuevo-mapa-btn">
+                        ➕ Nuevo cliente aquí (usa tu GPS)
+                      </Button>
+                    </>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <span className="font-semibold">📍 {capturando.cliente.nombre}</span>
+                      <Button size="sm" onClick={usarGpsParaCaptura} disabled={gpsBusy}>
+                        {gpsBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Crosshair className="w-4 h-4 mr-1" />} Usar mi GPS actual
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setCapturando(null); setCapQ(""); }}>Cancelar</Button>
+                      <span className="text-xs text-slate-400 ml-auto">Toca el punto exacto en el mapa ↓</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tarjeta rápida del cliente seleccionado */}
+              {selCliCard && (
+                <div className="card-soft p-4 space-y-3" data-testid="ruta-card-cliente">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="font-display font-bold">{selCliCard.nombre}</span>
+                      <span className="ml-2 text-xs text-slate-400 font-mono">{selCliCard.codigo}</span>
+                    </div>
+                    {Number(selCliCard.saldo || 0) > 0
+                      ? <Badge className="bg-amber-100 text-amber-700">Saldo: {money(selCliCard.saldo)}</Badge>
+                      : <Badge className="bg-green-100 text-green-700">Sin saldo</Badge>}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <button className="rounded-lg bg-slate-50 p-2 hover:bg-slate-100 text-left" onClick={() => iniciarVisitaDesde(selCliCard)}>
+                      <ListChecks className="w-3.5 h-3.5 text-[#C1401E]" /> Registrar visita
+                    </button>
+                    {can("pedido.gestionar") && (
+                      <button className="rounded-lg bg-slate-50 p-2 hover:bg-slate-100 text-left"
+                        onClick={() => { sessionStorage.setItem("preselect_pedido", JSON.stringify({ id: selCliCard.id, nombre: selCliCard.nombre })); window.location.href = "/app/pedidos"; }}>
+                        📋 Levantar pedido
+                      </button>
+                    )}
+                    {(
+                      <button className="rounded-lg bg-slate-50 p-2 hover:bg-slate-100 text-left"
+                        onClick={() => {
+                          sessionStorage.setItem("preselect_pos", JSON.stringify({ id: selCliCard.id, nombre: selCliCard.nombre }));
+                          window.location.href = "/app/pos";
+                        }}>
+                        🛒 Venta directa
+                      </button>
+                    )}
+                    {can("cxc.abono") && (
+                      <button className="rounded-lg bg-slate-50 p-2 hover:bg-slate-100 text-left"
+                        onClick={() => { sessionStorage.setItem("preselect_cxc", JSON.stringify({ id: selCliCard.id })); window.location.href = "/app/cxc"; }}>
+                        💰 Cobrar
+                      </button>
+                    )}
+                    {selCliCard.pos && (
+                      <>
+                        <a className="rounded-lg bg-blue-50 p-2 hover:bg-blue-100 text-left text-blue-700"
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${selCliCard.pos[0]},${selCliCard.pos[1]}`} target="_blank" rel="noreferrer">
+                          🗺️ Google Maps
+                        </a>
+                        <a className="rounded-lg bg-blue-50 p-2 hover:bg-blue-100 text-left text-blue-700"
+                          href={`https://waze.com/ul?ll=${selCliCard.pos[0]},${selCliCard.pos[1]}&navigate=yes`} target="_blank" rel="noreferrer">
+                          🧭 Waze
+                        </a>
+                      </>
+                    )}
+                  </div>
+                  {(selCliCard.ultima_visita || selCliCard.proxima_visita) && (
+                    <div className="text-[11px] text-slate-400">
+                      Últ. visita: {selCliCard.ultima_visita ? String(selCliCard.ultima_visita).slice(0, 10) : "—"} · Próxima: {selCliCard.proxima_visita ? String(selCliCard.proxima_visita).slice(0, 10) : "—"}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid lg:grid-cols-3 gap-4">
-                <div className="lg:col-span-2 card-soft p-4">
+                <div className="lg:col-span-2 card-soft p-4 relative">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5"><RouteIcon className="w-4 h-4" /> Ruta de tus clientes</span>
-                    <Button size="sm" variant="ghost" onClick={() => setMapKey((k) => k + 1)} title="Reencuadrar"><Crosshair className="w-4 h-4" /></Button>
+                    <div className="flex items-center gap-2">
+                      {rutaSugerida && <span className="text-[11px] text-amber-600 font-medium">🧭 Orden sugerido activo</span>}
+                      <Button size="sm" variant="ghost" onClick={() => setMapKey((k) => k + 1)} title="Reencuadrar"><Crosshair className="w-4 h-4" /></Button>
+                    </div>
                   </div>
                   <MapaCampo
-                    clientes={cliConPos}
+                    clientes={cliMapaFiltrados}
                     vendedores={miFlota.enMapa}
-                    altura="420px"
-                    autoFitKey={`ruta|${cliConPos.length}|${mapKey}|${gpsPos ? gpsPos.join() : ""}`}
-                    vacio={{ titulo: "Aún no tienes clientes con ubicación", texto: "Pide registrar las coordenadas de tus clientes para verlos en el mapa." }}
+                    rutaSugeridaPts={rutaSugeridaPts}
+                    modoCaptura={!!capturando?.cliente}
+                    onCapturaPunto={(pos) => guardarUbicacionCapturada(pos)}
+                    selClienteId={selCliCard?.id || ""}
+                    onSelectCliente={(id) => { const c = cliMapaFiltrados.find((x) => x.id === id); if (c) setSelCliCard(c); }}
+                    altura="460px"
+                    autoFitKey={`ruta|${cliConPos.length}|${mapKey}|${filtroRuta}|${gpsPos ? gpsPos.join() : ""}`}
+                    vacio={{ titulo: filtroRuta === "sin" ? "¡Todos tus clientes tienen ubicación!" : "Aún no tienes clientes con ubicación", texto: "Usa «Agregar ubicación de cliente» para capturarla frente al negocio." }}
                   />
                 </div>
 
@@ -551,6 +789,26 @@ export default function MiActividadCampo({ embedded = false }) {
           )}
         </>
       )}
+
+      {/* Alta de cliente nuevo desde el mapa */}
+      <Dialog open={nuevoMapaOpen} onOpenChange={setNuevoMapaOpen}>
+        <DialogContent data-testid="nuevo-mapa-dialog">
+          <DialogHeader><DialogTitle className="font-display">Nuevo cliente en mi ubicación</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Nombre / Razón social *</Label>
+              <Input value={nuevoMapaForm.nombre} onChange={(e) => setNuevoMapaForm((s) => ({ ...s, nombre: e.target.value }))} data-testid="nuevo-mapa-nombre" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Teléfono</Label>
+              <Input value={nuevoMapaForm.telefono} onChange={(e) => setNuevoMapaForm((s) => ({ ...s, telefono: e.target.value.replace(/[^\d]/g, "") }))} maxLength={10} data-testid="nuevo-mapa-tel" /></div>
+            <p className="text-xs text-slate-400">Se guardará con tu ubicación GPS actual como punto del negocio.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setNuevoMapaOpen(false)}>Cancelar</Button>
+            <Button onClick={guardarNuevoClienteMapa} disabled={nuevoMapaSaving} className="bg-[#C1401E] hover:bg-[#A03316]">
+              {nuevoMapaSaving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <CheckCircle2 className="w-4 h-4 mr-1" />} Crear cliente
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Diálogo crear/editar visita */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>

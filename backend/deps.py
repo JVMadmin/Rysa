@@ -138,8 +138,8 @@ ROLE_PERMISSIONS = {
     # VENDEDOR DE CAMPO: celular/APK — visitas, rutas, GPS, levanta pedidos
     # y venta directa opcional. SIN facturación ni recargas.
     "vendedor_campo": {
-        "venta.crear", "visita.crear", "visita.editar", "visita.ver",
-        "visita.cancelar", "catalogo.ver", "pedido.gestionar",
+        "venta.crear", "cliente.crear", "visita.crear", "visita.editar",
+        "visita.ver", "visita.cancelar", "catalogo.ver", "pedido.gestionar",
         "caja.abrir", "caja.cerrar", "caja.ver", "caja.retiro",
     },
     # Supervisor/Gerente comercial: monitoreo de vendedores de campo,

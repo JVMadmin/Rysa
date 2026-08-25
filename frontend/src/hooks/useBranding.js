@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, fileUrl } from "@/lib/api";
 
-const DEFAULT_LOGO = "/brand/isotipo1.png";
+const DEFAULT_LOGO = "/brand/ISOTIPO-Photoroom.png";
 
 // URL absolutas de un entorno local de desarrollo (persistidas en la BD) NO son
 // útiles en producción/navegador del cliente; se descartan y se usa el logo por
@@ -21,4 +21,3 @@ export function useBranding() {
   const logo = raw && !esLocal(raw) ? fileUrl(raw) : DEFAULT_LOGO;
   return { ...brand, logo };
 }
-

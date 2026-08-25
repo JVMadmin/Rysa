@@ -352,6 +352,14 @@ export default function POS({ windowId, windowLabel }) {
   const creditoBloqueado = condicion === "credito" && !!clienteSel && !clienteSel.credito_autorizado && clienteSel.codigo !== "PUBLICO";
 
   useEffect(() => {
+    // § Venta directa desde campo: preseleccionar cliente si viene del mapa
+    try {
+      const pre = JSON.parse(sessionStorage.getItem("preselect_pos"));
+      if (pre) {
+        sessionStorage.removeItem("preselect_pos");
+        setTimeout(() => { setClienteId(pre.id); setClientQuery(pre.nombre || ""); }, 400);
+      }
+    } catch { /* noop */ }
     api.get("/clients", { params: { estado: "activo" } }).then((r) => {
       setClients(r.data);
       const pub = r.data.find((c) => c.codigo === "PUBLICO");

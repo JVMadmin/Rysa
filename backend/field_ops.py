@@ -583,6 +583,31 @@ async def _get_visita(visita_id: str) -> dict:
     return v
 
 
+@router.post("/clients/{cliente_id}/ubicacion")
+async def set_client_ubicacion(cliente_id: str, data: LocationInput,
+                               user: dict = Depends(get_current_user)):
+    """El vendedor captura la ubicación GPS de un cliente de SU cartera
+    (o admin/supervisión sobre cualquiera). Usado por 'Mi Ruta' en campo."""
+    cli = await db.clients.find_one({"id": cliente_id}, {"_id": 0})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    if not (_es_admin(user) or _vende_todo(user)
+            or cli.get("vendedor_id") in (None, "", user["id"])):
+        raise HTTPException(403, "Solo puedes ubicar clientes de tu propia cartera")
+    upd = {
+        "latitud": round(float(data.latitud), 6),
+        "longitud": round(float(data.longitud), 6),
+        "estado_geo": f"capturada_{data.fuente or 'gps'}",
+        "geo_actualizada": iso_now(),
+    }
+    if data.precision is not None:
+        upd["geo_precision_m"] = round(float(data.precision), 1)
+    await db.clients.update_one({"id": cliente_id}, {"$set": upd})
+    await log_audit(user, "capturar_ubicacion", "cliente", cliente_id,
+                    f"{upd['latitud']},{upd['longitud']} · {cli.get('nombre','')}")
+    return {"ok": True, **{k: upd[k] for k in ("latitud", "longitud")}}
+
+
 @router.get("/visits")
 async def list_visits(estado: Optional[str] = None, vendedor_id: Optional[str] = None,
                       cliente_id: Optional[str] = None, tipo_visita: Optional[str] = None,

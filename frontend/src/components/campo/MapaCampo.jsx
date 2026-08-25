@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from "react-leaflet";
-import { MapPinOff } from "lucide-react";
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap, useMapEvents } from "react-leaflet";
+import { MapPinOff, Crosshair } from "lucide-react";
 import ErrorBoundaryMapa from "@/components/campo/ErrorBoundaryMapa";
 import {
   MAP_THEME, MAP_ATTRIBUTION, PALENQUE,
@@ -30,6 +30,16 @@ function Encajar({ pts, trigger }) {
   return null;
 }
 
+/** Captura de coordenada al hacer clic en el mapa (modo "ubicar cliente"). */
+function ClickCatcher({ activo, onPick }) {
+  useMapEvents({
+    click(e) {
+      if (activo && onPick) onPick([e.latlng.lat, e.latlng.lng]);
+    },
+  });
+  return null;
+}
+
 /**
  * ===========================================================================
  * MapaCampo — ÚNICO componente de mapa parametrizable del sistema.
@@ -55,6 +65,8 @@ export default function MapaCampo({
   selVendedorId = "", onSelectVendedor,
   enfocarTrigger = 0, altura = "480px", autoFitKey = 0,
   vacio = null, mostrarClientes = true, mostrarVendedores = true,
+  modoCaptura = false, onCapturaPunto,
+  rutaSugeridaPts = [],
 }) {
   const cliValidos = useMemo(
     () => clientes.map((c) => ({ ...c, pos: coordValida(c.latitud, c.longitud) ? [Number(c.latitud), Number(c.longitud)] : null }))
@@ -75,8 +87,10 @@ export default function MapaCampo({
   return (
     <div className="rounded-lg overflow-hidden border border-slate-200 relative" style={{ height: altura }}>
       <ErrorBoundaryMapa>
-        <MapContainer center={PALENQUE} zoom={12} style={{ height: "100%", width: "100%" }}>
+        <MapContainer center={PALENQUE} zoom={12}
+          style={{ height: "100%", width: "100%", cursor: modoCaptura ? "crosshair" : "" }}>
           <TileLayer url={MAP_THEME} attribution={MAP_ATTRIBUTION} />
+          <ClickCatcher activo={modoCaptura} onPick={onCapturaPunto} />
           {/* Encuadre de flota en cada refresh de datos */}
           <Encajar pts={todosPts} trigger={autoFitKey} />
           {/* Vuelo a selección (cliente desde listado o marcador) */}
@@ -97,6 +111,20 @@ export default function MapaCampo({
                       Precisión: {p.precision ?? "—"} m{p.velocidad_kmh != null ? <> · Vel: {p.velocidad_kmh} km/h</> : null}
                     </div>
                   </Popup>
+                </CircleMarker>
+              ))}
+            </>
+          )}
+
+          {/* Ruta sugerida numerada (orden óptimo de visitas) */}
+          {rutaSugeridaPts.length > 1 && (
+            <>
+              <Polyline positions={rutaSugeridaPts.map((p) => p.pos)}
+                        pathOptions={{ color: "#f59e0b", weight: 4, opacity: 0.85 }} />
+              {rutaSugeridaPts.map((p, i) => (
+                <CircleMarker key={`rs-${p.id || i}`} center={p.pos} radius={11}
+                  pathOptions={{ color: "#fff", weight: 2, fillColor: "#f59e0b", fillOpacity: 1 }}>
+                  <Popup><div className="text-xs"><b>{i + 1}.</b> {p.nombre}</div></Popup>
                 </CircleMarker>
               ))}
             </>
@@ -141,6 +169,13 @@ export default function MapaCampo({
           ))}
         </MapContainer>
       </ErrorBoundaryMapa>
+
+      {modoCaptura && (
+        <div className="absolute inset-x-0 bottom-0 z-[500] bg-[#C1401E] text-white text-xs font-semibold px-3 py-2 flex items-center gap-2 pointer-events-none">
+          <Crosshair className="w-4 h-4" />
+          Toca el punto exacto del negocio en el mapa para asignar la ubicación…
+        </div>
+      )}
 
       {sinDatos && vacio && (
         <div className="absolute inset-0 z-[500] flex items-center justify-center pointer-events-none">

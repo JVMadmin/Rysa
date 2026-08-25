@@ -59,6 +59,12 @@ export default function Pedidos() {
   useEffect(() => {
     api.get("/products", { params: { limit: 5000 } }).then((r) => setProductos(Array.isArray(r.data) ? r.data : (r.data?.items || []))).catch(() => setProductos([]));
     api.get("/clients", { params: { estado: "activo" } }).then((r) => setClientes(r.data || [])).catch(() => setClientes([]));
+    const pre = (() => { try { return JSON.parse(sessionStorage.getItem("preselect_pedido")); } catch { return null; } })();
+    if (pre) {
+      sessionStorage.removeItem("preselect_pedido");
+      setOpen(true);
+      setForm((s) => ({ ...s, cliente_id: pre.id, cliente_nombre: pre.nombre || "" }));
+    }
   }, []);
 
   const itemsFiltrados = useMemo(() => {
