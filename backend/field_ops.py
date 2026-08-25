@@ -12,8 +12,10 @@ import uuid
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
 from pydantic import BaseModel, Field
+
+import storage
 
 from deps import (
     db, iso_now, now_utc, get_current_user, require_permission,
@@ -40,15 +42,21 @@ def _uid() -> str:
 
 
 def _iso_to_dt(value) -> Optional[datetime]:
+    """Convierte ISO a datetime SIEMPRE timezone-aware (UTC).
+    Las fechas pueden llegar con o sin offset (GPS real vs. datos generados/
+    legados); compararlas directamente lanza TypeError naive-vs-aware."""
     if not value:
         return None
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except Exception:
         try:
-            return datetime.fromisoformat(str(value)[:19])
+            dt = datetime.fromisoformat(str(value)[:19])
         except Exception:
             return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def _parse_date(s) -> Optional[date]:
@@ -328,6 +336,7 @@ async def seller_map(user: dict = Depends(get_current_user)):
             "telefono": c.get("telefono") or c.get("celular"), "direccion": c.get("direccion"),
             "ciudad": c.get("ciudad"), "estado": c.get("estado_geo"), "cp": c.get("cp"),
             "latitud": lat, "longitud": lng,
+            "foto_fachada": c.get("foto_fachada") or "",
             "saldo": round(float(c.get("saldo", 0) or 0), 2),
             "credito": bool(c.get("credito_autorizado")),
             "vendedor_id": c.get("vendedor_id"),
@@ -390,8 +399,95 @@ async def seller_clients(q: Optional[str] = None, user: dict = Depends(get_curre
             "ult_fecha_compra": c.get("ult_fecha_compra") or "",
             "vendedor_id": c.get("vendedor_id"),
             "condicion_pago": c.get("condicion_pago", "contado"),
+            "foto_fachada": c.get("foto_fachada") or "",
         })
     return out
+
+
+# ==========================================================================
+# FOTO DE FACHADA DEL CLIENTE (para ubicar el negocio más fácilmente)
+# La sube su vendedor asignado (o admin/supervisión); se ve en
+# Supervisión Comercial → Clientes y en las fichas/mapa.
+# ==========================================================================
+_MIME_EXT = {"image/jpeg": ".jpg", "image/png": ".png",
+             "image/webp": ".webp", "image/gif": ".gif"}
+
+
+def _puede_gestionar_fachada(user: dict, cliente: dict) -> bool:
+    if _es_admin(user) or _vende_todo(user):
+        return True
+    # El vendedor solo sobre SU cartera (o clientes sin asignar).
+    return cliente.get("vendedor_id") in (None, "", user["id"])
+
+
+async def _soft_delete_archivo(url: str):
+    """Marca is_deleted el registro del archivo previo (best-effort)."""
+    if not url or not url.startswith("/api/files/"):
+        return
+    old_path = url[len("/api/files/"):]
+    try:
+        await db.files.update_one({"storage_path": old_path},
+                                  {"$set": {"is_deleted": True}})
+    except Exception:
+        pass
+
+
+@router.post("/clients/{cliente_id}/fachada")
+async def subir_fachada_cliente(cliente_id: str, file: UploadFile = File(...),
+                                user: dict = Depends(get_current_user)):
+    """Sube/actualiza la foto de la fachada de un cliente (máx 8 MB,
+    JPG/PNG/WEBP/GIF). Queda disponible para supervisión y mapa."""
+    cli = await db.clients.find_one({"id": cliente_id})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    if not _puede_gestionar_fachada(user, cli):
+        raise HTTPException(403, "Solo puedes subir fotos de tus propios clientes")
+
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "La imagen no debe superar 8 MB.")
+    mime = storage.detect_mime_type(data)
+    if mime not in _MIME_EXT:
+        raise HTTPException(400, "Formato no permitido. Usa JPG, PNG, WEBP o GIF.")
+
+    path = f"uploads/fachadas/{_uid()}{_MIME_EXT[mime]}"
+    try:
+        result = storage.put_object(path, data, mime)
+    except Exception:
+        raise HTTPException(502, "No se pudo guardar la imagen.")
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": _uid(), "storage_path": stored,
+        "original_filename": file.filename or "fachada",
+        "content_type": mime, "size": result.get("size", len(data)),
+        "original_size": len(data), "original_type": mime,
+        "is_deleted": False, "created_at": iso_now(),
+    })
+
+    await _soft_delete_archivo(cli.get("foto_fachada") or "")
+    url = f"/api/files/{stored}"
+    await db.clients.update_one(
+        {"id": cliente_id},
+        {"$set": {"foto_fachada": url, "fachada_actualizada": iso_now()}})
+    await log_audit(user, "subir_fachada", "cliente", cliente_id,
+                    cli.get("nombre", ""), url)
+    return {"ok": True, "foto_fachada": url}
+
+
+@router.delete("/clients/{cliente_id}/fachada")
+async def eliminar_fachada_cliente(cliente_id: str, user: dict = Depends(get_current_user)):
+    cli = await db.clients.find_one({"id": cliente_id})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    if not _puede_gestionar_fachada(user, cli):
+        raise HTTPException(403, "Solo puedes gestionar fotos de tus propios clientes")
+    await _soft_delete_archivo(cli.get("foto_fachada") or "")
+    # El adaptador no soporta $unset: se usa $set vacío ("sin foto").
+    await db.clients.update_one(
+        {"id": cliente_id},
+        {"$set": {"foto_fachada": "", "fachada_actualizada": ""}})
+    await log_audit(user, "eliminar_fachada", "cliente", cliente_id, cli.get("nombre", ""))
+    return {"ok": True}
 
 
 @router.get("/seller/cxc")
@@ -959,6 +1055,7 @@ async def supervision_map(vendedor_id: Optional[str] = None, sucursal_id: Option
             "telefono": c.get("telefono") or c.get("celular"),
             "direccion": c.get("direccion"), "ciudad": c.get("ciudad"),
             "latitud": c.get("latitud"), "longitud": c.get("longitud"),
+            "foto_fachada": c.get("foto_fachada") or "",
             "vendedor_id": c.get("vendedor_id"),
             "vendedor_nombre": vendedor_nombres.get(c.get("vendedor_id"), ""),
             "saldo": round(float(c.get("saldo", 0) or 0), 2),

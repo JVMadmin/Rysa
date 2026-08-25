@@ -1,0 +1,611 @@
+==================================================
+61. MÓDULO DESARROLLADOR
+==================================================
+
+Crear un módulo especial:
+
+🛠️ DESARROLLADOR
+
+Este módulo NO forma parte de la operación normal de RYSA.
+
+Su objetivo es proporcionar herramientas exclusivas para:
+
+- Desarrollo.
+- Pruebas.
+- Depuración.
+- Limpieza de datos de prueba.
+- Diagnóstico del sistema.
+- Preparación del entorno antes de producción.
+
+==================================================
+62. ACCESO EXCLUSIVO
+==================================================
+
+El módulo DESARROLLADOR debe estar disponible únicamente para un usuario/rol de desarrollador autorizado.
+
+NO debe aparecer para:
+
+- Administradores normales.
+- Gerentes.
+- Vendedores.
+- Cajeros.
+- Usuarios administrativos comunes.
+
+No confiar únicamente en ocultar el botón del frontend.
+
+La autorización debe existir también en BACKEND.
+
+Si un usuario intenta acceder directamente a una ruta de desarrollador:
+
+→ devolver 403.
+
+Todas las APIs del módulo deben verificar explícitamente el permiso de desarrollador.
+
+==================================================
+63. IDENTIFICACIÓN DEL ENTORNO
+==================================================
+
+El sistema debe distinguir claramente entre:
+
+DESARROLLO
+PRUEBAS
+PRODUCCIÓN
+
+Mostrar claramente dentro del módulo:
+
+⚠️ ENTORNO DE DESARROLLO
+
+o
+
+🔴 ENTORNO DE PRODUCCIÓN
+
+Nunca permitir que el desarrollador confunda el entorno.
+
+==================================================
+64. HERRAMIENTAS DE DEPURACIÓN
+==================================================
+
+El módulo deberá permitir consultar información técnica como:
+
+- Estado del backend.
+- Estado de PostgreSQL.
+- Estado de Docker cuando sea accesible desde la aplicación.
+- Versión de la aplicación.
+- Versión de API.
+- Estado de migraciones.
+- Últimos errores.
+- Health checks.
+- Tiempo de respuesta de APIs.
+- Estado de servicios.
+- Configuración no sensible.
+- Conteo de registros por tabla/entidad.
+
+NO mostrar:
+
+- Passwords.
+- Tokens.
+- Secret keys.
+- API keys.
+- Credenciales de base de datos.
+- Variables secretas completas.
+
+==================================================
+65. DEPURACIÓN
+==================================================
+
+Crear una sección:
+
+🔍 DEPURACIÓN
+
+Permitir consultar:
+
+- Errores recientes.
+- Requests fallidos.
+- Errores 400.
+- Errores 401.
+- Errores 403.
+- Errores 404.
+- Errores 422.
+- Errores 500.
+- Errores de PostgreSQL.
+- Errores de integración.
+
+Mostrar:
+
+Fecha
+Hora
+Módulo
+Endpoint
+Usuario
+Error
+Estado HTTP
+
+No exponer información sensible.
+
+==================================================
+66. ESTADO DEL SISTEMA
+==================================================
+
+Crear una pantalla:
+
+🩺 DIAGNÓSTICO
+
+Mostrar:
+
+Backend        🟢 OK
+PostgreSQL     🟢 OK
+Migraciones    🟢 OK
+Storage        🟢 OK
+API            🟢 OK
+
+Si existe algún problema:
+
+🔴 ERROR
+
+con información suficiente para diagnosticarlo.
+
+==================================================
+67. LIMPIEZA DE DATOS DE PRUEBA
+==================================================
+
+Crear una sección:
+
+🧹 LIMPIAR DATOS
+
+Permitir limpiar selectivamente datos utilizados durante desarrollo.
+
+Opciones:
+
+[ Limpiar Clientes ]
+
+[ Limpiar Productos ]
+
+[ Limpiar Inventario ]
+
+[ Limpiar Ventas ]
+
+[ Limpiar Compras ]
+
+[ Limpiar Gastos ]
+
+[ Limpiar Proveedores ]
+
+[ Limpiar Cuentas por Cobrar ]
+
+[ Limpiar Cuentas por Pagar ]
+
+[ Limpiar Cotizaciones ]
+
+[ Limpiar Pedidos ]
+
+[ Limpiar Caja ]
+
+[ Limpiar Vendedores de prueba ]
+
+==================================================
+68. DEPENDENCIAS ENTRE DATOS
+==================================================
+
+MUY IMPORTANTE:
+
+NO ejecutar DELETE ciegos sobre tablas relacionadas.
+
+Antes de implementar cada opción determinar las relaciones y dependencias.
+
+Ejemplo:
+
+Ventas
+↓
+Detalles de venta
+↓
+Movimientos de inventario
+↓
+Caja
+
+Si el desarrollador selecciona:
+
+"Limpiar ventas"
+
+el sistema debe determinar correctamente qué registros dependientes deben eliminarse o revertirse para evitar:
+
+- Foreign key violations.
+- Datos huérfanos.
+- Inventario inconsistente.
+- Saldos incorrectos.
+- Caja inconsistente.
+
+La limpieza debe ejecutarse dentro de una transacción cuando corresponda.
+
+Si la operación falla:
+
+ROLLBACK.
+
+Nunca dejar la base de datos parcialmente limpiada.
+
+==================================================
+69. LIMPIAR TODA LA BASE DE DATOS
+==================================================
+
+Crear una opción claramente separada y peligrosa:
+
+☢️ LIMPIAR TODA LA BASE DE DATOS DE PRUEBAS
+
+Esta opción debe eliminar únicamente los DATOS OPERATIVOS de la base de datos de desarrollo/pruebas.
+
+NO debe eliminar:
+
+- Estructura de tablas.
+- Migraciones.
+- Usuarios esenciales.
+- Configuración necesaria del sistema.
+- Catálogos estructurales necesarios.
+- Roles.
+- Permisos.
+- Configuración del tenant.
+
+A menos que específicamente se determine que deben formar parte de la limpieza.
+
+==================================================
+70. DOBLE CONFIRMACIÓN
+==================================================
+
+Las operaciones destructivas deben requerir confirmación explícita.
+
+Ejemplo:
+
+⚠️ ADVERTENCIA
+
+Esta operación eliminará permanentemente los datos seleccionados.
+
+[ Cancelar ]
+
+[ Continuar ]
+
+Para operaciones críticas:
+
+pedir escribir:
+
+LIMPIAR
+
+antes de permitir la ejecución.
+
+Para:
+
+☢️ LIMPIAR TODA LA BASE DE DATOS
+
+utilizar una confirmación todavía más explícita.
+
+==================================================
+71. BACKUP ANTES DE LIMPIAR
+==================================================
+
+Antes de ejecutar una limpieza importante, mostrar una advertencia:
+
+"Se recomienda realizar un backup antes de continuar."
+
+Si el entorno lo permite, preparar una opción:
+
+[ Crear backup ]
+
+antes de la limpieza.
+
+NO borrar datos automáticamente sin posibilidad razonable de recuperación.
+
+==================================================
+72. AUDITORÍA DE ACCIONES
+==================================================
+
+Registrar todas las acciones realizadas por el desarrollador.
+
+Ejemplo:
+
+Usuario:
+developer
+
+Acción:
+LIMPIAR VENTAS
+
+Fecha:
+2026-08-23 20:15
+
+Resultado:
+ÉXITO
+
+Cantidad eliminada:
+1,245 registros
+
+Registrar también:
+
+- Qué operación se ejecutó.
+- Cuándo.
+- Quién la ejecutó.
+- Resultado.
+- Error si ocurrió.
+
+==================================================
+73. CONTADORES
+==================================================
+
+Antes de ejecutar una limpieza mostrar:
+
+CLIENTES
+1,245 registros
+
+PRODUCTOS
+850 registros
+
+VENTAS
+12,430 registros
+
+etc.
+
+Después mostrar:
+
+Antes:
+12,430
+
+Eliminados:
+12,430
+
+Después:
+0
+
+Esto permitirá confirmar que la operación realmente funcionó.
+
+==================================================
+74. RESET DEL ENTORNO DE PRUEBAS
+==================================================
+
+Crear una opción:
+
+🔄 REINICIAR DATOS DE PRUEBA
+
+Esta función debe permitir preparar nuevamente el sistema para una nueva ronda de pruebas.
+
+El flujo deberá ser:
+
+1. Confirmar entorno.
+2. Mostrar datos que serán eliminados.
+3. Solicitar confirmación.
+4. Ejecutar limpieza de forma transaccional.
+5. Verificar integridad.
+6. Mostrar resultado.
+
+==================================================
+75. NO UTILIZAR SQL DESTRUCTIVO DIRECTAMENTE DESDE EL FRONTEND
+==================================================
+
+MUY IMPORTANTE:
+
+El frontend NO debe enviar SQL.
+
+NO permitir una interfaz donde el desarrollador escriba:
+
+DELETE FROM...
+DROP TABLE...
+TRUNCATE...
+
+El frontend únicamente podrá llamar operaciones previamente definidas y controladas por el backend.
+
+Esto reduce enormemente el riesgo de destruir accidentalmente la estructura de la base de datos.
+
+==================================================
+76. PROTECCIÓN CONTRA PRODUCCIÓN
+==================================================
+
+Las herramientas destructivas deben comprobar explícitamente el entorno.
+
+Si:
+
+ENVIRONMENT=production
+
+NO permitir:
+
+- Limpiar clientes.
+- Limpiar productos.
+- Limpiar inventario.
+- Limpiar ventas.
+- Limpiar compras.
+- Limpiar gastos.
+- Limpiar caja.
+- Limpiar toda la base de datos.
+
+Incluso aunque el usuario sea desarrollador.
+
+Mostrar:
+
+🔴 OPERACIÓN BLOQUEADA
+
+Las herramientas de limpieza están deshabilitadas en producción.
+
+==================================================
+77. DESACTIVACIÓN PARA PRODUCCIÓN
+==================================================
+
+Preparar una configuración:
+
+DEVELOPER_MODE=true
+
+para desarrollo.
+
+Y:
+
+DEVELOPER_MODE=false
+
+para producción.
+
+Cuando:
+
+DEVELOPER_MODE=false
+
+el módulo DESARROLLADOR debe:
+
+- No aparecer en el menú.
+- No permitir acceder por URL.
+- Deshabilitar endpoints destructivos.
+- Deshabilitar herramientas de limpieza.
+- Mantener únicamente las funciones de diagnóstico estrictamente necesarias, si se considera seguro.
+
+Idealmente, las rutas destructivas ni siquiera deberán registrarse/habilitarse en producción.
+
+==================================================
+78. PROTECCIÓN ADICIONAL
+==================================================
+
+No depender únicamente de:
+
+DEVELOPER_MODE=true
+
+También comprobar:
+
+- Usuario.
+- Rol.
+- Permiso.
+- Entorno.
+
+Para ejecutar una operación destructiva deberán cumplirse TODOS:
+
+ENVIRONMENT != production
++
+DEVELOPER_MODE = true
++
+usuario autenticado
++
+rol developer
++
+permiso developer_tools
+
+==================================================
+79. MIGRACIONES
+==================================================
+
+El módulo podrá mostrar:
+
+Migración actual:
+XXXX
+
+Migraciones pendientes:
+0
+
+Pero NO permitir ejecutar migraciones destructivas arbitrarias desde la interfaz.
+
+Las migraciones estructurales seguirán manejándose mediante Alembic.
+
+==================================================
+80. ESTRUCTURA DEL MÓDULO
+==================================================
+
+Organizar visualmente:
+
+🛠️ DESARROLLADOR
+
+   📊 Diagnóstico
+
+   🔍 Depuración
+
+   🗄️ Base de datos
+
+   🧹 Limpieza de datos
+
+   🔄 Reset de pruebas
+
+   📋 Logs
+
+   ⚙️ Estado del sistema
+
+   📝 Auditoría
+
+==================================================
+81. EXPERIENCIA VISUAL
+==================================================
+
+Mantener el diseño general de RYSA.
+
+Sin embargo, las operaciones peligrosas deben utilizar una jerarquía visual clara.
+
+Por ejemplo:
+
+Herramientas normales
+→ diseño estándar.
+
+Advertencias
+→ alerta.
+
+Operaciones destructivas
+→ diseño claramente diferenciado.
+
+No hacer que los botones destructivos sean fáciles de presionar accidentalmente.
+
+==================================================
+82. PREPARACIÓN PARA ESTA ETAPA DE DESARROLLO
+==================================================
+
+El sistema actualmente entrará en una etapa intensiva de desarrollo y pruebas.
+
+Por ello el módulo debe permitir:
+
+- Crear datos de prueba.
+- Limpiar datos.
+- Repetir escenarios.
+- Revisar errores.
+- Diagnosticar problemas.
+- Reiniciar información operativa.
+
+El objetivo es poder probar RYSA repetidamente sin tener que acceder manualmente a PostgreSQL.
+
+==================================================
+83. TRANSICIÓN A PRODUCCIÓN
+==================================================
+
+Preparar claramente el proceso:
+
+DESARROLLO
+↓
+PRUEBAS
+↓
+LIMPIEZA DE DATOS DE PRUEBA
+↓
+VALIDACIÓN
+↓
+BACKUP
+↓
+PRODUCCIÓN
+↓
+DEVELOPER_MODE=false
+
+Antes de pasar a producción verificar:
+
+- No quedan datos de prueba.
+- No quedan usuarios de prueba innecesarios.
+- No quedan clientes de prueba.
+- No quedan ventas de prueba.
+- No quedan compras de prueba.
+- No quedan movimientos de caja de prueba.
+- No quedan datos ficticios.
+- Las migraciones están actualizadas.
+- Los permisos están correctos.
+- El módulo desarrollador está deshabilitado.
+
+==================================================
+84. CRITERIO FINAL
+==================================================
+
+El módulo DESARROLLADOR debe ser una herramienta profesional de desarrollo y QA.
+
+Debe permitir trabajar rápidamente durante la etapa de desarrollo, pero ser extremadamente difícil de utilizar accidentalmente sobre producción.
+
+PRINCIPIOS:
+
+SEGURIDAD
++
+CONTROL
++
+AUDITORÍA
++
+REVERSIBILIDAD
++
+AISLAMIENTO DE ENTORNOS
+
+NO crear un "botón mágico" que pueda borrar producción.
+
+Toda operación destructiva debe estar protegida por múltiples capas.

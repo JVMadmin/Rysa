@@ -136,6 +136,18 @@ export default function Configuracion() {
   const addSuc = () => setS((x) => ({ ...x, sucursales: [...x.sucursales, { nombre: "", direccion: "", ciudad: "", estado: "", cp: "", telefono: "", activa: true }] }));
   const delSuc = (i) => setS((x) => ({ ...x, sucursales: x.sucursales.filter((_, idx) => idx !== i) }));
 
+  // --- Unidades de medida (configurables; se ofrecen en productos) ---
+  const UNIDADES_PREDETERMINADAS = ["PZA", "CAJA", "PAQUETE", "BOLSA", "SIX", "CUBETA", "PAR", "JUEGO", "KG", "GR", "LT", "ML", "MT", "ROL", "SERVICIO"];
+  const [nuevaUnidad, setNuevaUnidad] = useState("");
+  const addUnidad = () => {
+    const v = nuevaUnidad.trim().toUpperCase();
+    if (!v) return;
+    setS((x) => ({ ...x, unidades_medida: [...(x.unidades_medida || []), v] }));
+    setNuevaUnidad("");
+  };
+  const delUnidad = (i) => setS((x) => ({ ...x, unidades_medida: (x.unidades_medida || []).filter((_, idx) => idx !== i) }));
+  const restoreUnidades = () => setS((x) => ({ ...x, unidades_medida: [...UNIDADES_PREDETERMINADAS] }));
+
   // --- Editor por bloques del ticket ---
   const TYPE_LABELS = {
     empresa: "Nombre empresa", campo: "Campo / texto", texto: "Texto libre", separador: "Separador",
@@ -304,6 +316,39 @@ export default function Configuracion() {
                 <Button variant="outline" size="sm" onClick={addLista} className="h-7 text-[11px]" data-testid="cfg-lista-add"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar lista de precios</Button>
               </div>
               <p className="text-[11px] text-slate-400 mt-2">El % define la utilidad sugerida de cada lista sobre el costo (referencia para nuevos precios).</p>
+            </div>
+
+            {/* Unidades de medida */}
+            <div className="border-t border-slate-100 pt-4">
+              <Label className="text-xs uppercase tracking-wider text-slate-500 mb-2 block">Unidades de medida (disponibles al crear productos)</Label>
+              <div className="flex flex-wrap gap-2 mb-3">
+                {(s.unidades_medida || []).map((u, i) => (
+                  <span key={`${u}-${i}`} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 text-sm">
+                    {u}
+                    <button type="button" onClick={() => delUnidad(i)} className="text-slate-400 hover:text-red-600" data-testid={`cfg-unidad-del-${i}`}>
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {(s.unidades_medida || []).length === 0 && (
+                  <span className="text-xs text-slate-400">Sin unidades configuradas.</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={nuevaUnidad}
+                  onChange={(e) => setNuevaUnidad(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addUnidad(); } }}
+                  placeholder="Nueva unidad (ej. BULTO, MT2…)"
+                  className="h-9 w-56"
+                  data-testid="cfg-unidad-nueva"
+                />
+                <Button variant="outline" size="sm" onClick={addUnidad} data-testid="cfg-unidad-add"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar</Button>
+                <Button variant="ghost" size="sm" onClick={restoreUnidades} data-testid="cfg-unidad-restore">
+                  Restaurar predeterminadas
+                </Button>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-2">Se ofrecen en el formulario de productos (POS/Compras/Inventario). El IVA predeterminado de todo producto nuevo es 8%.</p>
             </div>
           </div>
         </TabsContent>

@@ -43,7 +43,7 @@ function Brand({ compact = false }) {
   return (
     <div className="flex items-center shrink-0">
       <img
-        src={compact ? "/brand/ISOTIPO-Photoroom.png" : "/brand/logotipo-Photoroom.png"}
+        src={compact ? "/brand/isotipo1.png" : "/brand/logotipo-Photoroom.png"}
         alt="Grupo RYSA"
         className={compact ? "h-10 w-14 object-contain" : "h-11 w-[164px] object-contain object-left"}
       />
@@ -202,3 +202,4 @@ export default function Landing() {
     </div>
   );
 }
+

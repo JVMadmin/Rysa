@@ -1,4 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
+
+// Columnas de la tabla de inventario (clic en encabezado = ordenar)
+const INV_COLS = [
+  { key: "codigo", label: "Código" },
+  { key: "descripcion", label: "Producto" },
+  { key: "linea", label: "Línea" },
+  { key: "existencia", label: "Exist.", right: true, num: true },
+  { key: "stock_minimo", label: "Min", right: true, num: true },
+  { key: "costo", label: "Costo", right: true, num: true },
+  { key: "precio_sin_iva", label: "Neto", right: true, num: true },
+  { key: "precio_con_iva", label: "Bruto", right: true, num: true },
+  { key: "valor_inventario", label: "Valor inv.", right: true, num: true },
+  { key: "venta_potencial", label: "Venta pot.", right: true, num: true },
+  { key: "utilidad_potencial", label: "Util. pot.", right: true, num: true },
+  { key: "margen", label: "Margen", center: true, num: true },
+  { key: "unidades_vendidas", label: "Unid. vend.", right: true, num: true },
+  { key: "rotacion", label: "Rotación", right: true, num: true },
+];
 import { api, money } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +58,7 @@ export default function Reportes() {
   const mes = hoy.slice(0, 8) + "01";
   const [tab, setTab] = useState("ventas");
   const [desde, setDesde] = useState(mes);
+  const [invSort, setInvSort] = useState({ key: "", dir: "desc" });
   const [hasta, setHasta] = useState(hoy);
   const [group, setGroup] = useState("dia");
   const [vendedor, setVendedor] = useState("");
@@ -139,6 +158,22 @@ export default function Reportes() {
       setInv(data);
     } finally { setInvLoading(false); }
   };
+
+  // § Orden por clic en encabezados (Reportes › Inventario)
+  const invSorted = useMemo(() => {
+    const arr = [...(inv?.productos || [])];
+    if (!invSort.key) return arr;
+    const numK = new Set(["existencia", "stock_minimo", "costo", "precio_sin_iva",
+      "precio_con_iva", "valor_inventario", "venta_potencial", "utilidad_potencial",
+      "margen", "unidades_vendidas", "rotacion"]);
+    const k = invSort.key;
+    arr.sort((a, b) => {
+      if (numK.has(k)) { const x = Number(a[k] || 0), y = Number(b[k] || 0); return invSort.dir === "asc" ? x - y : y - x; }
+      const x = String(a[k] ?? ""), y = String(b[k] ?? "");
+      return invSort.dir === "asc" ? x.localeCompare(y, "es") : y.localeCompare(x, "es");
+    });
+    return arr;
+  }, [inv, invSort]);
 
   const exportarInventario = () => {
     const params = new URLSearchParams({ desde, hasta, estado: invEstado, fmt: "excel" });
@@ -432,14 +467,20 @@ export default function Reportes() {
                   <div className="text-xs uppercase tracking-wider text-slate-400 p-3">Existencia, costo y valor (unidades vendidas y rotación en el periodo)</div>
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-                      <th className="p-3">Código</th><th className="p-3">Producto</th><th className="p-3">Línea</th><th className="p-3 text-right">Exist.</th>
-                      <th className="p-3 text-right">Min</th><th className="p-3 text-right">Costo</th><th className="p-3 text-right">Neto</th><th className="p-3 text-right">Bruto</th>
-                      <th className="p-3 text-right">Valor inv.</th><th className="p-3 text-right">Venta pot.</th><th className="p-3 text-right">Util. pot.</th>
-                      <th className="p-3 text-center">Margen</th><th className="p-3 text-right">Unid. vend.</th><th className="p-3 text-right">Rotación</th>
+                      {INV_COLS.map((c, i) => (
+                        <th key={c.key} onClick={() => setInvSort((s) => ({ key: c.key, dir: s.key === c.key && s.dir === "asc" ? "desc" : "asc" }))}
+                          className={`p-3 cursor-pointer select-none hover:text-[#C1401E] ${c.right ? "text-right" : ""} ${c.center ? "text-center" : ""}`}
+                          data-testid={`inv-col-${c.key}`}>
+                          <span className="inline-flex items-center gap-1">
+                            {c.label}
+                            {invSort.key === c.key && <span>{invSort.dir === "asc" ? "↑" : "↓"}</span>}
+                          </span>
+                        </th>
+                      ))}
                     </tr></thead>
                     <tbody>
                       {inv.productos.length === 0 && <tr><td colSpan={14} className="p-8 text-center text-slate-400">Sin productos para los filtros seleccionados.</td></tr>}
-                      {inv.productos.slice(0, 400).map((p, i) => (
+                      {invSorted.slice(0, 400).map((p, i) => (
                         <tr key={i} className="border-t border-slate-100" data-testid={`inv-fila-${p.codigo}`}>
                           <td className="p-3 font-medium text-[#C1401E]">{p.codigo}</td>
                           <td className="p-3 max-w-[220px] truncate">{p.descripcion}</td>

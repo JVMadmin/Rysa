@@ -50,6 +50,7 @@ import exports
 import ocr_invoice as _ocr_invoice
 import pac_provider
 import moneycalc
+import developer as _devmod
 
 _APP_ENV = os.environ.get("ENVIRONMENT", "development").lower()
 logging.basicConfig(level=logging.DEBUG if _APP_ENV == "development" else logging.INFO)
@@ -61,6 +62,13 @@ api = APIRouter(prefix="/api")
 # Roles que se consideran administración del sistema (admin, propietario, desarrollador)
 ADMIN_SYSTEM_ROLES = {"admin", "admin_propietario", "admin_desarrollador"}
 
+# Unidades de medida predeterminadas del sistema. Configurables en
+# Configuración → Precios y unidades; se ofrecen al crear/editar productos.
+UNIDADES_DEFAULT = [
+    "PZA", "CAJA", "PAQUETE", "BOLSA", "SIX", "CUBETA", "PAR", "JUEGO",
+    "KG", "GR", "LT", "ML", "MT", "ROL", "SERVICIO",
+]
+
 # --- Bitácora en memoria de errores no controlados (para developer admin) ---
 DEV_ERRORS = []
 
@@ -71,15 +79,57 @@ async def unhandled_error_handler(request: Request, exc: Exception):
     # mensaje genérico. En producción no se retiene la traza en memoria.
     if _APP_ENV != "production":
         tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        tipo = type(exc).__name__
         record = {
             "id": uid(), "fecha": iso_now(),
             "ruta": f"{request.method} {request.url.path}",
-            "tipo": type(exc).__name__, "mensaje": str(exc)[:800], "detalle": tb[-2000:],
+            "tipo": tipo, "mensaje": str(exc)[:800], "detalle": tb[-2000:],
+            "estado": 500,
+            "categoria": ("postgresql" if ("asyncpg" in tb or "DBAPI" in tipo
+                                           or "asyncpg" in tipo) else "app"),
+            "usuario": _usuario_de_request(request),
         }
         DEV_ERRORS.append(record)
         DEV_ERRORS[:] = DEV_ERRORS[-200:]
     logger.exception("Error no controlado: %s", exc)
     return JSONResponse(status_code=500, content={"detail": "Error interno del servidor"})
+
+
+def _usuario_de_request(request: Request) -> str:
+    """Extrae el email del usuario del token (best-effort, solo para bitácora dev)."""
+    try:
+        token = request.cookies.get("access_token")
+        if not token:
+            auth = request.headers.get("Authorization", "")
+            token = auth[7:] if auth.startswith("Bearer ") else None
+        if not token:
+            return ""
+        payload = decode_token(token)
+        return payload.get("email") or payload.get("sub") or ""
+    except Exception:
+        return ""
+
+
+# --- Bitácora de requests fallidos (>=400) para el módulo DESARROLLADOR ------
+@app.middleware("http")
+async def _dev_failed_request_logger(request: Request, call_next):
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    try:
+        if response.status_code >= 400 and request.url.path.startswith("/api"):
+            _devmod.record_request_error({
+                "id": uid(),
+                "fecha": iso_now(),
+                "metodo": request.method,
+                "ruta": request.url.path,
+                "estado": response.status_code,
+                "duracion_ms": round((time.perf_counter() - t0) * 1000, 1),
+                "usuario": _usuario_de_request(request),
+                "categoria": "http",
+            })
+    except Exception:
+        pass
+    return response
 
 def es_admin_sistema(user: dict) -> bool:
     """Solo admin/propietario/desarrollador pueden administrar usuarios y módulos."""
@@ -699,6 +749,8 @@ class CajaMovimiento(BaseModel):
     concepto: str
     monto: float
     referencia: Optional[str] = ""
+    forzar: bool = False              # excedente autorizado (encargado/admin)
+    evidencia_url: Optional[str] = "" # foto del comprobante (gasto/retiro)
 
 class CajaClose(BaseModel):
     efectivo_contado: float
@@ -809,6 +861,7 @@ class SettingsInput(BaseModel):
     precios_incluyen_iva: bool = True
     listas_precios_nombres: List[str] = Field(default_factory=lambda: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"])
     listas_precios_pct: List[float] = Field(default_factory=lambda: [40, 30, 20, 15, 10])
+    unidades_medida: List[str] = Field(default_factory=lambda: list(UNIDADES_DEFAULT))
     logo_url: Optional[str] = ""
     ticket_config: dict = Field(default_factory=dict)
     sucursales: List[SucursalItem] = Field(default_factory=list)
@@ -1580,10 +1633,14 @@ CLIENT_IMPORT_MAP = {
     "FECHAALTA": ("fecha_alta", "date"), "VENDEDOR": ("vendedor", "text"),
     "PRECIOVTA": ("precio_venta", "int"), "TIPO": ("tipo_clave", "text"),
     "SALDO": ("saldo", "num"), "MENSUAL": ("mensual", "num"), "ANUAL": ("anual", "num"),
-    "CREDITO": ("credito_autorizado", "bool"), "RET_ISR": ("ret_isr", "bool"),
-    "RET_IVA": ("ret_iva", "bool"), "RET_ISRTAS": ("ret_isr_tasa", "num"),
-    "RET_IVATAS": ("ret_iva_tasa", "num"), "LIMDESCTO": ("lim_descuento", "num"),
-    "LIMCREDITO": ("limite_credito", "num"), "DIASCREDIT": ("dias_credito", "int"),
+    # Alias comunes de plantillas externas (no fallar silenciosamente):
+    "SALDO PENDIENTE": ("saldo", "num"), "SALDO_ACTUAL": ("saldo", "num"),
+    "LIMCREDITO": ("limite_credito", "num"), "LIMITE_CREDITO": ("limite_credito", "num"),
+    "LIMITE DE CREDITO": ("limite_credito", "num"), "LIMITE": ("limite_credito", "num"),
+    "CREDITO": ("credito_autorizado", "bool"), "CREDITO_AUTORIZADO": ("credito_autorizado", "bool"),
+    "CREDITO AUTORIZADO": ("credito_autorizado", "bool"), "AUTORIZADO": ("credito_autorizado", "bool"),
+    "DIASCREDIT": ("dias_credito", "int"), "DIAS_CREDITO": ("dias_credito", "int"),
+    "DIAS DE CREDITO": ("dias_credito", "int"),
     "VTACREDITO": ("venta_credito", "num"), "ULTFCOMPRA": ("ult_fecha_compra", "date"),
     "ULTCCOMPRA": ("ult_monto_compra", "num"), "COMENTARIO": ("comentario", "text"),
     "USOCFDI": ("uso_cfdi", "text"), "REGFISCAL": ("reg_fiscal", "text"),
@@ -1878,6 +1935,25 @@ async def caja_movimiento(data: CajaMovimiento, user: dict = Depends(require_per
     caja = await caja_abierta_de(user["id"])
     if not caja:
         raise HTTPException(400, "No tienes caja abierta")
+    # Validación de retiro (§3.3): no entregar más efectivo del disponible
+    # (fondo + ventas efectivo + entradas − retiros/gastos/devoluciones).
+    # Forzar el retiro pese al excedente queda reservado a encargado/admin.
+    if data.tipo in ("retiro", "gasto"):
+        movs_previos = await db.caja_movimientos.find({"caja_id": caja["id"]}, {"_id": 0}).to_list(2000)
+        res_previo = resumen_caja(caja, movs_previos)
+        disponible = float(res_previo.get("efectivo_esperado", 0))
+        puede_forzar = (
+            es_admin_sistema(user)
+            or user.get("role") == "encargado"
+            or user_has_permission(user, "caja.retiro_forzado")
+        )
+        if abs(data.monto) > disponible + 0.01 and not (data.forzar and puede_forzar):
+            raise HTTPException(status_code=409, detail={
+                "mensaje": f"El monto excede el efectivo disponible (${disponible:,.2f}).",
+                "disponible": disponible,
+                "requiere_autorizacion": True,
+                "puede_forzar": puede_forzar,
+            })
     # Las entregas de efectivo (retiros) llevan folio propio RET-xxxxxx para
     # trazabilidad e impresión del ticket de entrega.
     folio = ""
@@ -1887,9 +1963,115 @@ async def caja_movimiento(data: CajaMovimiento, user: dict = Depends(require_per
            "folio": folio, "concepto": data.concepto,
            "monto": abs(data.monto), "referencia": data.referencia,
            "usuario_id": user["id"], "usuario_nombre": user["name"], "fecha": iso_now()}
+    if data.evidencia_url:
+        doc["evidencia_url"] = data.evidencia_url
+        doc["evidencia_estado"] = "pendiente"
     await db.caja_movimientos.insert_one(doc)
-    await log_audit(user, "caja_movimiento", "caja", caja["id"], f"{data.tipo} {data.monto}")
+    await log_audit(user, "caja_movimiento", "caja", caja["id"],
+                    f"{data.tipo} {data.monto}" + (" (forzado)" if data.forzar else ""))
     return {"ok": True, "movimiento": doc}
+
+
+@api.get("/caja/evidencias")
+async def caja_evidencias(estado: str = "pendiente",
+                          user: dict = Depends(require_permission("auditoria.ver"))):
+    """Bandeja de evidencias fotográficas de gastos/retiros (solo admin)."""
+    if not es_admin_sistema(user):
+        raise HTTPException(403, "Solo administradores/propietario")
+    flt = {"evidencia_url": {"$ne": None}}
+    if estado in ("pendiente", "revisado"):
+        flt["evidencia_estado"] = estado
+    movs = await db.caja_movimientos.find(flt, {"_id": 0}).sort("fecha", -1).to_list(500)
+    cajas = {c["id"]: c for c in await db.cajas.find({}, {"_id": 0}).to_list(1000)}
+    out = []
+    for m in movs:
+        c = cajas.get(m.get("caja_id"), {})
+        out.append({**m, "caja_nombre": c.get("caja_nombre"), "fecha_corte": c.get("fecha_cierre")})
+    return out
+
+
+@api.patch("/caja/movimientos/{mov_id}/revisar")
+async def caja_evidencia_revisar(mov_id: str, user: dict = Depends(get_current_user)):
+    """Marca una evidencia como revisada (solo admin/propietario)."""
+    if not es_admin_sistema(user):
+        raise HTTPException(403, "Solo administradores/propietario")
+    res = await db.caja_movimientos.update_one(
+        {"id": mov_id},
+        {"$set": {"evidencia_estado": "revisado",
+                  "revisado_por": user.get("name"), "revisado_fecha": iso_now()}})
+    if not res:
+        raise HTTPException(404, "Movimiento no encontrado")
+    await log_audit(user, "revisar_evidencia", "caja_movimiento", mov_id)
+    return {"ok": True}
+
+
+@api.get("/catalogo")
+async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = None,
+                            con_existencia: Optional[bool] = None,
+                            user: dict = Depends(get_current_user)):
+    """Catálogo por categoría SOLO consulta: imagen, nombre, categoría,
+    precio al público y existencia disponible. Sin costos ni utilidad."""
+    flt = {"estado": "activo"}
+    if categoria:
+        flt["$or"] = [{"clasificacion": categoria}, {"categoria": categoria}]
+    if q:
+        rx = {"$regex": re.escape(q), "$options": "i"}
+        flt["$and"] = [{"$or": [{"descripcion": rx}, {"codigo": rx}, {"codigos_barras": rx}]}]
+    if con_existencia:
+        flt["existencia"] = {"$gt": 0}
+    docs = await db.products.find(
+        flt, {"_id": 0, "id": 1, "codigo": 1, "descripcion": 1,
+              "clasificacion": 1, "categoria": 1, "imagen": 1, "IMAGEN": 1,
+              "precios": 1, "existencia": 1}).sort("descripcion", 1).to_list(5000)
+    out = []
+    for d in docs:
+        precio = ""
+        try:
+            precio = float(((d.get("precios") or [{}])[0]).get("precio_con_iva") or 0)
+        except Exception:
+            precio = 0.0
+        out.append({
+            "id": d.get("id"),
+            "nombre": d.get("descripcion") or "",
+            "codigo": d.get("codigo") or "",
+            "categoria": d.get("clasificacion") or d.get("categoria") or "",
+            "imagen": d.get("imagen") or d.get("IMAGEN") or "",
+            "precio_publico": round(precio, 2),
+            "existencia": round(float(d.get("existencia") or 0), 3),
+        })
+    return out
+
+
+@api.get("/sales/mi-reporte-hoy")
+async def mi_reporte_hoy(user: dict = Depends(get_current_user)):
+    """Reporte rápido PROPIO del día: tickets, total vendido y desglose por
+    forma de pago. Nunca incluye utilidad/margen (§3.2)."""
+    hoy = now_utc().date().isoformat()
+    ventas = await db.sales.find(
+        {"usuario_id": user["id"], "estado": "confirmada", "fecha": {"$regex": "^" + hoy}},
+        {"_id": 0, "folio": 1, "hora": 1, "total": 1, "pagos": 1, "condicion": 1}
+    ).sort("fecha", -1).to_list(2000)
+    metodos = {}
+    total = 0.0
+    tickets = []
+    for s in ventas:
+        t = round(float(s.get("total", 0) or 0), 2)
+        total = round(total + t, 2)
+        restante = t
+        metas_txt = []
+        for p in (s.get("pagos") or []):
+            met = p.get("metodo") or "otros"
+            aplicar = min(round(float(p.get("monto", 0) or 0), 2), restante)
+            metodos[met] = round(metodos.get(met, 0) + aplicar, 2)
+            restante = round(restante - aplicar, 2)
+            metas_txt.append(met)
+        if not metas_txt:
+            metas_txt = ["credito" if s.get("condicion") == "credito" else "contado"]
+            metodos[metas_txt[0]] = round(metodos.get(metas_txt[0], 0) + t, 2)
+        tickets.append({"folio": s.get("folio"), "hora": s.get("hora"),
+                        "total": t, "metodo": " + ".join(metas_txt)})
+    return {"fecha": hoy, "num_ventas": len(ventas), "total": total,
+            "por_metodo": metodos, "tickets": tickets}
 
 
 @api.post("/caja/movimientos/{mov_id}/comprobante")
@@ -1951,9 +2133,61 @@ async def cerrar_caja(data: CajaClose, user: dict = Depends(require_permission("
     if not cerradas:
         raise HTTPException(409, "La caja acaba de ser cerrada por otro usuario")
     await log_audit(user, "cerrar_caja", "caja", caja["id"], f"diferencia {diferencia}")
-    # Se devuelven los movimientos completos para que la UI muestre el
-    # reporte de cierre sin una segunda petición.
-    return {"cierre": cierre, "movimientos": movs}
+    # Se devuelven los movimientos completos y el DESGLOSE de ventas del turno
+    # para que la UI muestre el reporte de verificación sin más peticiones.
+    desglose = await _desglose_ventas_caja(caja["id"])
+    return {"cierre": cierre, "movimientos": movs, "desglose": desglose,
+            "caja": {"id": caja.get("id"), "caja_nombre": caja.get("caja_nombre"),
+                     "usuario_nombre": caja.get("usuario_nombre"),
+                     "fondo_inicial": caja.get("fondo_inicial"),
+                     "fecha_apertura": caja.get("fecha_apertura"),
+                     "fecha_cierre": iso_now()}}
+
+
+async def _desglose_ventas_caja(caja_id: str) -> dict:
+    """Ventas confirmadas del turno agrupadas por método de pago.
+    Cada pago cuenta solo hasta cubrir el total de su venta (el CAMBIO no es
+    dinero que quede en caja) — mismo criterio que el movimiento de caja."""
+    vsales = await db.sales.find(
+        {"caja_id": caja_id, "estado": "confirmada"},
+        {"_id": 0, "pagos": 1, "total": 1}).to_list(20000)
+    metodos = {}
+    total_vendido = 0.0
+    for s in vsales:
+        total_s = round(float(s.get("total", 0) or 0), 2)
+        total_vendido = round(total_vendido + total_s, 2)
+        restante = total_s
+        for p in (s.get("pagos") or []):
+            if restante <= 0:
+                break
+            aplicar = min(round(float(p.get("monto", 0) or 0), 2), restante)
+            met = p.get("metodo") or "otros"
+            metodos[met] = round(metodos.get(met, 0) + aplicar, 2)
+            restante = round(restante - aplicar, 2)
+    return {"num_ventas": len(vsales), "total_vendido": total_vendido,
+            "metodos": metodos}
+
+
+@api.get("/caja/{caja_id}/desglose")
+async def caja_desglose(caja_id: str, user: dict = Depends(require_permission("caja.ver"))):
+    """Desglose de ventas del corte (para verificar el reporte en cualquier
+    momento, con la caja abierta o cerrada). Solo el dueño o administración."""
+    caja = await db.cajas.find_one({"id": caja_id}, {"_id": 0})
+    if not caja:
+        raise HTTPException(404, "Corte de caja no encontrado")
+    if not es_admin_sistema(user) and caja.get("usuario_id") != user["id"]:
+        raise HTTPException(403, "Solo puedes consultar tus propios cortes")
+    movs = await db.caja_movimientos.find({"caja_id": caja_id}, {"_id": 0}).sort("fecha", 1).to_list(5000)
+    desglose = await _desglose_ventas_caja(caja_id)
+    return {"caja": {"id": caja.get("id"), "caja_nombre": caja.get("caja_nombre"),
+                     "usuario_nombre": caja.get("usuario_nombre"),
+                     "fondo_inicial": caja.get("fondo_inicial"),
+                     "fecha_apertura": caja.get("fecha_apertura"),
+                     "fecha_cierre": caja.get("fecha_cierre"),
+                     "cierre": caja.get("cierre")},
+            "movimientos": movs,
+            "resumen": resumen_caja(caja, movs),
+            "desglose": desglose}
 
 @api.get("/caja/operadores")
 async def caja_operadores(user: dict = Depends(require_permission("caja.ver"))):
@@ -2057,6 +2291,65 @@ async def _caja_reporte_payload(caja_id: str, user: dict) -> dict:
     settings_doc = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
     return {"caja": caja, **rep, "metodos": metodos, "settings": settings_doc,
             "user_name": user.get("name")}
+
+
+@api.get("/caja/{caja_id}/ventas.xlsx")
+async def caja_ventas_xlsx(caja_id: str, ambito: str = "turno",
+                           user: dict = Depends(require_permission("caja.ver"))):
+    """Descarga el listado de ventas del TURNO (esta caja) o del DÍA
+    (fecha de apertura del corte). Solo dueño de la caja o administración."""
+    caja = await db.cajas.find_one({"id": caja_id}, {"_id": 0})
+    if not caja:
+        raise HTTPException(404, "Corte de caja no encontrado")
+    if not es_admin_sistema(user) and caja.get("usuario_id") != user["id"]:
+        raise HTTPException(403, "Solo puedes consultar tus propios cortes")
+
+    if ambito == "dia":
+        dia = (caja.get("fecha_apertura") or iso_now())[:10]
+        flt = {"estado": "confirmada", "fecha": {"$regex": "^" + dia}}
+        if not es_admin_sistema(user):
+            flt["$or"] = [{"usuario_id": user["id"]}, {"vendedor_id": user["id"]}]
+        titulo = f"VENTAS DEL DÍA {dia}"
+    else:
+        flt = {"estado": "confirmada", "caja_id": caja_id}
+        titulo = "VENTAS DEL TURNO"
+
+    ventas = await db.sales.find(flt, {"_id": 0}).sort("fecha", 1).to_list(20000)
+    metodos = {}
+    total = 0.0
+    headers = ["Folio", "Hora", "Cliente", "Vendedor", "Método(s)", "Artículos", "Total"]
+    rows = []
+    for s in ventas:
+        pagos = s.get("pagos") or []
+        met_txt = " + ".join((p.get("metodo") or "otros") for p in pagos) or (
+            "crédito" if s.get("condicion") == "credito" else "contado")
+        for p in pagos:
+            m = p.get("metodo") or "otros"
+            metodos[m] = round(metodos.get(m, 0) + float(p.get("monto", 0) or 0), 2)
+        total = round(total + float(s.get("total", 0) or 0), 2)
+        arts = sum(int(float(i.get("cantidad", 0) or 0)) for i in (s.get("items") or []))
+        rows.append({
+            "Folio": s.get("folio") or "",
+            "Hora": (s.get("fecha") or "")[11:16],
+            "Cliente": s.get("cliente_nombre") or "",
+            "Vendedor": s.get("vendedor_nombre") or s.get("usuario_nombre") or "",
+            "Método(s)": met_txt,
+            "Artículos": arts,
+            "Total": round(float(s.get("total", 0) or 0), 2),
+        })
+    rows.append({})
+    rows.append({"Folio": "TOTAL", "Cliente": f"{len(ventas)} ventas", "Total": round(total, 2)})
+    for met, monto in sorted(metodos.items()):
+        rows.append({"Folio": "", "Cliente": f"  {met}", "Total": round(monto, 2)})
+
+    filtros = (f"Caja: {caja.get('caja_nombre') or 'Caja'} · Cajero: {caja.get('usuario_nombre') or '—'} · "
+               f"Apertura: {(caja.get('fecha_apertura') or '')[:16].replace('T', ' ')} · Ámbito: {'día' if ambito == 'dia' else 'turno'}")
+    data = exports.excel_bytes(rows, headers, sheet_name="Ventas",
+                               title=f"{titulo} - GRUPO RYSA")
+    stamp = (caja.get("fecha_apertura") or iso_now())[:10]
+    return StreamingResponse(io.BytesIO(data),
+                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f"attachment; filename=ventas_{ambito}_{stamp}.xlsx"})
 
 
 @api.get("/caja/{caja_id}/reporte.xlsx")
@@ -2329,13 +2622,25 @@ async def _crear_venta(user: dict, data: SaleInput):
 
     # --- Persistencia atómica (PostgreSQL): una sola transacción ---
     try:
-        return await _pgpos.crear_venta_pg(
+        creada = await _pgpos.crear_venta_pg(
             user=user, sale=sale, items=items, pagos=pagos, total=total,
             es_cotizacion=es_cotizacion, caja=caja, condicion=data.condicion,
             cliente=cliente, folio=folio, idempotency_key=data.idempotency_key,
             override_inv=override_inv)
     except _pgpos.VentaError as e:
         raise HTTPException(status_code=e.status, detail=e.message)
+
+    # Generador ÚNICO de documentos: pre-genera ticket + carta UNA vez aquí;
+    # vista previa / descarga / impresión / WhatsApp / correo usarán SIEMPRE
+    # estos mismos archivos. Best-effort: si falla, se generan bajo demanda.
+    if not es_cotizacion:
+        try:
+            import documentos as _docs
+            await _docs.asegurar_documentos(creada["id"])
+        except Exception as e:
+            logger.warning("Pre-generación de documentos pendiente %s: %s",
+                           folio, str(e)[:120])
+    return creada
 
 # =========================================================================
 # COTIZACIONES (listado, detalle y conversión a venta)
@@ -2886,7 +3191,7 @@ async def cxc_recordatorio(client_id: str, user: dict = Depends(require_permissi
     return {"texto": texto, "telefono": telefono, "wa_url": wa_url, "historico_id": msg["id"]}
 
 @api.post("/cxc/{client_id}/abono")
-async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(require_permission("caja.entrada"))):
+async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(require_permission("cxc.abono"))):
     """Abono FIFO ATÓMICO (pgstore.cxc.abonar_pg): cliente y ventas se bloquean
     con FOR UPDATE en una sola transacción; imposible dejar saldo negativo o
     aplicaciones parciales."""
@@ -4888,7 +5193,15 @@ async def import_clients_preview(file: UploadFile = File(...), user: dict = Depe
                         "accion": "actualizar" if existe else "crear", "existe": existe,
                         "errores": errores, "data": data})
     return {"total": len(preview), "nuevos": nuevos, "existentes": existentes,
-            "con_errores": con_errores, "columnas": CLIENT_LEGACY_ORDER, "preview": preview}
+            "con_errores": con_errores, "columnas": CLIENT_LEGACY_ORDER,
+            "mapeo_columnas": {
+                "archivo": [c for c in df.columns if c],
+                "reconocidas": [c for c in df.columns if c in CLIENT_IMPORT_MAP],
+                "ignoradas": [c for c in df.columns
+                              if c and c not in CLIENT_IMPORT_MAP
+                              and c not in ("CLAVE",)],
+            },
+            "preview": preview}
 
 @api.post("/clients/import/confirm")
 async def import_clients(payload: dict, user: dict = Depends(require_permission("importar"))):
@@ -5199,6 +5512,163 @@ async def dev_seed_campo(regenerar_track: bool = True, user: dict = Depends(_dev
             "login_demo": [{"email": e, "password": _DEMO_PASSWORD} for _, e in
                            [(v["name"], v["email"]) for v in _DEMO_VENDEDORES]]}
 
+
+# --- Diagnóstico del sistema (SOLO DEV) ---------------------------------------
+@api.get("/dev/diagnostico")
+async def dev_diagnostico(user: dict = Depends(_dev_only)):
+    """Salud del sistema: latencia de BD, almacenamiento escribible,
+    integridad referencial básica y resumen del entorno."""
+    diag = {"generado": iso_now(), "entorno": _APP_ENV,
+            "python": platform.python_version(),
+            "errores_en_memoria": len(DEV_ERRORS)}
+
+    # 1) Base de datos: latencia de una consulta trivial.
+    t0 = time.perf_counter()
+    try:
+        await db.counters.find_one({})
+        diag["bd"] = {"ok": True,
+                      "latencia_ms": round((time.perf_counter() - t0) * 1000, 1)}
+    except Exception as e:
+        diag["bd"] = {"ok": False, "error": str(e)[:300]}
+
+    # 2) Almacenamiento local: escribir / leer / borrar un archivo de prueba.
+    try:
+        storage.init_storage()
+        base = Path(storage.base_upload_dir())
+        probe = base / ".__diagnostico_rysa.tmp"
+        probe.write_bytes(b"rysa-diag")
+        leidos = probe.read_bytes()
+        probe.unlink()
+        diag["storage"] = {"ok": leidos == b"rysa-diag", "ruta": str(base)}
+    except Exception as e:
+        diag["storage"] = {"ok": False, "error": str(e)[:300]}
+
+    # 3) Integridad referencial básica (escaneos acotados).
+    try:
+        client_ids = {c["id"] for c in await db.clients.find({}, {"id": 1}).to_list(20000)}
+        user_ids = {u["id"] for u in await db.users.find({}, {"id": 1}).to_list(20000)}
+        ventas = await db.sales.find({}, {"cliente_id": 1}).to_list(5000)
+        visitas = await db.visits.find({}, {"cliente_id": 1, "vendedor_id": 1}).to_list(5000)
+        clientes = await db.clients.find({}, {"vendedor_id": 1}).to_list(20000)
+        diag["integridad"] = {
+            "ventas_sin_cliente": sum(1 for v in ventas if v.get("cliente_id") and v["cliente_id"] not in client_ids),
+            "visitas_sin_cliente": sum(1 for v in visitas if v.get("cliente_id") and v["cliente_id"] not in client_ids),
+            "visitas_sin_vendedor": sum(1 for v in visitas if v.get("vendedor_id") and v["vendedor_id"] not in user_ids),
+            "clientes_sin_vendedor": sum(1 for c in clientes if c.get("vendedor_id") and c["vendedor_id"] not in user_ids),
+            "muestra": {"ventas": len(ventas), "visitas": len(visitas)},
+        }
+    except Exception as e:
+        diag["integridad"] = {"error": str(e)[:300]}
+    return diag
+
+
+# --- Checklist previo a producción (SOLO DEV) ----------------------------------
+@api.get("/dev/preproduccion")
+async def dev_preproduccion(user: dict = Depends(_dev_only)):
+    """Evalúa condiciones recomendadas ANTES de pasar ENVIRONMENT=production.
+    El propio módulo desarrollador se desactiva en producción (404)."""
+    checks = []
+
+    def add(cid, titulo, ok, detalle, severidad="alta"):
+        checks.append({"id": cid, "titulo": titulo, "ok": bool(ok),
+                       "detalle": detalle, "severidad": severidad})
+
+    # 1) Sin cuentas demo y sin su contraseña por defecto.
+    demos = await db.users.find({"email": {"$regex": "@rysa\\.dev$"}},
+                                {"_id": 0}).to_list(100)
+    pw_demo = [u.get("email") for u in demos
+               if verify_password(_DEMO_PASSWORD, u.get("password_hash") or "")]
+    add("usuarios_demo", "Sin cuentas demo (@rysa.dev)", len(demos) == 0,
+        f"{len(demos)} cuenta(s) demo" +
+        (f" · {len(pw_demo)} con contraseña por defecto" if pw_demo else ""))
+
+    # 2) Sin clientes de prueba.
+    n_cli = await db.clients.count_documents({"codigo": {"$regex": "^DEMO-"}})
+    add("clientes_demo", "Sin clientes de prueba (DEMO-*)", n_cli == 0,
+        f"{n_cli} cliente(s) de prueba")
+
+    # 3) Bitácora de errores vacía.
+    add("errores", "Bitácora de errores vacía", len(DEV_ERRORS) == 0,
+        f"{len(DEV_ERRORS)} error(es) pendientes", severidad="media")
+
+    # 4) Configuración básica del ERP.
+    s = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    empresa = (s.get("empresa_nombre") or "").strip()
+    add("empresa", "Nombre de la empresa configurado", bool(empresa),
+        empresa or "settings.empresa_nombre vacío")
+    add("logo", "Logo corporativo cargado", bool(s.get("logo_url")),
+        "definido" if s.get("logo_url") else "sin logo (recomendado)",
+        severidad="baja")
+
+    # 5) Catálogo sano: productos sin código o sin precio de venta.
+    prods = await db.products.find({}, {"codigo": 1, "CODIGO": 1,
+                                        "PRECIO1": 1, "precio1": 1}).to_list(20000)
+
+    def _cod(p):
+        return ((p.get("codigo") or p.get("CODIGO")) or "").strip()
+
+    def _precio(p):
+        try:
+            return float(p.get("PRECIO1") or p.get("precio1") or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
+    malos = [p for p in prods if not _cod(p) or not _precio(p)]
+    add("productos", f"Catálogo íntegro ({len(prods)} productos)", len(malos) == 0,
+        f"{len(malos)} producto(s) sin código o sin precio de venta",
+        severidad="media")
+
+    n_sin_cod = sum(1 for c in await db.clients.find({}, {"codigo": 1}).to_list(20000)
+                    if not (c.get("codigo") or "").strip())
+    add("clientes_codigo", "Clientes con código asignado", n_sin_cod == 0,
+        f"{n_sin_cod} cliente(s) sin código")
+
+    # 6) Auditoría operando.
+    n_audit = await db.audit_logs.count_documents({})
+    add("auditoria", "Auditoría operando", n_audit > 0, f"{n_audit} registro(s)")
+
+    listo = all(c["ok"] for c in checks if c["severidad"] != "baja")
+    return {"checks": checks, "listo": listo}
+
+
+# --- Limpieza de datos de prueba (SOLO DEV) -------------------------------------
+@api.delete("/dev/datos-prueba")
+async def dev_purgar_datos_prueba(user: dict = Depends(_dev_only)):
+    """Elimina TODOS los datos generados para pruebas: cuentas demo (@rysa.dev)
+    con sus ubicaciones GPS, clientes DEMO-* y las visitas asociadas."""
+    resumen = {"usuarios_eliminados": 0, "ubicaciones_eliminadas": 0,
+               "clientes_eliminados": 0, "visitas_eliminadas": 0}
+
+    # 1) Cuentas demo: revocar sesiones y borrar su rastro.
+    demos = await db.users.find({"email": {"$regex": "@rysa\\.dev$"}},
+                                {"_id": 0}).to_list(100)
+    demo_uids = [u["id"] for u in demos]
+    for vid in demo_uids:
+        try:
+            await revoke_user_sessions(vid)
+        except Exception:
+            pass
+        resumen["ubicaciones_eliminadas"] += await db.seller_locations.delete_many(
+            {"vendedor_id": vid})
+        resumen["visitas_eliminadas"] += await db.visits.delete_many(
+            {"vendedor_id": vid})
+        resumen["usuarios_eliminados"] += await db.users.delete_one({"id": vid})
+
+    # 2) Clientes de prueba y sus visitas.
+    cli_docs = await db.clients.find({"codigo": {"$regex": "^DEMO-"}},
+                                     {"_id": 0}).to_list(1000)
+    for cid in [c["id"] for c in cli_docs]:
+        resumen["visitas_eliminadas"] += await db.visits.delete_many(
+            {"cliente_id": cid})
+    if cli_docs:
+        resumen["clientes_eliminados"] = await db.clients.delete_many(
+            {"codigo": {"$regex": "^DEMO-"}})
+
+    await log_audit(user, "dev_purga_pruebas", "sistema", "",
+                    f"Purga de datos de prueba: {resumen}")
+    return {"ok": True, **resumen}
+
+
 # =========================================================================
 # SUCURSALES
 # =========================================================================
@@ -5264,6 +5734,8 @@ async def get_settings(user: dict = Depends(get_current_user)):
     st = s.get("storage") or {}
     st = {**st, "backend": st.get("backend") or "local", "upload_dir": st.get("upload_dir") or storage.base_upload_dir()}
     s = {**s, "storage": st}
+    if not s.get("unidades_medida"):
+        s["unidades_medida"] = list(UNIDADES_DEFAULT)  # UNIDADES_MERGE_DONE
     return s
 
 
@@ -5413,62 +5885,83 @@ async def sale_qr_png(sale_id: str, size: int = 240, destino: Optional[str] = No
                         headers={"Cache-Control": "no-store"})
 
 @api.post("/sales/{sale_id}/ticket-pdf")
-async def sale_ticket_pdf(sale_id: str, user: dict = Depends(get_current_user)):
-    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
-    if not sale:
-        raise HTTPException(404, "Venta no encontrada")
-    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+async def sale_ticket_pdf(sale_id: str, regenerar: bool = False,
+                          user: dict = Depends(get_current_user)):
+    """PDF del ticket. Generador ÚNICO (documentos.py): la primera llamada
+    crea el archivo y las siguientes devuelven EXACTAMENTE el mismo PDF —
+    el que se comparte por WhatsApp/descarga es siempre el original."""
+    import documentos as _docs
     try:
-        pdf_bytes = storage.build_ticket_pdf(sale, settings)
-        # Nombre de archivo basado en folio seguro + UUID
-        folio_clean = "".join(c for c in sale.get('folio', 'sale') if c.isalnum())
-        path = f"tickets/{folio_clean}-{uid()[:8]}.pdf"
-        result = storage.put_object(path, pdf_bytes, "application/pdf")
+        res = await _docs.asegurar_documentos(sale_id, formatos=("ticket",),
+                                              regenerar=regenerar)
+    except ValueError:
+        raise HTTPException(404, "Venta no encontrada")
     except Exception as e:
         logger.error("Ticket PDF falló: %s", str(e)[:160])
         raise HTTPException(502, "No se pudo generar el PDF del ticket.")
-    stored = result.get("path", path)
-    await db.files.insert_one({
-        "id": uid(), "storage_path": stored, "original_filename": f"ticket-{sale.get('folio')}.pdf",
-        "content_type": "application/pdf", "size": result.get("size", len(pdf_bytes)),
-        "sale_id": sale_id, "is_deleted": False, "created_at": iso_now(),
-    })
-    return {"path": stored, "url": f"/api/files/{stored}"}
+    r = res.get("ticket") or {}
+    if not r.get("url"):
+        raise HTTPException(502, "No se pudo generar el PDF del ticket.")
+    return {"path": r["path"], "url": r["url"]}
 
 
 @api.post("/sales/{sale_id}/letter-pdf")
-async def sale_letter_pdf(sale_id: str, user: dict = Depends(get_current_user)):
-    """Genera el comprobante comercial RYSA en formato carta (Letter 8.5x11)."""
-    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
-    if not sale:
-        raise HTTPException(404, "Venta no encontrada")
-    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
-    cliente = None
-    if sale.get("cliente_id"):
-        c = await db.clients.find_one({"id": sale["cliente_id"]}, {"_id": 0})
-        if c:
-            cliente = {
-                "nombre": c.get("nombre"), "rfc": c.get("rfc"),
-                "telefono": c.get("telefono") or c.get("celular") or c.get("whatsapp"),
-                "correo": c.get("correo") or c.get("correos"),
-                "direccion": c.get("direccion"), "colonia": c.get("colonia"),
-                "ciudad": c.get("ciudad"), "estado_geo": c.get("estado_geo"), "cp": c.get("cp"),
-            }
+async def sale_letter_pdf(sale_id: str, regenerar: bool = False,
+                          user: dict = Depends(get_current_user)):
+    """Comprobante formato carta (Letter 8.5x11) con logotipo oficial.
+    Mismo generador central: una sola vez por venta, mismo archivo siempre."""
+    import documentos as _docs
     try:
-        pdf_bytes = storage.build_letter_pdf(sale, settings, cliente)
-        folio_clean = "".join(c for c in sale.get('folio', 'sale') if c.isalnum())
-        path = f"tickets/{folio_clean}-{uid()[:8]}-carta.pdf"
-        result = storage.put_object(path, pdf_bytes, "application/pdf")
+        res = await _docs.asegurar_documentos(sale_id, formatos=("carta",),
+                                              regenerar=regenerar)
+    except ValueError:
+        raise HTTPException(404, "Venta no encontrada")
     except Exception as e:
         logger.error("Formato carta PDF falló: %s", str(e)[:200])
         raise HTTPException(502, "No se pudo generar el comprobante en formato carta.")
-    stored = result.get("path", path)
-    await db.files.insert_one({
-        "id": uid(), "storage_path": stored, "original_filename": f"carta-{sale.get('folio')}.pdf",
-        "content_type": "application/pdf", "size": result.get("size", len(pdf_bytes)),
-        "sale_id": sale_id, "is_deleted": False, "created_at": iso_now(),
-    })
-    return {"path": stored, "url": f"/api/files/{stored}"}
+    r = res.get("carta") or {}
+    if not r.get("url"):
+        raise HTTPException(502, "No se pudo generar el comprobante en formato carta.")
+    return {"path": r["path"], "url": r["url"]}
+
+
+@api.get("/sales/{sale_id}/ticket-print")
+async def sale_ticket_print(sale_id: str, request: Request):
+    """Vista HTML de auto-impresión en PAPEL POS80 (@page 80mm) del ticket
+    oficial YA generado. El iframe del POS la carga y el navegador imprime
+    el documento real a 80mm por la impresora térmica predeterminada."""
+    from fastapi.responses import HTMLResponse
+    import documentos as _docs
+    try:
+        res = await _docs.asegurar_documentos(sale_id, formatos=("ticket",))
+    except ValueError:
+        raise HTTPException(404, "Venta no encontrada")
+    except Exception as e:
+        logger.error("ticket-print falló: %s", str(e)[:160])
+        raise HTTPException(502, "No se pudo preparar la impresión.")
+    r = res.get("ticket") or {}
+    if not r.get("url"):
+        raise HTTPException(502, "No se pudo preparar la impresión.")
+    base = str(request.base_url).rstrip("/")
+    src = f"{base}{r['url']}"
+    folio = ""
+    sale_doc = await db.sales.find_one({"id": sale_id}, {"_id": 0, "folio": 1})
+    if sale_doc:
+        folio = str(sale_doc.get("folio") or "")
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><title>Ticket {folio}</title>
+<style>
+@page {{ size: 80mm auto; margin: 0; }}
+html, body {{ margin: 0; padding: 0; background: #fff; }}
+embed {{ width: 80mm; display: block; }}
+</style></head>
+<body><embed id="pdf" src="{src}" type="application/pdf" width="80mm">
+<script>
+window.addEventListener('load', function () {{
+  setTimeout(function () {{ try {{ window.print(); }} catch (e) {{}} }}, 400);
+}});
+</script>
+</body></html>"""
+    return HTMLResponse(html)
 
 
 @api.get("/vendedores")
@@ -6520,6 +7013,11 @@ app.include_router(api)
 # Módulo de operación en campo: vendedores, visitas, ubicaciones y supervisión.
 import field_ops  # noqa: E402
 app.include_router(field_ops.router)
+
+# Módulo DESARROLLADOR: diagnóstico, depuración y limpieza transaccional.
+# Las rutas destructivas solo se registran si entorno != production Y
+# DEVELOPER_MODE=true (ver developer.py).
+app.include_router(_devmod.router)
 
 # Configuración dinámica de CORS
 env = os.environ.get("ENVIRONMENT", "development").lower()

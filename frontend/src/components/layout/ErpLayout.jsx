@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
@@ -6,8 +6,8 @@ import { useBranding, DEFAULT_LOGO } from "@/hooks/useBranding";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
-  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3, Smartphone, Bug,
-  Search, ChevronRight, MapPinned, Radar, Route as RouteIcon, ShoppingBag, Truck, ScanLine,
+  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3, Smartphone, Bug, Wrench,
+  Search, ChevronRight, Radar, Route as RouteIcon, ShoppingBag, Truck, Images,
 } from "lucide-react";
 import {
   Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
@@ -19,10 +19,13 @@ const NAV = [
   
   // OPERACIÓN
   { to: "/app/pos", label: "Punto de venta", icon: ShoppingCart, perm: "venta.crear", section: "OPERACIÓN" },
-  { to: "/app/ventas", label: "Ventas", icon: Receipt, section: "OPERACIÓN" },
-  { to: "/app/inventario", label: "Inventario", icon: Package, section: "OPERACIÓN" },
-  { to: "/app/clientes", label: "Clientes", icon: Users, section: "OPERACIÓN" },
+  { to: "/app/ventas", label: "Ventas", icon: Receipt, perm: "venta.crear", section: "OPERACIÓN" },
+  { to: "/app/catalogo", label: "Catálogo", icon: Images, perm: "catalogo.ver", section: "OPERACIÓN" },
+  { to: "/app/inventario", label: "Inventario", icon: Package, perm: "producto.crear", section: "OPERACIÓN" },
+  // Categorías vive DENTRO de Inventario (botón en la cabecera de Productos).
+  { to: "/app/clientes", label: "Clientes", icon: Users, perm: "clientes.gestionar", section: "OPERACIÓN" },
   { to: "/app/cxc", label: "Cuentas por cobrar", icon: HandCoins, perm: "cxc.ver", section: "OPERACIÓN" },
+  { to: "/app/recargas", label: "Recargas y Servicios", icon: Smartphone, perm: "recargas.usar", section: "OPERACIÓN" },
   
   // ASAUSTECIMIENTO
   { to: "/app/compras", label: "Compras y gastos", icon: ShoppingBag, perm: "compra.ver", section: "ABASTECIMIENTO" },
@@ -34,26 +37,26 @@ const NAV = [
   { to: "/app/pedidos", label: "Pedidos", icon: ShoppingCart, section: "COMERCIAL" },
   { to: "/app/facturacion", label: "Facturación", icon: FileText, section: "COMERCIAL" },
   
-  // FUERZA DE VENTAS
-  { to: "/app/vendedores", label: "Vendedores", icon: UserCog, section: "FUERZA DE VENTAS" },
-  { to: "/app/clientes-en-campo", label: "Clientes en campo", icon: MapPinned, perm: "visita.ver", section: "FUERZA DE VENTAS" },
-  { to: "/app/mapa", label: "Mapa", icon: Radar, section: "FUERZA DE VENTAS" },
-  { to: "/app/rutas", label: "Rutas", icon: RouteIcon, perm: "visita.ver", section: "FUERZA DE VENTAS" },
-  { to: "/app/visitas", label: "Visitas", icon: MapPinned, perm: "visita.ver", section: "FUERZA DE VENTAS" },
-  { to: "/app/seguimiento", label: "Seguimiento", icon: ScanLine, section: "FUERZA DE VENTAS" },
+  // FUERZA DE VENTAS · consolidada en 2 módulos por rol (regla 1):
+  //   · Supervisión Comercial: solo admin/dueño/supervisor (supervision.ver)
+  //   · Mi Actividad de Campo: solo vendedores de campo (visita.*), oculta si
+  //     el usuario ya ve Supervisión (los admins usan el toggle interno
+  //     "Actuar como vendedor" dentro del propio módulo).
+  { to: "/app/supervision-comercial", label: "Supervisión Comercial", icon: Radar, perm: "supervision.ver", section: "FUERZA DE VENTAS" },
+  { to: "/app/mi-actividad", label: "Mi Actividad de Campo", icon: RouteIcon, perm: "visita.ver", ocultoConPerm: "supervision.ver", section: "FUERZA DE VENTAS" },
   
   // ADMINISTRACIÓN
   { to: "/app/caja", label: "Caja", icon: Wallet, perm: "caja.ver", section: "ADMINISTRACIÓN" },
-  { to: "/app/finanzas", label: "Finanzas", icon: BarChart3, section: "ADMINISTRACIÓN" },
+  { to: "/app/finanzas", label: "Finanzas", icon: BarChart3, perm: "finanzas.ver", section: "ADMINISTRACIÓN" },
   { to: "/app/reportes", label: "Reportes", icon: BarChart3, perm: "reportes.ver", section: "ADMINISTRACIÓN" },
   
   // SISTEMA
   { to: "/app/usuarios", label: "Usuarios y permisos", icon: UserCog, perm: "usuarios.ver", section: "SISTEMA" },
-  { to: "/app/sucursales", label: "Sucursales", icon: LayoutDashboard, section: "SISTEMA" },
-  { to: "/app/impresoras", label: "Impresoras", icon: Settings, section: "SISTEMA" },
+  { to: "/app/sucursales", label: "Sucursales", icon: LayoutDashboard, perm: "config", section: "SISTEMA" },
+  { to: "/app/impresoras", label: "Impresoras", icon: Settings, perm: "config", section: "SISTEMA" },
   { to: "/app/configuracion", label: "Configuración", icon: Settings, perm: "config", section: "SISTEMA" },
-  { to: "/app/cuentas-bancarias", label: "Cuentas bancarias", icon: Wallet, section: "SISTEMA" },
-  { to: "/app/devtools", label: "Depuración", icon: Bug, perm: "dev.errores", dev: true, section: "SISTEMA" },
+  { to: "/app/cuentas-bancarias", label: "Cuentas bancarias", icon: Wallet, perm: "cuentas.ver", section: "SISTEMA" },
+  { to: "/app/devtools", label: "Desarrollador", icon: Wrench, perm: "dev.errores", dev: true, section: "SISTEMA" },
 ];
 
 export default function ErpLayout() {
@@ -97,7 +100,10 @@ export default function ErpLayout() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const visible = NAV.filter((n) => !n.perm || can(n.perm));
+  // Visibilidad: permiso requerido + ocultamiento por permiso excluyente
+  // (p. ej. Mi Actividad se oculta para quien ya ve Supervisión Comercial).
+  const visible = NAV.filter((n) =>
+    (!n.perm || can(n.perm)) && !(n.ocultoConPerm && can(n.ocultoConPerm)));
 
   const current =
     visible
@@ -148,7 +154,7 @@ export default function ErpLayout() {
                 onError={(e) => {
                   // Fallback robusto: si la URL configurada no carga, se usa el
                   // logotipo por defecto; solo se oculta si tampoco carga este.
-                  if (!e.currentTarget.src.includes("ISOTIPO-Photoroom.png")) {
+                  if (!e.currentTarget.src.includes("isotipo1.png")) {
                     e.currentTarget.src = DEFAULT_LOGO;
                   } else {
                     e.currentTarget.style.display = "none";
@@ -184,7 +190,7 @@ export default function ErpLayout() {
                     <div className="h-px bg-slate-200 mt-1" />
                   </div>
                 )}
-                {/* Items del ítem */}
+                {/* Items del Ítem */}
                 {items.map((n) => (
                   <NavLink
                     key={n.to}
@@ -244,7 +250,7 @@ export default function ErpLayout() {
             className="flex items-center gap-2 flex-1 max-w-md h-10 px-3.5 rounded-full bg-slate-100 text-slate-400 hover:bg-slate-200/70 hover:text-slate-500 transition-colors"
           >
             <Search className="w-4 h-4 shrink-0" strokeWidth={2} />
-            <span className="text-sm truncate">Buscar módulo o acción…</span>
+            <span className="text-sm truncate">Buscar módulo o acción·</span>
             <kbd className="ml-auto hidden sm:inline-flex items-center h-5 px-1.5 rounded-md bg-white border border-slate-200 text-[10px] font-semibold text-slate-400">Ctrl K</kbd>
           </button>
 
@@ -273,7 +279,7 @@ export default function ErpLayout() {
                 }`}
               >
                 <Stamp className="w-3.5 h-3.5 shrink-0" strokeWidth={2.2} />
-                <span>{timbres.disponibles ?? "—"}</span>
+                <span>{timbres.disponibles ?? "·"}</span>
                 <span className="hidden lg:inline">timbres</span>
               </div>
             )}
@@ -306,7 +312,7 @@ export default function ErpLayout() {
 
         {/* Command palette: búsqueda global */}
         <CommandDialog open={searchOpen} onOpenChange={setSearchOpen}>
-          <CommandInput placeholder="Buscar módulo, sección o acción…" />
+          <CommandInput placeholder="Buscar módulo, sección o acción·" />
           <CommandList>
             <CommandEmpty>Sin resultados.</CommandEmpty>
             <CommandGroup heading="Ir a">
@@ -336,3 +342,4 @@ export default function ErpLayout() {
     </div>
   );
 }
+

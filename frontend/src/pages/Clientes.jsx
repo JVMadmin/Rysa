@@ -147,7 +147,14 @@ export default function Clientes() {
     const { data } = await api.get("/clients", { params });
     setRows(data); setLoading(false);
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
+    // § Búsqueda en vivo (debounce): filtra mientras se escribe.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    if (!mountedRef.current) { mountedRef.current = true; return; }
+    const id = setTimeout(() => { load(); }, 350);
+    return () => clearTimeout(id);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
 
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const openNew = () => { setF(blank()); setEditId(null); setOpen(true); };
@@ -650,12 +657,28 @@ export default function Clientes() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-2 border border-amber-200 bg-amber-50 rounded-md px-3 py-1.5">
+                <div className="flex items-center gap-2 border border-amber-200 bg-amber-50 rounded-md px-3 py-1.5" title="Necesario para que el saldo del archivo se aplique a clientes EXISTENTES">
                   <Switch checked={impSaldo} onCheckedChange={setImpSaldo} data-testid="imp-saldo" />
-                  <span className="text-xs text-amber-800">Importar/actualizar saldos desde el archivo</span>
+                  <span className="text-xs text-amber-800 font-medium">Importar/actualizar SALDOS, LÍMITE y CRÉDITO</span>
                 </div>
                 {preview.con_errores > 0 && <Button variant="outline" size="sm" onClick={downloadErrores} data-testid="imp-download-errores"><FileDown className="w-4 h-4 mr-1" /> Descargar errores</Button>}
               </div>
+
+              {/* Mapeo de columnas: qué se reconoció y qué se ignoró */}
+              {preview.mapeo_columnas && preview.mapeo_columnas.ignoradas.length > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs" data-testid="imp-mapeo">
+                  <div className="font-semibold text-slate-600 mb-1">Columnas del archivo no reconocidas (se ignorarán):</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {preview.mapeo_columnas.ignoradas.map((c) => (
+                      <span key={c} className="px-2 py-0.5 rounded-full bg-white border text-slate-500">{c}</span>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1.5">
+                    Encabezados reconocidos incluyen: CLAVE, NOMBRE, RFC, TELEFONO, CELULAR, DIRECCION, CIUDAD,
+                    SALDO, LIMITE / LIMITE DE CREDITO, CREDITO / CREDITO AUTORIZADO, DIAS DE CREDITO, VENDEDOR…
+                  </p>
+                </div>
+              )}
 
               <div className="border border-slate-200 rounded-md max-h-72 overflow-auto">
                 <table className="w-full text-xs">

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2, History, Search, Users, ArrowUpDown, HandCoins, Printer } from "lucide-react";
+import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2, History, Search, Users, ArrowUpDown, HandCoins, Printer, FileSpreadsheet, ClipboardCheck } from "lucide-react";
 
 export default function Caja() {
   const { isAdminOrOwner } = useAuth();
@@ -17,12 +17,21 @@ export default function Caja() {
   const [fondo, setFondo] = useState("");
   const [movOpen, setMovOpen] = useState(false);
   const [mov, setMov] = useState({ tipo: "entrada", concepto: "", monto: "", referencia: "" });
+  const [movFoto, setMovFoto] = useState(null);      // File del comprobante (§3.5)
+  const [fotoSubiendo, setFotoSubiendo] = useState(false);
+  const [bloqueoRetiro, setBloqueoRetiro] = useState(null); // {mensaje,disponible,puede_forzar}
+  // Bandeja de evidencias (solo admin)
+  const [evidencias, setEvidencias] = useState([]);
   const [compBusy, setCompBusy] = useState("");
   const [closeOpen, setCloseOpen] = useState(false);
   const [contado, setContado] = useState("");
   const [cierre, setCierre] = useState(null);
   const [cierreMovs, setCierreMovs] = useState([]);
   const [cierreCajaId, setCierreCajaId] = useState("");
+  // Reporte de verificación del corte (modal completo tras cerrar).
+  const [repOpen, setRepOpen] = useState(false);
+  const [repCaja, setRepCaja] = useState(null);   // {caja_nombre,usuario_nombre,fondo_inicial,fecha_apertura,fecha_cierre}
+  const [repDesglose, setRepDesglose] = useState(null);
   const [hist, setHist] = useState([]);
   const [histDesde, setHistDesde] = useState("");
   const [histHasta, setHistHasta] = useState("");
@@ -30,6 +39,14 @@ export default function Caja() {
   const [histOperador, setHistOperador] = useState("all");
   const [sort, setSort] = useState({ key: "fecha_apertura", dir: "desc" });
   const [detCaja, setDetCaja] = useState(null);
+  const [detDesglose, setDetDesglose] = useState(null);
+  const abrirDetalle = async (c) => {
+    setDetCaja(c); setDetDesglose(null);
+    try {
+      const { data } = await api.get(`/caja/${c.id}/desglose`);
+      setDetDesglose(data.desglose || null);
+    } catch { /* el detalle básico sigue disponible */ }
+  };
   const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
   const sortedHist = [...hist];
   if (sort.key) {
@@ -93,7 +110,7 @@ export default function Caja() {
     }
   };
 
-  useEffect(() => { load(); loadHist(); loadOperadores(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { load(); loadHist(); loadOperadores(); loadEvidencias(); /* eslint-disable-next-line */ }, []);
 
   const refetch = () => { load(); loadHist(); loadOperadores(); };
 
@@ -101,20 +118,56 @@ export default function Caja() {
     try { await api.post("/caja/abrir", { fondo_inicial: Number(fondo || 0) }); toast.success("Caja abierta"); setFondo(""); refetch(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
-  const registrarMov = async () => {
+  const registrarMov = async (forzar = false) => {
     if (!mov.concepto.trim() || !mov.monto) return toast.error("Concepto y monto requeridos");
     try {
-      const { data } = await api.post("/caja/movimiento", { ...mov, monto: Number(mov.monto) });
+      let evidencia_url = "";
+      if (movFoto) {
+        setFotoSubiendo(true);
+        try {
+          const fd = new FormData();
+          fd.append("file", movFoto);
+          const up = await api.post("/uploads/image", fd, { headers: { "Content-Type": "multipart/form-data" } });
+          evidencia_url = up.data.url;
+        } finally { setFotoSubiendo(false); }
+      }
+      const { data } = await api.post("/caja/movimiento", {
+        ...mov, monto: Number(mov.monto), forzar, evidencia_url,
+      });
       toast.success(mov.tipo === "retiro" ? "Entrega de efectivo registrada (descontada de caja)" : "Movimiento registrado");
+      if (evidencia_url) toast.info("Evidencia fotográfica enviada a revisión.");
       setMovOpen(false);
       const creado = data?.movimiento;
       const fueRetiro = mov.tipo === "retiro";
       setMov({ tipo: "entrada", concepto: "", monto: "", referencia: "" });
+      setMovFoto(null); setBloqueoRetiro(null);
       load();
       // El ticket de entrega se abre automáticamente al registrar el retiro.
       if (fueRetiro && creado?.id) abrirComprobante(creado);
     }
-    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    catch (e) {
+      const d = e?.response?.data?.detail;
+      if (e?.response?.status === 409 && d && typeof d === "object") {
+        setBloqueoRetiro(d); // §3.3 ventana bloqueante de excedente
+      } else {
+        toast.error(typeof d === "string" ? d : formatApiError(d));
+      }
+    }
+  };
+
+  const loadEvidencias = async () => {
+    if (!isAdminOrOwner) return;
+    try {
+      const { data } = await api.get("/caja/evidencias?estado=pendiente");
+      setEvidencias(data || []);
+    } catch { setEvidencias([]); }
+  };
+  const revisarEvidencia = async (id) => {
+    try {
+      await api.patch(`/caja/movimientos/${id}/revisar`);
+      toast.success("Evidencia marcada como revisada");
+      loadEvidencias();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   // Ticket 80mm del movimiento (entrega de efectivo con folio y firmas).
@@ -143,7 +196,8 @@ export default function Caja() {
     try {
       const { data: resp } = await api.post("/caja/cerrar", { efectivo_contado: Number(contado || 0) });
       setCierre(resp.cierre); setCierreMovs(resp.movimientos || []); setCierreCajaId(cajaId);
-      setCloseOpen(false); toast.success("Caja cerrada"); load();
+      setRepCaja(resp.caja || null); setRepDesglose(resp.desglose || null);
+      setCloseOpen(false); setRepOpen(true); toast.success("Caja cerrada"); load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -159,11 +213,25 @@ export default function Caja() {
   const cerrarPorUsuario = async () => {
     if (!closeTarget) return;
     try {
-      const { data } = await api.post("/caja/cerrar", { caja_id: closeTarget.caja.id, efectivo_contado: Number(closeContado || 0) });
-      setCierre(data.cierre); setCierreMovs(data.movimientos || []); setCierreCajaId(closeTarget.caja.id);
+      const { data: resp } = await api.post("/caja/cerrar", { caja_id: closeTarget.caja.id, efectivo_contado: Number(closeContado || 0) });
+      setCierre(resp.cierre); setCierreMovs(resp.movimientos || []); setCierreCajaId(closeTarget.caja.id);
+      setRepCaja(resp.caja || null); setRepDesglose(resp.desglose || null);
       toast.success(`Caja ${closeTarget.caja.caja_nombre} de ${closeTarget.usuario_nombre} cerrada`);
-      setCloseTarget(null); setCloseContado(""); refetch();
+      setCloseTarget(null); setCloseContado(""); setRepOpen(true); refetch();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  // Descarga de ventas del turno o del día (Excel).
+  const descargarVentas = async (cajaId, ambito) => {
+    if (!cajaId) return toast.error("No hay corte para descargar");
+    try {
+      const { data } = await api.get(`/caja/${cajaId}/ventas.xlsx`, { params: { ambito }, responseType: "blob" });
+      const url = window.URL.createObjectURL(data);
+      const a = document.createElement("a");
+      a.href = url; a.download = `ventas_${ambito}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail) || "Error al descargar ventas"); }
   };
 
   if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>;
@@ -252,8 +320,11 @@ export default function Caja() {
       {cierre && (
         <div className="card-soft p-5 max-w-3xl" data-testid="reporte-cierre">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <h3 className="font-display font-bold">Reporte de cierre</h3>
+            <h3 className="font-display font-bold flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-[#C1401E]" /> Reporte de cierre</h3>
             <div className="flex gap-2">
+              <Button size="sm" onClick={() => setRepOpen(true)} data-testid="cierre-verificar">
+                <ClipboardCheck className="w-4 h-4 mr-1" /> Verificar / reporte completo
+              </Button>
               <Button size="sm" variant="outline" onClick={() => descargarReporte(cierreCajaId, "pdf")} data-testid="cierre-descargar-pdf"><ArrowDownCircle className="w-4 h-4 mr-1" /> PDF</Button>
               <Button size="sm" variant="outline" onClick={() => descargarReporte(cierreCajaId, "xlsx")} data-testid="cierre-descargar-excel"><ArrowDownCircle className="w-4 h-4 mr-1" /> Excel</Button>
               <Button size="sm" variant="ghost" onClick={() => { setCierre(null); setCierreMovs([]); }}>Ocultar</Button>
@@ -300,6 +371,140 @@ export default function Caja() {
           )}
         </div>
       )}
+
+      {/* ============ REPORTE DE VERIFICACIÓN COMPLETA DEL CIERRE ============ */}
+      <Dialog open={repOpen} onOpenChange={setRepOpen}>
+        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto" data-testid="reporte-verificacion">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <ClipboardCheck className="w-5 h-5 text-[#C1401E]" /> Reporte de cierre · verificación
+            </DialogTitle>
+          </DialogHeader>
+
+          {/* Encabezado del corte */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+            <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Caja</div><div className="font-semibold">{repCaja?.caja_nombre || "Caja"}</div></div>
+            <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Cajero</div><div className="font-semibold">{repCaja?.usuario_nombre || "—"}</div></div>
+            <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Apertura</div><div className="font-medium">{(repCaja?.fecha_apertura || "").slice(0, 16).replace("T", " ") || "—"}</div></div>
+            <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Cierre</div><div className="font-medium">{(repCaja?.fecha_cierre || cierre?.fecha_cierre || "").slice(0, 16).replace("T", " ") || "—"}</div></div>
+          </div>
+
+          {/* Arqueo */}
+          <div>
+            <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">Arqueo (verificación de efectivo)</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 text-sm">
+              {[["Fondo inicial", repCaja?.fondo_inicial ?? res?.fondo_inicial],
+                ["Ventas efectivo", cierre?.ventas_efectivo],
+                ["Entradas", cierre?.entradas],
+                ["Retiros + gastos", cierre?.retiros],
+                ["Devoluciones", cierre?.devoluciones],
+              ].map(([l, v], i) => (
+                <div key={i} className="rounded-lg border border-slate-200 p-2">
+                  <div className="text-[10px] uppercase text-slate-400">{l}</div>
+                  <div className="font-semibold tabular-nums">{money(v)}</div>
+                </div>
+              ))}
+              <div className="rounded-lg border-2 border-[#C1401E] p-2">
+                <div className="text-[10px] uppercase text-slate-500 font-semibold">Esperado</div>
+                <div className="font-black tabular-nums text-[#C1401E]">{money(cierre?.efectivo_esperado)}</div>
+              </div>
+              <div className={`rounded-lg p-2 ${Number(cierre?.diferencia) === 0 ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
+                <div className="text-[10px] uppercase text-slate-400">Contado / Diferencia</div>
+                <div className="font-semibold tabular-nums">{money(cierre?.efectivo_contado)}</div>
+                <div className={`font-black tabular-nums ${Number(cierre?.diferencia) < 0 ? "text-red-600" : Number(cierre?.diferencia) > 0 ? "text-amber-600" : "text-green-700"}`}>
+                  {cierre?.diferencia > 0 ? "+" : ""}{money(cierre?.diferencia)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Desglose de ventas del turno */}
+          {repDesglose && (
+            <div>
+              <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">Ventas del turno</div>
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <Badge variant="outline" className="h-7 px-3">{repDesglose.num_ventas} ventas</Badge>
+                <span className="font-semibold">Total vendido: {money(repDesglose.total_vendido)}</span>
+                {Object.entries(repDesglose.metodos || {}).map(([met, monto]) => (
+                  <span key={met} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 text-xs">
+                    <b className="capitalize">{met}</b> {money(monto)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Movimientos del turno */}
+          {(cierreMovs || []).length > 0 && (
+            <div>
+              <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">
+                Movimientos del turno ({cierreMovs.length}) — con saldo corrido para verificar
+              </div>
+              <div className="overflow-x-auto border rounded-lg max-h-72 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 sticky top-0"><tr className="text-left text-slate-500 uppercase tracking-wider">
+                    <th className="p-2">Hora</th><th className="p-2">Tipo</th><th className="p-2">Concepto</th><th className="p-2">Ref.</th><th className="p-2">Usuario</th>
+                    <th className="p-2 text-right">Entrada</th><th className="p-2 text-right">Salida</th><th className="p-2 text-right">Saldo</th>
+                  </tr></thead>
+                  <tbody>
+                    {(() => {
+                      let saldo = Number(repCaja?.fondo_inicial ?? res?.fondo_inicial ?? 0);
+                      return cierreMovs.map((m, i) => {
+                        const monto = Number(m.monto || 0);
+                        const entrada = ["venta", "entrada"].includes(m.tipo) ? monto : 0;
+                        const salida = ["retiro", "gasto", "devolucion"].includes(m.tipo) ? monto : 0;
+                        saldo = Math.round((saldo + entrada - salida) * 100) / 100;
+                        const f = (m.fecha || "");
+                        return (
+                          <tr key={m.id || i} className="border-t border-slate-100">
+                            <td className="p-2 text-slate-500 whitespace-nowrap">{f.slice(11, 16)}</td>
+                            <td className="p-2"><Badge variant="outline">{m.folio ? `${m.tipo} ${m.folio}` : m.tipo}</Badge></td>
+                            <td className="p-2 max-w-[180px] truncate" title={m.concepto}>{m.concepto}</td>
+                            <td className="p-2 text-slate-400">{m.referencia || "—"}</td>
+                            <td className="p-2 text-slate-400">{m.usuario_nombre || "—"}</td>
+                            <td className="p-2 text-right text-green-700">{entrada ? money(entrada) : ""}</td>
+                            <td className="p-2 text-right text-red-600">{salida ? money(salida) : ""}</td>
+                            <td className="p-2 text-right font-semibold tabular-nums">{money(saldo)}</td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Descargas */}
+          <div>
+            <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">Descargar reportes</div>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => descargarReporte(cierreCajaId, "pdf")}>
+                <ArrowDownCircle className="w-4 h-4 mr-1" /> Corte PDF
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => descargarReporte(cierreCajaId, "xlsx")}>
+                <FileSpreadsheet className="w-4 h-4 mr-1" /> Corte Excel
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => descargarVentas(cierreCajaId, "turno")} data-testid="descargas-ventas-turno">
+                <FileSpreadsheet className="w-4 h-4 mr-1" /> Ventas del turno (Excel)
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => descargarVentas(cierreCajaId, "dia")} data-testid="descargas-ventas-dia">
+                <FileSpreadsheet className="w-4 h-4 mr-1" /> Ventas del día (Excel)
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => descargarReporte(cierreCajaId, "pdf")}>
+                <Printer className="w-4 h-4 mr-1" /> Imprimir reporte
+              </Button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              El corte incluye el ledger completo con saldo corrido; las ventas incluyen folio, cliente, método y total.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={() => setRepOpen(false)} data-testid="reporte-verificacion-cerrar">Listo, verificado</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {isAdminOrOwner && (
         <div className="card-soft p-4 space-y-3" data-testid="caja-global">
@@ -392,13 +597,41 @@ export default function Caja() {
                   <td className="p-2 text-right">{c.cierre ? money(c.cierre.efectivo_esperado) : "—"}</td>
                   <td className="p-2 text-right">{c.cierre ? money(c.cierre.efectivo_contado) : "—"}</td>
                   <td className={`p-2 text-right font-semibold ${c.cierre && c.cierre.diferencia < 0 ? "text-red-600" : "text-green-600"}`}>{c.cierre ? money(c.cierre.diferencia) : "—"}</td>
-                  <td className="p-2 text-right"><Button size="sm" variant="ghost" onClick={() => setDetCaja(c)} data-testid={`caja-hist-ver-${c.id}`}>Ver</Button></td>
+                  <td className="p-2 text-right"><Button size="sm" variant="ghost" onClick={() => abrirDetalle(c)} data-testid={`caja-hist-ver-${c.id}`}>Ver</Button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Bandeja de evidencias fotográficas (solo admin) */}
+      {isAdminOrOwner && evidencias.length > 0 && (
+        <div className="card-soft p-4 space-y-3" data-testid="caja-evidencias">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display font-bold flex items-center gap-2">📷 Evidencias por revisar ({evidencias.length})</h3>
+            <Button size="sm" variant="ghost" onClick={loadEvidencias}><Search className="w-4 h-4" /></Button>
+          </div>
+          <div className="grid md:grid-cols-2 gap-3">
+            {evidencias.map((ev) => (
+              <div key={ev.id} className="border border-slate-200 rounded-lg p-3 flex gap-3">
+                <a href={fileUrl(ev.evidencia_url)} target="_blank" rel="noreferrer">
+                  <img src={fileUrl(ev.evidencia_url)} alt="comprobante" className="w-16 h-16 object-cover rounded-md border" loading="lazy" />
+                </a>
+                <div className="min-w-0 flex-1 text-sm">
+                  <div className="font-semibold capitalize">{ev.tipo} {ev.folio ? `· ${ev.folio}` : ""}</div>
+                  <div className="text-slate-500 truncate">{ev.concepto}</div>
+                  <div className="text-xs text-slate-400">{(ev.fecha || "").slice(0, 16).replace("T", " ")} · {ev.usuario_nombre} · {ev.caja_nombre}</div>
+                  <Badge variant="outline" className="mt-1 text-[10px] uppercase">{ev.evidencia_estado}</Badge>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => revisarEvidencia(ev.id)} data-testid={`evid-revisar-${ev.id}`}>
+                  Revisada
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <Dialog open={!!detCaja} onOpenChange={(o) => !o && setDetCaja(null)}>
         <DialogContent data-testid="caja-hist-detalle">
@@ -413,6 +646,18 @@ export default function Caja() {
                 <div className="flex justify-between"><span>Efectivo contado</span><span>{money(detCaja.cierre.efectivo_contado)}</span></div>
                 <div className="flex justify-between border-t pt-2 font-bold"><span>Diferencia</span><span className={detCaja.cierre.diferencia < 0 ? "text-red-600" : "text-green-600"}>{money(detCaja.cierre.diferencia)}</span></div>
               </>}
+              {detDesglose && (
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1.5">Ventas del turno</div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <Badge variant="outline">{detDesglose.num_ventas} ventas</Badge>
+                    <span className="font-semibold">Total: {money(detDesglose.total_vendido)}</span>
+                    {Object.entries(detDesglose.metodos || {}).map(([met, monto]) => (
+                      <span key={met} className="px-2 py-0.5 rounded-full bg-slate-100"><b className="capitalize">{met}</b> {money(monto)}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
               {detCaja.movimientos?.length > 0 && (
                 <div className="mt-4 border-t border-slate-100 pt-3">
                   <div className="flex justify-between font-semibold border-b border-slate-200 pb-1 mb-1"><span>Movimientos</span><span>Saldo</span></div>
@@ -434,18 +679,20 @@ export default function Caja() {
             </div>
           )}
           <DialogFooter className="flex flex-wrap gap-2 sm:justify-between">
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => descargarReporte(detCaja?.id, "pdf")} data-testid="detalle-descargar-pdf"><ArrowDownCircle className="w-4 h-4 mr-1" /> PDF</Button>
-              <Button size="sm" variant="outline" onClick={() => descargarReporte(detCaja?.id, "xlsx")} data-testid="detalle-descargar-excel"><ArrowDownCircle className="w-4 h-4 mr-1" /> Excel</Button>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => descargarReporte(detCaja?.id, "pdf")} data-testid="detalle-descargar-pdf"><ArrowDownCircle className="w-4 h-4 mr-1" /> Corte PDF</Button>
+              <Button size="sm" variant="outline" onClick={() => descargarReporte(detCaja?.id, "xlsx")} data-testid="detalle-descargar-excel"><FileSpreadsheet className="w-4 h-4 mr-1" /> Corte Excel</Button>
+              <Button size="sm" variant="outline" onClick={() => descargarVentas(detCaja?.id, "turno")}><FileSpreadsheet className="w-4 h-4 mr-1" /> Ventas turno</Button>
+              <Button size="sm" variant="outline" onClick={() => descargarVentas(detCaja?.id, "dia")}><FileSpreadsheet className="w-4 h-4 mr-1" /> Ventas del día</Button>
             </div>
             <Button variant="outline" onClick={() => setDetCaja(null)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={movOpen} onOpenChange={setMovOpen}>
+      <Dialog open={movOpen} onOpenChange={(o) => { setMovOpen(o); if (!o) { setBloqueoRetiro(null); setMovFoto(null); } }}>
         <DialogContent data-testid="mov-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> {mov.tipo === "retiro" ? "Entrega de efectivo" : "Movimiento de caja"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> {mov.tipo === "retiro" ? "Entrega de efectivo" : mov.tipo === "gasto" ? "Registrar gasto" : "Movimiento de caja"}</DialogTitle></DialogHeader>
           {mov.tipo === "retiro" && (
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
               El monto se <b>descontará del efectivo en caja</b> y se generará un ticket de entrega con folio RET y firmas.
@@ -466,15 +713,72 @@ export default function Caja() {
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Concepto / Motivo</Label><Input value={mov.concepto} onChange={(e) => setMov((s) => ({ ...s, concepto: e.target.value }))} className="mt-1" data-testid="mov-concepto" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Monto</Label><Input type="number" value={mov.monto} onChange={(e) => setMov((s) => ({ ...s, monto: e.target.value }))} className="mt-1" data-testid="mov-monto" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Referencia</Label><Input value={mov.referencia} onChange={(e) => setMov((s) => ({ ...s, referencia: e.target.value }))} className="mt-1" /></div>
+
+            {/* §3.5 Evidencia fotográfica del comprobante (gasto/retiro) */}
+            {(mov.tipo === "retiro" || mov.tipo === "gasto") && (
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Foto del comprobante (opcional)</Label>
+                <div className="mt-1 flex items-center gap-3">
+                  <label className="cursor-pointer inline-flex items-center gap-2 px-3 h-9 rounded-md border border-slate-200 text-sm hover:bg-slate-50" data-testid="mov-foto-btn">
+                    <input type="file" accept="image/*" capture="environment" className="hidden"
+                           onChange={(e) => { setMovFoto(e.target.files?.[0] || null); e.target.value = ""; }} />
+                    {fotoSubiendo ? <Loader2 className="w-4 h-4 animate-spin" /> : <>📷 {movFoto ? "Cambiar foto" : "Tomar / elegir foto"}</>}
+                  </label>
+                  {movFoto && (
+                    <>
+                      <img src={URL.createObjectURL(movFoto)} alt="evidencia" className="w-10 h-10 object-cover rounded-md border" />
+                      <button type="button" onClick={() => setMovFoto(null)} className="text-slate-400 hover:text-red-600 text-sm">Quitar</button>
+                    </>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">La evidencia llega a la bandeja de revisión de administración.</p>
+              </div>
+            )}
+
+            {/* §3.3 Bloqueo por excedente */}
+            {bloqueoRetiro && (
+              <div className="rounded-lg border border-red-300 bg-red-50 p-3 text-sm" data-testid="mov-bloqueo">
+                <div className="font-semibold text-red-700 flex items-center gap-1.5">⚠️ Operación bloqueada</div>
+                <p className="text-slate-700 mt-1">{bloqueoRetiro.mensaje}</p>
+                {!bloqueoRetiro.puede_forzar && (
+                  <p className="text-xs text-slate-500 mt-1">Solicita autorización a un encargado o administración.</p>
+                )}
+              </div>
+            )}
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setMovOpen(false)}>Cancelar</Button><Button onClick={registrarMov} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="mov-save">Registrar</Button></DialogFooter>
+          <DialogFooter className="flex flex-wrap gap-2 sm:justify-between w-full">
+            {bloqueoRetiro && bloqueoRetiro.puede_forzar ? (
+              <>
+                <Button variant="outline" onClick={() => setBloqueoRetiro(null)}>Ajustar monto</Button>
+                <Button variant="destructive" onClick={() => registrarMov(true)} data-testid="mov-forzar">
+                  Forzar retiro (autorizado)
+                </Button>
+              </>
+            ) : bloqueoRetiro ? (
+              <Button variant="outline" onClick={() => setBloqueoRetiro(null)}>Entendido</Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setMovOpen(false)}>Cancelar</Button>
+                <Button onClick={() => registrarMov(false)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="mov-save">Registrar</Button>
+              </>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
         <DialogContent data-testid="close-dialog">
           <DialogHeader><DialogTitle className="font-display">Cerrar caja</DialogTitle></DialogHeader>
-          <p className="text-sm text-slate-500">Efectivo esperado: <b>{money(res?.efectivo_esperado)}</b></p>
+          <p className="text-sm text-slate-500">Verifica contra el efectivo esperado antes de confirmar:</p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+            {[["Ventas efectivo", res?.ventas_efectivo], ["Entradas", res?.entradas], ["Retiros + gastos", res?.retiros], ["Devoluciones", res?.devoluciones]].map(([l, v], i) => (
+              <div key={i} className="rounded-lg bg-slate-50 p-2">
+                <div className="text-[10px] uppercase text-slate-400">{l}</div>
+                <div className="font-semibold tabular-nums">{money(v)}</div>
+              </div>
+            ))}
+          </div>
+          <div className="text-sm">Efectivo esperado: <b className="text-[#C1401E]">{money(res?.efectivo_esperado)}</b></div>
           <div><Label className="text-xs uppercase tracking-wider text-slate-500">Efectivo contado</Label><Input type="number" value={contado} onChange={(e) => setContado(e.target.value)} className="mt-1" data-testid="efectivo-contado" /></div>
           <DialogFooter><Button variant="outline" onClick={() => setCloseOpen(false)}>Cancelar</Button><Button onClick={cerrar} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirm-cierre"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
         </DialogContent>

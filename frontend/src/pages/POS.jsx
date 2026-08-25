@@ -11,13 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import CajaAperturaModal from "@/components/CajaAperturaModal";
+import ReporteRapido from "@/components/ReporteRapido";
 import { toast } from "sonner";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, PauseCircle, PlayCircle, X, Package,
   Banknote, ArrowLeftRight, CreditCard,   Tag, Printer, Hash, Keyboard, FileText,
   Smartphone, Landmark, Gift, DollarSign, User as UserIcon, Check, Tags, MessageCircle, Loader2,
   Star, Flame, LayoutGrid, HandCoins, UserPlus, AlertTriangle, Share2, Download, RefreshCw,
-  Wallet as Wallet2,
+  Wallet as Wallet2, Mail,
 } from "lucide-react";
 
 const METODOS = [
@@ -93,6 +94,9 @@ export default function POS({ windowId, windowLabel }) {
   const location = useLocation();
   const nav = useNavigate();
   const { user, can } = useAuth();
+  // §3.1: datos sensibles de clientes solo para quien gestiona clientes.
+  const puedeVerClientesFull = can("clientes.gestionar") || can("*");
+  const esVendedorCampo = user?.role === "vendedor_campo";
   const { clearCartState } = useContext(CartContext);
   const {
     cart, setCart,
@@ -157,6 +161,8 @@ export default function POS({ windowId, windowLabel }) {
   const [posComp, setPosComp] = useState(null); // comprobante de abono desde el POS
   const [posCompBusy, setPosCompBusy] = useState(false);
   const [printMode, setPrintMode] = useState("thermal"); // thermal | letter | invoice
+  // Generador ÚNICO: la carta comparte/descarga/imprime SIEMPRE este mismo PDF.
+  const [cartaUrl, setCartaUrl] = useState("");
   const [sucursales, setSucursales] = useState([]);
   const incluyeIvaDefault = useRef(true); // valor de settings.precios_incluyen_iva
   // Nuevo cliente desde el POS (modal, sin abandonar la venta)
@@ -168,6 +174,9 @@ export default function POS({ windowId, windowLabel }) {
   // Impresión
   const [printFail, setPrintFail] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  // §3.7 aviso de venta directa (vendedor de campo)
+  const [avisoCampoOpen, setAvisoCampoOpen] = useState(false);
+  const [avisoCampoOk, setAvisoCampoOk] = useState(false);
 
   const injectPageSize = useCallback((size) => {
     let el = document.getElementById("print-page-size");
@@ -213,35 +222,87 @@ export default function POS({ windowId, windowLabel }) {
   // --- Impresoras configuradas: destino real por tipo de documento ---
   const printerById = (id) => (settings.printers?.lista || []).find((p) => p.id === id);
   const defaultPrinterId = (tipo) => (settings.printers?.predeterminadas || settings.printers?.defaults || {})[tipo];
-  const enviarAlPuente = async (printer) => {
+  const ticketPdfRef = useRef(""); // PDF oficial de la venta actual (cache)
+
+  const enviarAlPuente = async (printer, extra = {}) => {
     const base = String(settings.printers?.bridge_url || "").trim() || "http://localhost:9731";
     const r = await fetch(base + "/print", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ printer: printer?.name || "", ip: printer?.ip || "", documento: "ticket" }),
-      signal: AbortSignal.timeout(5000),
+      body: JSON.stringify({
+        printer: printer?.name || "", ip: printer?.ip || "", documento: "ticket",
+        ...extra,
+      }),
+      signal: AbortSignal.timeout(8000),
     });
     if (!r.ok) throw new Error("bridge_error");
   };
 
+  // Imprime el PDF REAL (el mismo archivo que se comparte por WhatsApp).
+  // Para tickets usa la vista /ticket-print que fija @page 80mm (POS80 por
+  // defecto); para otros documentos abre el PDF directo.
+  const imprimirPdfUrl = useCallback((url, opts = {}) => {
+    if (!url) return false;
+    try {
+      const pos80 = !!opts.pos80 && !!ticket?.id;
+      const src = pos80 ? `/api/sales/${ticket.id}/ticket-print` : fileUrl(url);
+      const f = document.createElement("iframe");
+      f.style.position = "fixed";
+      f.style.right = "0"; f.style.bottom = "0";
+      f.style.width = "1px"; f.style.height = "1px"; f.style.border = "0";
+      f.src = src;
+      document.body.appendChild(f);
+      return true;
+    } catch { return false; }
+  }, [ticket]);
+
+  // Obtiene (una vez por venta) la URL del ticket PDF oficial.
+  const asegurarTicketPdf = async () => {
+    if (!ticket?.id) return "";
+    if (ticketPdfRef.current) return ticketPdfRef.current;
+    try {
+      const { data } = await api.post(`/sales/${ticket.id}/ticket-pdf`);
+      ticketPdfRef.current = data.url || "";
+    } catch { /* se reintenta en el siguiente intento de impresión */ }
+    return ticketPdfRef.current;
+  };
+
   // Imprime el ticket según la impresora predeterminada para tickets.
-  // Si no hay puente/caja de impresión local, usa el diálogo del navegador.
-  // Un fallo de impresión NUNCA afecta la venta registrada.
+  // Puente local: recibe además el PDF oficial en base64. Sin puente, se
+  // imprime directamente el PDF real del documento. Un fallo de impresión
+  // NUNCA afecta la venta registrada.
   const imprimirTicket = async () => {
+    const pdfUrl = await asegurarTicketPdf();
     const pr = printerById(defaultPrinterId("ticket") || defaultPrinterId("ticket_pos"));
     if (pr && pr.tipo_conexion !== "browser") {
-      try { await enviarAlPuente(pr); setPrintFail(false); toast.success("Prueba de impresión enviada correctamente."); return true; }
-      catch { setPrintFail(true); toast.error("No fue posible imprimir. Verifica que la impresora esté encendida, conectada y disponible."); return false; }
+      try {
+        let pdf_base64 = "";
+        if (pdfUrl) {
+          const resp = await api.get(pdfUrl.replace(/^.*\/api\/files\//, "/files/"), { responseType: "blob" });
+          pdf_base64 = await new Promise((res) => {
+            const fr = new FileReader();
+            fr.onload = () => res(String(fr.result).split(",")[1] || "");
+            fr.onerror = () => res("");
+            fr.readAsDataURL(resp.data);
+          });
+        }
+        await enviarAlPuente(pr, { pdf_base64, filename: `ticket-${ticket?.folio || ""}.pdf` });
+        setPrintFail(false); toast.success("Impresión enviada correctamente."); return true;
+      } catch { /* sin puente disponible: imprime el PDF real abajo */ }
     }
+    if (pdfUrl && imprimirPdfUrl(pdfUrl, { pos80: true })) { setPrintFail(false); return true; }
     try { printThermal(); setPrintFail(false); return true; }
     catch { setPrintFail(true); return false; }
   };
 
   // --- Formato carta: PDF real del comprobante comercial RYSA ---
+  // El backend es el GENERADOR ÚNICO: la primera llamada crea el archivo y
+  // todas las siguientes devuelven EL MISMO PDF (vista previa incluida).
   const generarCartaPDF = async () => {
     if (!ticket?.id) { toast.error("Ticket no disponible"); return null; }
+    if (cartaUrl) return cartaUrl;
     setPdfBusy(true);
-    try { const { data } = await api.post(`/sales/${ticket.id}/letter-pdf`); return data.url || data.path; }
+    try { const { data } = await api.post(`/sales/${ticket.id}/letter-pdf`); setCartaUrl(data.url || data.path); return data.url || data.path; }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); return null; }
     finally { setPdfBusy(false); }
   };
@@ -253,6 +314,15 @@ export default function POS({ windowId, windowLabel }) {
     if (navigator.share) { try { await navigator.share({ title: `Comprobante ${ticket?.folio}`, text: `Comprobante ${ticket?.folio}`, url: link }); } catch {} }
     else { try { await navigator.clipboard.writeText(link); toast.success("Enlace copiado al portapapeles"); } catch { window.open(link, "_blank"); } }
   };
+  const enviarCartaCorreo = () => {
+    const link = cartaUrl ? fileUrl(cartaUrl) : `${window.location.origin}/verificar/${ticket?.id}`;
+    window.location.href = `mailto:?subject=${encodeURIComponent(`Comprobante ${ticket?.folio} · ${settings.empresa_nombre || "Grupo RYSA"}`)}&body=${encodeURIComponent(`Hola${ticket?.cliente_nombre ? " " + ticket.cliente_nombre : ""}:\n\nAdjuntamos tu comprobante ${ticket?.folio}. Total: ${money(ticket?.total)}.\nVerifícalo en: ${link}\n\n${settings.empresa_nombre || "Grupo RYSA"}`)}`;
+  };
+  // Al abrir la pestaña carta: carga (una vez) el PDF oficial de esta venta.
+  useEffect(() => {
+    if (ticket?.id && printMode === "letter") generarCartaPDF();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticket?.id, printMode]);
   const enviarCartaWhatsApp = async () => {
     const url = await generarCartaPDF();
     if (!url) return;
@@ -273,10 +343,11 @@ export default function POS({ windowId, windowLabel }) {
     if (!clienteSel || clienteSel.codigo === "PUBLICO") return null;
     const lim = Number(clienteSel.limite_credito || 0), sal = Number(clienteSel.saldo || 0);
     const disp = Math.round((lim - sal) * 100) / 100;
-    if (!clienteSel.credito_autorizado) return { dot: "bg-slate-800", label: "Sin crédito", lim, sal, disp, ok: false };
-    if (clienteSel.estado === "suspendido" || (lim > 0 && sal >= lim)) return { dot: "bg-red-500", label: "Crédito suspendido / al límite", lim, sal, disp, ok: true };
-    if (sal > 0) return { dot: "bg-amber-500", label: "Crédito activo con saldo pendiente", lim, sal, disp, ok: true };
-    return { dot: "bg-green-500", label: "Crédito activo (disponible)", lim, sal, disp, ok: true };
+    if (!clienteSel.credito_autorizado) return { dot: "bg-slate-400", label: "Sin crédito autorizado (contado)", nota: "", lim, sal, disp, ok: false };
+    if (clienteSel.estado === "suspendido") return { dot: "bg-red-500", label: "Crédito suspendido", nota: "El crédito no puede usarse mientras esté suspendido.", lim, sal, disp, ok: true };
+    if (lim > 0 && sal >= lim) return { dot: "bg-red-500", label: "Límite de crédito alcanzado", nota: "El crédito ya no puede usarse por el monto límite asignado.", lim, sal, disp, ok: true };
+    if (sal > 0) return { dot: "bg-amber-500", label: "Crédito activo · con saldo pendiente", nota: "Puede seguir comprando; registra el abono abajo.", lim, sal, disp, ok: true };
+    return { dot: "bg-green-500", label: "Crédito activo · disponible", nota: "", lim, sal, disp, ok: true };
   }, [clienteSel]);
   const creditoBloqueado = condicion === "credito" && !!clienteSel && !clienteSel.credito_autorizado && clienteSel.codigo !== "PUBLICO";
 
@@ -405,9 +476,16 @@ export default function POS({ windowId, windowLabel }) {
   // Descarga el PDF y lo adjunta directamente (Web Share API con archivos).
   // Así se envía el archivo real por WhatsApp, no un link. Si el navegador no
   // soporta compartir archivos, el PDF se descarga como respaldo para adjuntarlo.
-  const adjuntarPdf = async (pdfUrl, filename, titulo, texto) => {
+  const blobCacheRef = useRef({});
+  const prefetchBlob = async (pdfUrl) => {
+    const key = fileUrl(pdfUrl);
+    if (blobCacheRef.current[key]) return blobCacheRef.current[key];
     const resp = await api.get(pdfUrl.replace(/^.*\/api\/files\//, "/files/"), { responseType: "blob" });
-    const blob = resp.data;
+    blobCacheRef.current[key] = resp.data;
+    return resp.data;
+  };
+  const adjuntarPdf = async (pdfUrl, filename, titulo, texto) => {
+    const blob = await prefetchBlob(pdfUrl);
     const file = new File([blob], filename, { type: "application/pdf" });
     if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
       await navigator.share({ title: titulo, text: texto, files: [file] });
@@ -514,9 +592,17 @@ export default function POS({ windowId, windowLabel }) {
       setNcError(formatApiError(e.response?.data?.detail) || "No se pudo registrar el cliente");
     } finally { setNcBusy(false); }
   };
-  const filteredClients = clientQuery
-    ? clients.filter((c) => `${c.nombre} ${c.codigo} ${c.rfc || ""}`.toLowerCase().includes(clientQuery.toLowerCase())).slice(0, 100)
-    : clients; // lista completa en orden alfabético (el backend ya ordena por nombre)
+  // Búsqueda en vivo por TOKENS: cada palabra escrita debe aparecer en
+  // nombre/código/RFC, sin importar el orden ni la posición (coincidencia parcial).
+  const filteredClients = useMemo(() => {
+    const base = clientQuery ? clients : clients; // lista ya ordenada por nombre
+    if (!clientQuery.trim()) return base;
+    const tokens = clientQuery.toLowerCase().split(/\s+/).filter(Boolean);
+    return base.filter((c) => {
+      const hay = `${c.nombre} ${c.codigo} ${c.rfc || ""}`.toLowerCase();
+      return tokens.every((tk) => hay.includes(tk));
+    }).slice(0, 100);
+  }, [clients, clientQuery]);
   const setLinePrecio = (item, precio) => {
     const inCart = cart.some((i) => i.product_id === item.product_id);
     if (inCart) setCart((c) => c.map((i) => (i.product_id === item.product_id ? { ...i, precio: Number(precio) || 0 } : i)));
@@ -668,6 +754,11 @@ export default function POS({ windowId, windowLabel }) {
   }, [windowId, clearCartState, pubClientId, refreshFolio, setClienteId]);
 
   const confirmar = async () => {
+    // §3.7 — Aviso obligatorio de venta directa desde campo (vendedor_campo):
+    if (esVendedorCampo && !avisoCampoOk) {
+      setAvisoCampoOpen(true);
+      return;
+    }
     try {
       const payload = {
         cliente_id: clienteId || null,
@@ -689,7 +780,16 @@ export default function POS({ windowId, windowLabel }) {
       // Reset completo: la siguiente venta comienza limpia (Público General,
       // carrito vacío, contado, directa, sin descuentos ni modales abiertos).
       resetPos();
+      setCartaUrl(""); // documento nuevo = archivos nuevos
+      ticketPdfRef.current = "";
+      blobCacheRef.current = {};
       setTicket(data);
+      // Precarga en segundo plano de ticket + carta (PDF y blob): así el
+      // primer clic en WhatsApp/Descargar comparte INMEDIATAMENTE.
+      setTimeout(() => {
+        asegurarTicketPdf().then((u) => u && prefetchBlob(u)).catch(() => {});
+        generarCartaPDF().then((u) => u && prefetchBlob(u)).catch(() => {});
+      }, 50);
       setWaPhone(clienteSel?.whatsapp || clienteSel?.telefono || clienteSel?.celular || "");
       setPrintFail(false);
       toast.success(`${tipoVenta === "cotizacion" ? "Cotización" : "Venta"} ${data.folio} registrada`);
@@ -769,29 +869,31 @@ export default function POS({ windowId, windowLabel }) {
             value={clientQuery}
             onChange={(e) => { setClientQuery(e.target.value); setClientOpen(true); if (!e.target.value) setClienteId(""); }}
             onFocus={() => setClientOpen(true)}
-            placeholder="Cliente: escribe para buscar por nombre, clave o RFC..."
+            placeholder={puedeVerClientesFull ? "Cliente: escribe para buscar por nombre, clave o RFC..." : "Cliente: busca por nombre o clave..."}
             className="pl-10 h-12" data-testid="pos-cliente-search" />
           {clientOpen && filteredClients.length > 0 && (
             <div className="absolute z-30 mt-1 w-full card-soft shadow-lg max-h-64 overflow-y-auto" data-testid="pos-cliente-list">
               {filteredClients.map((c) => (
-                <button key={c.id} onClick={() => pickClient(c)} data-testid={`pos-cliente-opt-${c.codigo}`}
-                  className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between">
-                  <span className="truncate"><b className="text-[#C1401E] mr-1">{c.codigo}</b> {c.nombre}
-                    {c.rfc && <span className="text-slate-400 font-mono text-xs ml-1">· {c.rfc}</span>}
-                  </span>
-                  <span className="flex items-center gap-1.5 shrink-0">
-                    {c.rfc && <span className="font-mono text-[10px] text-slate-400">{c.rfc}</span>}
-                    {Number(c.descuento_permanente) > 0 && <Badge variant="outline" className="text-[10px] ml-2">-{c.descuento_permanente}%</Badge>}
-                  </span>
-                </button>
+                 <button key={c.id} onClick={() => pickClient(c)} data-testid={`pos-cliente-opt-${c.codigo}`}
+                   className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between">
+                   <span className="truncate"><b className="text-[#C1401E] mr-1">{c.codigo}</b> {c.nombre}
+                     {puedeVerClientesFull && c.rfc && <span className="text-slate-400 font-mono text-xs ml-1">· {c.rfc}</span>}
+                   </span>
+                   <span className="flex items-center gap-1.5 shrink-0">
+                     {puedeVerClientesFull && c.rfc && <span className="font-mono text-[10px] text-slate-400">{c.rfc}</span>}
+                     {Number(c.descuento_permanente) > 0 && <Badge variant="outline" className="text-[10px] ml-2">-{c.descuento_permanente}%</Badge>}
+                   </span>
+                 </button>
               ))}
             </div>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={openNuevoCliente} className="h-12 whitespace-nowrap" data-testid="pos-nuevo-cliente" title="Registrar un cliente nuevo sin salir del POS">
-            <UserPlus className="w-4 h-4 mr-1 text-[#C1401E]" /> Nuevo cliente
-          </Button>
+          {puedeVerClientesFull && (
+            <Button variant="outline" onClick={openNuevoCliente} className="h-12 whitespace-nowrap" data-testid="pos-nuevo-cliente" title="Registrar un cliente nuevo sin salir del POS">
+              <UserPlus className="w-4 h-4 mr-1 text-[#C1401E]" /> Nuevo cliente
+            </Button>
+          )}
           <Button
             variant={cajaAbierta ? "outline" : "default"}
             onClick={() => setCajaModalOpen(true)}
@@ -809,6 +911,7 @@ export default function POS({ windowId, windowLabel }) {
             <SelectItem value={String(listaNames.length + 1)}>Precio mínimo</SelectItem>
           </SelectContent>
           </Select>
+          <ReporteRapido />
         </div>
         </div>
 
@@ -852,15 +955,23 @@ export default function POS({ windowId, windowLabel }) {
                   </span>
                   <span className="text-slate-400">Límite {money(credInfo.lim)}</span>
                 </div>
+                {credInfo.nota && (
+                  <div className={`text-[11px] mt-1 ${credInfo.dot === "bg-red-500" ? "text-red-600" : "text-slate-500"}`}>{credInfo.nota}</div>
+                )}
                 <div className="flex items-center justify-between text-xs mt-1">
-                  <span className="text-slate-500">Saldo: <b className={credInfo.sal > 0 ? "text-red-600" : "text-slate-700"}>{money(credInfo.sal)}</b></span>
+                  <span className="text-slate-500">Saldo pendiente: <b className={credInfo.sal > 0 ? "text-red-600" : "text-green-700"}>{money(credInfo.sal)}</b></span>
                   <span className="text-slate-500">Disponible: <b className={credInfo.disp <= 0 ? "text-red-600" : "text-green-700"}>{money(credInfo.disp)}</b></span>
                 </div>
-                {credInfo.sal > 0 && can("caja.entrada") && (
+                {credInfo.sal > 0 && can("cxc.abono") && (
                   <Button size="sm" onClick={() => { setAbonoCli(clienteSel); setAbono({ monto: "", metodo: "efectivo", referencia: "" }); }}
                     className="w-full mt-2 bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-abonar-credito">
                     <HandCoins className="w-4 h-4 mr-1" /> Abonar a la cuenta ({money(credInfo.sal)})
                   </Button>
+                )}
+                {credInfo.sal > 0 && !can("cxc.abono") && (
+                  <p className="text-[11px] text-slate-400 mt-1.5" title="El abono directo lo realiza administración o encargado">
+                    Para abonar a esta cuenta, solicítalo a un encargado.
+                  </p>
                 )}
               </div>
             )}
@@ -1288,7 +1399,7 @@ export default function POS({ windowId, windowLabel }) {
               {printMode === "thermal" && (
               <div id="thermal-ticket" className="thermal font-mono text-[12px] text-black bg-white p-2 mx-auto">
                 <div className="text-center">
-                  <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" className="h-12 mx-auto mb-1 object-contain" />
+                  <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/isotipo1.png"} alt="logo" className="h-12 mx-auto mb-1 object-contain" />
                   <div className="font-bold text-[11px]">{settings.razon_social || "RAYMUNDO GOMEZ DIAZ"}</div>
                   <div className="font-bold text-[14px]">{settings.empresa_nombre || "Grupo RYSA"}</div>
                   {settings.ticket_config?.mostrar_direccion !== false && [settings.direccion, [settings.ciudad, settings.estado, settings.cp].filter(Boolean).join(", ")].filter(Boolean).map((l, i) => <div key={i}>{l}</div>)}
@@ -1343,111 +1454,62 @@ export default function POS({ windowId, windowLabel }) {
               </div>
               )}
 
-              {/* Formato carta RYSA (comprobante comercial Letter 8.5x11) */}
+              {/* Formato carta RYSA — GENERADOR ÚNICO: se muestra el PDF real
+                  persistido; lo que se ve aquí es EXACTAMENTE el archivo que
+                  se descarga, imprime y comparte por WhatsApp/correo. */}
               {printMode === "letter" && (
-                <div id="letter-template" className="letter-doc mx-auto" data-testid="letter-template">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "3px solid #C1401E", paddingBottom: 12, marginBottom: 14 }}>
-                    <div>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#C1401E" }}>{settings.empresa_nombre || "Grupo RYSA"}</div>
-                      <div style={{ fontSize: 10, color: "#475569" }}>{settings.razon_social || "RAYMUNDO GOMEZ DIAZ"}</div>
-                      {settings.rfc && <div style={{ fontSize: 9, color: "#64748B" }}>RFC: {settings.rfc}</div>}
-                      {settings.direccion && <div style={{ fontSize: 9, color: "#64748B" }}>{settings.direccion}</div>}
-                      {[settings.ciudad, settings.estado, settings.cp].filter(Boolean).length > 0 && <div style={{ fontSize: 9, color: "#64748B" }}>{[settings.ciudad, settings.estado, settings.cp].filter(Boolean).join(", ")}</div>}
-                      {settings.telefono && <div style={{ fontSize: 9, color: "#64748B" }}>Tel: {settings.telefono}</div>}
-                      {settings.correo && <div style={{ fontSize: 9, color: "#64748B" }}>{settings.correo}</div>}
-                      {ticketSucursal && <div style={{ fontSize: 9, color: "#C1401E", fontWeight: 600 }}>Sucursal: {ticketSucursal.nombre}</div>}
+                <div id="letter-pdf-wrap" className="mx-auto" data-testid="letter-template">
+                  {!cartaUrl ? (
+                    <div className="py-16 flex flex-col items-center gap-3">
+                      {pdfBusy ? (
+                        <Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" />
+                      ) : (
+                        <Button onClick={generarCartaPDF} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="letter-cargar">
+                          <FileText className="w-4 h-4 mr-1" /> Generar vista previa del PDF oficial
+                        </Button>
+                      )}
+                      <p className="text-xs text-slate-400 max-w-sm text-center">
+                        El documento se genera UNA sola vez por venta: la vista previa, la descarga,
+                        la impresión y lo que llega por WhatsApp son siempre este mismo archivo.
+                      </p>
                     </div>
-                    <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" style={{ height: 64 }} className="object-contain" />
-                  </div>
+                  ) : (
+                    <>
+                      <object data={fileUrl(cartaUrl)} type="application/pdf"
+                              width="100%" style={{ height: "62vh", minHeight: 420 }}
+                              data-testid="letter-pdf-frame">
+                        <iframe title={`Comprobante ${ticket?.folio || ""}`} src={fileUrl(cartaUrl)}
+                                style={{ width: "100%", height: "62vh", border: 0 }} />
+                        <div className="text-center py-10">
+                          <p className="text-sm text-slate-500 mb-2">Tu navegador no muestra el PDF integrado.</p>
+                          <a href={fileUrl(cartaUrl)} target="_blank" rel="noreferrer"
+                             className="text-[#C1401E] underline font-semibold">Abrir el PDF en una pestaña</a>
+                        </div>
+                      </object>
+                      <p className="text-[11px] text-slate-400 text-center mt-1">
+                        Vista previa del archivo oficial · {ticket?.folio} ·{" "}
+                        <a href={fileUrl(cartaUrl)} target="_blank" rel="noreferrer" className="underline">abrir en pestaña</a>
+                      </p>
+                    </>
+                  )}
 
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: "#1F1F1F", letterSpacing: 1 }}>DOCUMENTO DE VENTA</div>
-                    <div style={{ fontSize: 9, color: "#64748B", textAlign: "right" }}>
-                      <div><b>Folio:</b> {ticket.folio} · <b>Fecha:</b> {ticket.fecha?.slice(0, 10)} {ticket.hora ? `· ${ticket.hora}` : ""}</div>
-                      <div><b>Vendedor:</b> {ticket.vendedor_nombre || ticket.usuario_nombre}</div>
-                      <div><b>Método de pago:</b> {(ticket.pagos || []).map((p) => {
-                        const base = ({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito", spei: "SPEI", otros: "Otro" })[p.metodo] || p.metodo;
-                        return p.metodo === "tarjeta" && p.card_type ? `${base} ${p.card_type === "debito" ? "Débito" : "Crédito"}` : base;
-                      }).join(" + ") || (ticket.condicion === "credito" ? "Crédito" : "Contado")}</div>
-                    </div>
-                  </div>
-
-                  <div style={{ backgroundColor: "#F5F3F0", border: "1px solid #E2E0DC", borderRadius: 8, padding: 10, marginBottom: 14 }}>
-                    <div style={{ fontWeight: 700, color: "#C1401E", fontSize: 10, textTransform: "uppercase", marginBottom: 4 }}>Cliente</div>
-                    <div style={{ fontSize: 10, color: "#1F1F1F" }}>
-                      <div style={{ fontWeight: 600 }}>{ticketCliente?.razon_social || ticket.cliente_nombre}</div>
-                      {ticketCliente?.rfc && <div><b>RFC:</b> {ticketCliente.rfc}</div>}
-                      {(ticketCliente?.telefono || ticketCliente?.celular || ticketCliente?.whatsapp) && <div><b>Teléfono:</b> {ticketCliente.telefono || ticketCliente.celular || ticketCliente.whatsapp}</div>}
-                      {(ticketCliente?.correo || ticketCliente?.correos) && <div><b>Email:</b> {ticketCliente.correo || ticketCliente.correos}</div>}
-                      {[ticketCliente?.direccion, ticketCliente?.colonia, ticketCliente?.ciudad, ticketCliente?.estado_geo, ticketCliente?.cp].filter(Boolean).length > 0 &&
-                        <div><b>Dirección:</b> {[ticketCliente?.direccion, ticketCliente?.colonia, ticketCliente?.ciudad, ticketCliente?.estado_geo, ticketCliente?.cp].filter(Boolean).join(", ")}</div>}
-                    </div>
-                  </div>
-
-                  <table>
-                    <thead>
-                      <tr>
-                        <th style={{ width: "12%" }}>Código</th>
-                        <th>Descripción</th>
-                        <th style={{ width: "5%" }}>Und.</th>
-                        <th className="text-right" style={{ width: "8%" }}>Cant.</th>
-                        <th className="text-right" style={{ width: "12%" }}>Precio</th>
-                        <th className="text-right" style={{ width: "9%" }}>Desc.</th>
-                        <th className="text-right" style={{ width: "14%" }}>Importe</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ticket.items.map((i, k) => {
-                        const importe = i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0));
-                        const precio = i.precio_bruto ?? i.precio;
-                        return (
-                          <tr key={k}>
-                            <td style={{ fontSize: "8pt" }}>{i.codigo}</td>
-                            <td>{i.descripcion}{i.comentario ? <><br /><span style={{ fontSize: "7.5pt", color: "#C1401E" }}>• {i.comentario}</span></> : null}</td>
-                            <td style={{ fontSize: "8pt" }}>{i.unidad}</td>
-                            <td className="text-right">{i.cantidad}</td>
-                            <td className="text-right">{money(precio)}</td>
-                            <td className="text-right">{i.descuento ? money(i.descuento) : "—"}</td>
-                            <td className="text-right" style={{ fontWeight: 600 }}>{money(importe)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10, fontSize: "10pt" }}>
-                    <div style={{ width: 260 }}>
-                      {ticket.subtotal != null && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}><span>Subtotal</span><span>{money(ticket.subtotal)}</span></div>}
-                      {Number(ticket.descuento_total || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", color: "#C1401E" }}><span>Descuento</span><span>-{money(ticket.descuento_total)}</span></div>}
-                      {Number(ticket.iva_total || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}><span>IVA</span><span>{money(ticket.iva_total)}</span></div>}
-                      <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontWeight: 800, fontSize: "13pt", color: "#C1401E", borderTop: "2px solid #C1401E" }}>
-                        <span>TOTAL</span><span>{money(ticket.total)}</span>
-                      </div>
-                      {ticket.condicion === "credito" && <div style={{ fontSize: "8pt", color: "#dc2626", textAlign: "right" }}>Saldo pendiente: {money(ticket.saldo)}</div>}
-                    </div>
-                  </div>
-
-                  <div style={{ marginTop: 28, paddingTop: 10, borderTop: "1px solid #E2E0DC", textAlign: "center" }}>
-                    <div style={{ fontWeight: 700, color: "#C1401E", fontSize: "12pt" }}>¡GRACIAS POR SU PREFERENCIA!</div>
-                    <div style={{ fontSize: "8pt", color: "#94a3b8", marginTop: 4 }}>
-                      {settings.empresa_nombre || "Grupo RYSA"} · {settings.rfc || ""}
-                    </div>
-                    {ticket.id && <div style={{ fontSize: "8pt", color: "#94a3b8", marginTop: 2 }}>Verifica tu comprobante en: {window.location.origin}/verificar/{ticket.id}</div>}
-                  </div>
-
-                  {/* Acciones del formato carta (no se imprimen) */}
-                  <div className="letter-actions" style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                  <div className="letter-actions" style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
                     <Button size="sm" variant="outline" onClick={descargarCarta} disabled={pdfBusy} data-testid="letter-descargar">
                       {pdfBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Download className="w-4 h-4 mr-1" />} Descargar PDF
                     </Button>
-                    <Button size="sm" variant="outline" onClick={compartirCarta} disabled={pdfBusy} data-testid="letter-compartir">
+                    <Button size="sm" variant="outline" onClick={compartirCarta} disabled={!cartaUrl} data-testid="letter-compartir">
                       <Share2 className="w-4 h-4 mr-1" /> Compartir
                     </Button>
                     <Button size="sm" className="bg-[#25D366] hover:bg-[#1ebe57]" onClick={enviarCartaWhatsApp} disabled={pdfBusy} data-testid="letter-whatsapp">
                       <MessageCircle className="w-4 h-4 mr-1" /> Enviar por WhatsApp
                     </Button>
-                    <Button size="sm" variant="outline" onClick={printLetter} data-testid="letter-imprimir">
-                      <Printer className="w-4 h-4 mr-1" /> Imprimir
+                    <Button size="sm" variant="outline" onClick={enviarCartaCorreo} disabled={!cartaUrl} data-testid="letter-correo">
+                      <Mail className="w-4 h-4 mr-1" /> Correo
+                    </Button>
+                    <Button size="sm" variant="outline"
+                            onClick={() => cartaUrl && window.open(fileUrl(cartaUrl), "_blank")}
+                            disabled={!cartaUrl} data-testid="letter-imprimir">
+                      <Printer className="w-4 h-4 mr-1" /> Imprimir PDF
                     </Button>
                   </div>
                 </div>
@@ -1459,7 +1521,7 @@ export default function POS({ windowId, windowLabel }) {
                 {/* Header */}
                 <div className="flex justify-between items-start mb-6">
                   <div>
-                    <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" style={{ height: 60 }} className="object-contain" />
+                    <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/isotipo1.png"} alt="logo" style={{ height: 60 }} className="object-contain" />
                   </div>
                   <div className="text-right" style={{ fontSize: "9pt", color: "#475569" }}>
                     <div style={{ fontSize: "14pt", fontWeight: 700, color: "#C1401E" }}>{settings.empresa_nombre || "Grupo RYSA"}</div>
@@ -1656,7 +1718,7 @@ export default function POS({ windowId, windowLabel }) {
             <div className="space-y-4">
               <div className="rounded-xl border border-[#E5E0DA] overflow-hidden" data-testid="pos-comprobante-abono-cuerpo">
                 <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-[#C1401E]">
-                  <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/ISOTIPO-Photoroom.png"} alt="logo" className="h-12 w-12 object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                  <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/isotipo1.png"} alt="logo" className="h-12 w-12 object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                   <div className="flex-1">
                     <div className="font-display font-extrabold text-[#C1401E] leading-none">{settings.empresa_nombre || "Grupo RYSA"}</div>
                     <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 mt-0.5">Comprobante de Abono</div>
@@ -1737,6 +1799,24 @@ export default function POS({ windowId, windowLabel }) {
           </div>
         </div>
       </div>
+      {/* §3.7 Aviso de venta directa desde campo (vendedor_campo) */}
+      <Dialog open={avisoCampoOpen} onOpenChange={setAvisoCampoOpen}>
+        <DialogContent data-testid="aviso-venta-campo">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Venta directa desde campo</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-slate-600">
+            Estás realizando una <b>venta directa desde este dispositivo</b>. El inventario se
+            descuenta al instante, a diferencia de un pedido normal que pasa por revisión.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAvisoCampoOpen(false)}>Cancelar</Button>
+            <Button className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setAvisoCampoOk(true); setAvisoCampoOpen(false); }} data-testid="aviso-venta-campo-confirmar">
+              Entendido, vender ahora
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <CajaAperturaModal
         open={cajaModalOpen}
         onOpenChange={setCajaModalOpen}
@@ -1745,3 +1825,4 @@ export default function POS({ windowId, windowLabel }) {
     </div>
   );
 }
+

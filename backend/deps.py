@@ -92,6 +92,7 @@ DEV_PERMISSIONS = {
     "dev.errores",           # ver bitácora de errores
     "dev.info",              # información técnica del sistema
     "dev.mantenimiento",     # acciones de mantenimiento
+    "developer_tools",       # herramientas destructivas (limpieza/reset) del módulo desarrollador
 }
 
 # Roles base.
@@ -108,22 +109,38 @@ ROLE_PERMISSIONS = {
         "producto.crear", "producto.editar", "producto.baja", "producto.costo",
         "producto.precio", "inventario.ajuste", "venta.crear", "venta.cancelar",
         "venta.descuento", "venta.ver_todas", "venta.facturar",
-        "venta.cambiar_operador", "recargas.ver_todas",
-        "cliente.crear", "cliente.editar", "reportes.ver", "reportes.global",
+        "venta.cambiar_operador", "recargas.usar", "recargas.ver_todas",
+        "cliente.crear", "cliente.editar", "clientes.gestionar",
+        "reportes.ver", "reportes.global",
         "importar", "exportar", "config", "credito.autorizar",
-        "inventario.autorizar_negativo",
+        "inventario.autorizar_negativo", "finanzas.ver", "catalogo.ver",
+        "caja.retiro_forzado", "cxc.abono",
         "proveedor.ver", "proveedor.crear", "proveedor.editar",
         "compra.ver", "compra.crear", "compra.cancelar",
         "abono.ver", "abono.comprobante", "cuentas.ver",
         "pedido.gestionar", "cxp.pagar",
     },
+    # VENDEDOR (piso): sucursal, caja física, POS, facturación y recargas.
+    # SIN: inventario completo, datos sensibles de clientes (módulo), reportes
+    # completos, finanzas ni actividad de campo.
     "vendedor": {
-        "venta.crear", "venta.descuento", "cliente.crear", "cliente.editar",
-        "exportar", "visita.crear", "visita.editar", "visita.ver",
-        "pedido.gestionar",
+        "venta.crear", "venta.cancelar", "venta.descuento", "venta.facturar",
+        "recargas.usar", "catalogo.ver", "caja.abrir", "caja.cerrar",
+        "caja.ver", "caja.retiro", "caja.entrada", "pedido.gestionar",
     },
+    # CAJERA: opera caja y POS (facturación y recargas) sin cotizaciones
+    # complejas de campo; mismo alcance restringido que vendedor de piso.
     "cajero": {
-        "venta.crear", "exportar",
+        "venta.crear", "venta.facturar", "recargas.usar", "catalogo.ver",
+        "caja.abrir", "caja.cerrar", "caja.ver", "caja.retiro",
+        "caja.entrada", "pedido.gestionar",
+    },
+    # VENDEDOR DE CAMPO: celular/APK — visitas, rutas, GPS, levanta pedidos
+    # y venta directa opcional. SIN facturación ni recargas.
+    "vendedor_campo": {
+        "venta.crear", "visita.crear", "visita.editar", "visita.ver",
+        "visita.cancelar", "catalogo.ver", "pedido.gestionar",
+        "caja.abrir", "caja.cerrar", "caja.ver", "caja.retiro",
     },
     # Supervisor/Gerente comercial: monitoreo de vendedores de campo,
     # cartera, CxC, actividad, mapa y autorizaciones comerciales.
@@ -145,6 +162,10 @@ ROLE_PERMISSIONS = {
 # Catálogo de módulos asignables por admin/propietario en Usuarios.
 # Cada módulo otorga un conjunto de permisos adicional al rol base.
 MODULES = {
+    "catalogo": {
+        "label": "Catálogo (consulta por categoría)",
+        "perms": {"catalogo.ver"},
+    },
     "productos": {
         "label": "Productos e Inventario",
         "perms": {"producto.crear", "producto.editar", "producto.baja",
@@ -170,7 +191,7 @@ MODULES = {
     },
     "cxc": {
         "label": "Cuentas por Cobrar",
-        "perms": {"cxc.ver", "caja.entrada", "credito.autorizar"},
+        "perms": {"cxc.ver", "caja.entrada", "credito.autorizar", "cxc.abono"},
     },
     "reportes": {
         "label": "Reportes",
@@ -227,7 +248,7 @@ def role_permissions(role: str) -> set:
 # Solo es un DEFAULT: un administrador autorizado puede modificarlo después.
 # "productos" agrupa Productos e Inventario.
 DEFAULT_MODULES_NON_PRIVILEGED = [
-    "productos", "clientes", "recargas", "ventas", "caja", "reportes",
+    "caja", "catalogo",
 ]
 
 # Roles que tienen acceso total (evitar escalamiento al otorgar estos módulos).

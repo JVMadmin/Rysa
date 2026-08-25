@@ -42,7 +42,9 @@ export function AuthProvider({ children }) {
   };
 
   const can = (perm) => {
-    if (perm?.startsWith("dev.")) return permissions.includes(perm);
+    // Permisos exclusivos de desarrollador (dev.* y developer_*): el comodín
+    // "*" NO los otorga; deben estar asignados explícitamente al rol.
+    if (perm?.startsWith("dev.") || perm?.startsWith("developer")) return permissions.includes(perm);
     return permissions.includes("*") || permissions.includes(perm);
   };
   const isAdminOrOwner = !!user && ADMIN_ROLES.includes(user.role);

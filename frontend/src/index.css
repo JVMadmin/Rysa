@@ -146,6 +146,16 @@ body {
 
 .font-display { font-family: 'Outfit', sans-serif; }
 
+/* ---- Mapas (Leaflet) ---------------------------------------------------- */
+/* Contenedor acotado: evita que los paneles de Leaflet tapen menús/modales. */
+.leaflet-container { z-index: 0; background: #eef1f4; }
+/* Anillo pulsante del vendedor seleccionado. */
+@keyframes rysaPulse {
+  0%   { transform: scale(.7); opacity: .65; }
+  70%  { transform: scale(1.25); opacity: 0; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
 ::selection { background: #C1401E; color: #fff; }
 
 /* Scrollbar */

@@ -39,6 +39,46 @@ def get_safe_local_path(storage_path: str) -> str:
         raise ValueError("Acceso no autorizado: Intento de Path Traversal detectado.")
     return target
 
+
+# Logotipo oficial incluido con el proyecto (fallback cuando no hay logo
+# personalizado en Configuración). Se usa en TODOS los documentos generados.
+_ASSET_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "isotipo1.png")
+
+
+def logo_local(settings: dict) -> str | None:
+    """Ruta local del logotipo para documentos (ticket/carta/PDF).
+    Prioridad: 1) logo subido en Configuración · 2) asset oficial del repo.
+    Devuelve None si no hay ninguno disponible."""
+    lu = (settings or {}).get("logo_url") or ""
+    if lu and "/api/files/" in lu:
+        try:
+            p = get_safe_local_path(lu.split("/api/files/", 1)[1])
+            if os.path.isfile(p):
+                return p
+        except Exception:
+            pass
+    try:
+        if os.path.isfile(_ASSET_LOGO):
+            return _ASSET_LOGO
+    except Exception:
+        pass
+    return None
+
+
+def imagen_con_proporcion(ruta: str, ancho_max_mm: float, alto_max_mm: float):
+    """Image de reportlab que respeta la proporción real del archivo
+    (nunca deforma el logo) y cabe dentro del caja dada."""
+    from reportlab.platypus import Image
+    iw, ih = ImageReader(ruta).getSize()
+    if not iw or not ih:
+        return None
+    ar = iw / float(ih)
+    w, h = ancho_max_mm, ancho_max_mm / ar
+    if h > alto_max_mm:
+        h = alto_max_mm
+        w = h * ar
+    return Image(ruta, width=w, height=h)
+
 def init_storage():
     """Garantiza la existencia del directorio de almacenamiento."""
     os.makedirs(base_upload_dir(), exist_ok=True)
@@ -161,9 +201,11 @@ def _build_default_elements(tc, settings, sale):
         settings.get("estado", ""),
         settings.get("cp", ""),
     ]))
-    if settings.get("logo_url"):
-        els.append({"tipo": "logo", "align": "center"})
-        els.append({"tipo": "texto", "contenido": "RAYMUNDO GOMEZ DIAZ", "align": "center", "font_size": 8})
+    # Logo SIEMPRE: usa el de Configuración o el asset oficial incluido
+    # (storage.logo_local resuelve el fallback automáticamente).
+    els.append({"tipo": "logo", "align": "center"})
+    if settings.get("razon_social"):
+        els.append({"tipo": "texto", "contenido": settings.get("razon_social"), "align": "center", "font_size": 8})
     els.append({"tipo": "empresa", "align": "center", "bold": True, "font_size": 11})
     if tc.get("mostrar_rfc", True) and settings.get("rfc"):
         els.append({"tipo": "campo", "contenido": f"RFC: {settings.get('rfc')}", "align": "center"})
@@ -186,7 +228,8 @@ def _build_default_elements(tc, settings, sale):
     if sale.get("cliente_nombre"):
         els.append({"tipo": "cliente"})
     els.append({"tipo": "separador"})
-    els.append({"tipo": "deschead"})
+    # El bloque "items" ya imprime su propio encabezado DESCRIPCION:
+    # NO añadir "deschead" (antes salía duplicado).
     els.append({"tipo": "items"})
     els.append({"tipo": "separador"})
     incluye_iva = (settings or {}).get("precios_incluyen_iva", True)
@@ -410,28 +453,7 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
     if not elements:
         elements = _build_default_elements(tc, settings, sale)
 
-    buf = io.BytesIO()
-    if size == "carta":
-        c = canvas.Canvas(buf, pagesize=letter)
-        w, h = letter
-        x = 25 * mm
-        y = h - 25 * mm
-        line_h = 14
-    else:
-        width = 80 * mm
-        items = sale.get("items", [])
-        # Alto estimado incluyendo el wrap real de cada descripción/línea para
-        # que el ticket nunca quede cortado ni deformado.
-        item_font = 7
-        n_items_lines = 0
-        for it in items:
-            n_items_lines += _item_lines(it, width - 8 * mm - 4 * mm, item_font)
-        est_h = (40 + n_items_lines + 25) * mm
-        c = canvas.Canvas(buf, pagesize=(width, est_h))
-        w, h = width, est_h
-        x = 4 * mm
-        y = h - 8 * mm
-        line_h = 11
+    # ---- Lienzo y cursor se fijan por rama (carta fija · térmico dos pasadas) ----
 
     def L(text, center=False, bold=False, sz=None, align=None):
         nonlocal y
@@ -494,99 +516,155 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
         except Exception:
             return t or ""
 
-    for el in elements:
-        if not _elem_visible(el):
-            continue
-        tipo = el.get("tipo", "texto")
-        cont = fi(el.get("contenido"))
-        align = el.get("align") or ("center" if size != "carta" else "left")
-        bold = el.get("bold", False)
-        fsz = el.get("font_size")
-        try:
-            if tipo == "logo" and settings.get("logo_url"):
-                logo_path = settings["logo_url"]
-                # Si es una URL completa o relativa de /api/files/, extraemos el path local
-                if "/api/files/" in logo_path:
-                    logo_path = logo_path.split("/api/files/", 1)[1]
-                p = get_safe_local_path(logo_path) if not logo_path.startswith("http") else None
-                if p and os.path.exists(p):
+    def _draw_all():
+        """Dibuja todos los elementos sobre el lienzo/cursor actuales.
+        Se ejecuta DOS veces en térmico: sondeo (medir alto exacto) y final."""
+        nonlocal y
+        for el in elements:
+            if not _elem_visible(el):
+                continue
+            tipo = el.get("tipo", "texto")
+            cont = fi(el.get("contenido"))
+            align = el.get("align") or ("center" if size != "carta" else "left")
+            bold = el.get("bold", False)
+            fsz = el.get("font_size")
+            try:
+                if tipo == "logo":
+                    # Logo con proporción real; usa el de Configuración o el asset
+                    # oficial incluido en el proyecto.
+                    p = logo_local(settings)
+                    if p:
+                        try:
+                            iw, ih = ImageReader(p).getSize()
+                            ar = (iw / float(ih)) if ih else 1.5
+                            box_w, box_h = 22 * mm, 14 * mm
+                            dw, dh = box_w, box_w / ar
+                            if dh > box_h:
+                                dh = box_h
+                                dw = dh * ar
+                            c.drawImage(ImageReader(p), w / 2 - dw / 2, y - dh, dw, dh,
+                                        preserveAspectRatio=True, mask="auto")
+                            y -= (dh + 3 * mm)
+                        except Exception:
+                            pass
+                elif tipo == "qr":
+                    import qrcode
+                    from io import BytesIO
+                    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M)
+                    qr.add_data(cont or "https://gruporysa.com")
+                    qr.make(fit=True)
+                    img = qr.make_image(fill_color="black", back_color="white")
+                    qbio = BytesIO()
+                    img.save(qbio, format="PNG")
+                    qbio.seek(0)
+                    qs = el.get("qr_size") or 18
+                    c.drawImage(ImageReader(qbio), w / 2 - (qs * mm) / 2, y - (qs * mm), qs * mm, qs * mm)
+                    y -= (qs * mm + 4 * mm)
+                elif tipo == "empresa":
+                    L(empresa, bold=True, sz=fsz or 11, align="center")
+                elif tipo in ("campo", "texto"):
+                    L(cont, align=align, bold=bold, sz=fsz)
+                elif tipo == "encabezado":
+                    L(cont, align="center", bold=bold, sz=fsz)
+                elif tipo == "separador":
+                    sep()
+                elif tipo == "folio":
+                    L(f"FOLIO: {sale.get('folio', '')}", bold=True, sz=fsz)
+                elif tipo == "fecha":
+                    L(f"Fecha: {str(sale.get('fecha', ''))[:16].replace('T', ' ')}", sz=fsz)
+                elif tipo == "hora":
+                    L(f"Hora: {sale.get('hora') or str(sale.get('fecha', ''))[11:16]}", sz=fsz)
+                elif tipo == "cliente":
+                    L(f"Cliente: {sale.get('cliente_nombre', 'Público General')}", sz=fsz)
+                elif tipo == "articulos":
+                    items_data = sale.get("items") or []
+                    total_art = sum(float(it.get("cantidad", 0) or 0) for it in items_data)
+                    L(f"Artículos vendidos: {int(total_art)}", sz=fsz)
+                elif tipo == "atendio":
+                    L(f"Atendido por: {sale.get('vendedor_nombre')}", sz=fsz)
+                elif tipo == "items":
+                    campos_items()
+                elif tipo == "deschead":
+                    _apply_align(c, y, w, "DESCRIPCION", "center", 8, True)
+                    y -= line_h
+                elif tipo == "subtotal":
+                    L(f"Subtotal: {_money(sale.get('subtotal'))}", align=align, sz=fsz)
+                elif tipo == "iva":
+                    L(f"IVA: {_money(sale.get('iva_total'))}", align=align, sz=fsz)
+                elif tipo == "descuento":
+                    L(f"Descuento: -{_money(sale.get('descuento', sale.get('descuento_total'))) }", align=align, sz=fsz)
+                elif tipo == "letras":
                     try:
-                        c.drawImage(ImageReader(p), w / 2 - 10 * mm, y, 20 * mm, 20 * mm * 0.6, preserveAspectRatio=True, mask="auto")
-                        y -= 14 * mm
+                        L(f"({_num_a_letras(sale.get('total'))})", align="center", bold=True, sz=fsz or 8)
                     except Exception:
                         pass
-            elif tipo == "qr":
-                import qrcode
-                from io import BytesIO
-                qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M)
-                qr.add_data(cont or "https://gruporysa.com")
-                qr.make(fit=True)
-                img = qr.make_image(fill_color="black", back_color="white")
-                qbio = BytesIO()
-                img.save(qbio, format="PNG")
-                qbio.seek(0)
-                qs = el.get("qr_size") or 18
-                c.drawImage(ImageReader(qbio), w / 2 - (qs * mm) / 2, y - (qs * mm), qs * mm, qs * mm)
-                y -= (qs * mm + 4 * mm)
-            elif tipo == "empresa":
-                L(empresa, bold=True, sz=fsz or 11, align="center")
-            elif tipo in ("campo", "texto"):
-                L(cont, align=align, bold=bold, sz=fsz)
-            elif tipo == "encabezado":
-                L(cont, align="center", bold=bold, sz=fsz)
-            elif tipo == "separador":
-                sep()
-            elif tipo == "folio":
-                L(f"FOLIO: {sale.get('folio', '')}", bold=True, sz=fsz)
-            elif tipo == "fecha":
-                L(f"Fecha: {str(sale.get('fecha', ''))[:16].replace('T', ' ')}", sz=fsz)
-            elif tipo == "hora":
-                L(f"Hora: {sale.get('hora') or str(sale.get('fecha', ''))[11:16]}", sz=fsz)
-            elif tipo == "cliente":
-                L(f"Cliente: {sale.get('cliente_nombre', 'Público General')}", sz=fsz)
-            elif tipo == "articulos":
-                items_data = sale.get("items") or []
-                total_art = sum(float(it.get("cantidad", 0) or 0) for it in items_data)
-                L(f"Artículos vendidos: {int(total_art)}", sz=fsz)
-            elif tipo == "atendio":
-                L(f"Atendido por: {sale.get('vendedor_nombre')}", sz=fsz)
-            elif tipo == "items":
-                campos_items()
-            elif tipo == "deschead":
-                _apply_align(c, y, w, "DESCRIPCION", "center", 8, True)
-                y -= line_h
-            elif tipo == "subtotal":
-                L(f"Subtotal: {_money(sale.get('subtotal'))}", align=align, sz=fsz)
-            elif tipo == "iva":
-                L(f"IVA: {_money(sale.get('iva_total'))}", align=align, sz=fsz)
-            elif tipo == "descuento":
-                L(f"Descuento: -{_money(sale.get('descuento', sale.get('descuento_total'))) }", align=align, sz=fsz)
-            elif tipo == "letras":
-                try:
-                    L(f"({_num_a_letras(sale.get('total'))})", align="center", bold=True, sz=fsz or 8)
-                except Exception:
-                    pass
-            elif tipo == "recibido":
-                pagado = sum(float(p.get("monto", 0) or 0) for p in (sale.get("pagos") or []))
-                L(f"Recibido: {_money(pagado)}", align=align, sz=fsz)
-            elif tipo == "cambio":
-                L(f"Cambio: {_money(sale.get('cambio'))}", align=align, sz=fsz)
-            elif tipo == "total":
-                L(f"TOTAL: {_money(sale.get('total'))}", bold=True, align=align, sz=fsz or (12 if size == "carta" else 9))
-            elif tipo == "credito":
-                L(f"** VENTA A CRÉDITO ** Saldo: {_money(sale.get('saldo'))}", align="center", sz=fsz)
-            elif tipo == "pie" or tipo == "pie2":
-                L(cont if cont else tc.get("pie", "¡Gracias por su compra!"), align="center", sz=fsz)
-        except Exception:
-            # Nunca romper la generación del ticket por un bloque fallido.
-            continue
+                elif tipo == "recibido":
+                    pagado = sum(float(p.get("monto", 0) or 0) for p in (sale.get("pagos") or []))
+                    L(f"Recibido: {_money(pagado)}", align=align, sz=fsz)
+                elif tipo == "cambio":
+                    L(f"Cambio: {_money(sale.get('cambio'))}", align=align, sz=fsz)
+                elif tipo == "total":
+                    L(f"TOTAL: {_money(sale.get('total'))}", bold=True, align=align, sz=fsz or (12 if size == "carta" else 9))
+                elif tipo == "credito":
+                    L(f"** VENTA A CRÉDITO ** Saldo: {_money(sale.get('saldo'))}", align="center", sz=fsz)
+                elif tipo == "pie" or tipo == "pie2":
+                    L(cont if cont else tc.get("pie", "¡Gracias por su compra!"), align="center", sz=fsz)
+            except Exception:
+                # Nunca romper la generación del ticket por un bloque fallido.
+                continue
 
+    # fin _draw_all
+
+    if size == "carta":
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=letter)
+        w, h = letter
+        x = 25 * mm
+        y = h - 25 * mm
+        line_h = 14
+        _draw_all()
+        c.showPage()
+        c.save()
+        buf.seek(0)
+        return buf.read()
+
+    # ---- TÉRMICO 80mm: DOS PASADAS --------------------------------------
+    # Pasada 1 (sondeo): dibuja en un lienzo muy alto para medir el alto
+    # EXACTO de UNA copia (logo, QR y wraps incluidos). Pasada 2: PDF final
+    # con N copias (cliente y comercio) de ese alto exacto.
+    width = 80 * mm
+    x = 4 * mm
+    line_h = 11
+    item_font = 7
+    n_items_lines = sum(_item_lines(it, width - 12 * mm, item_font)
+                        for it in sale.get("items", []))
+    est_h = (40 + n_items_lines + 30) * mm
+    probe_h = int(est_h + 120 * mm)
+
+    copias = max(1, int((tc or {}).get("copias", 2)))  # §3.4: cliente+comercio
+
+    c = canvas.Canvas(io.BytesIO(), pagesize=(width, probe_h))
+    w, h = width, probe_h
+    y = probe_h - 8 * mm
+    start_y = y
+    _draw_all()
+    copy_h = max(int(round((start_y - y) + 10 * mm)), int(40 * mm))
+    page_h = copy_h * copias
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(width, page_h))
+    w, h = width, page_h
+    for idx in range(copias):
+        y = h - 8 * mm - idx * copy_h
+        if copias > 1:
+            etiqueta = "— COPIA CLIENTE —" if idx == 0 else f"— COPIA COMERCIO —" if idx == 1 else f"— COPIA {idx + 1} —"
+            _apply_align(c, y, w, etiqueta, "center", 6, True)
+            y -= line_h
+        _draw_all()
     c.showPage()
     c.save()
     buf.seek(0)
     return buf.read()
-
-
 def _metodo_pago_label(pago: dict) -> str:
     """Etiqueta legible de un pago, incluida la tarjeta débito/crédito."""
     m = (pago or {}).get("metodo", "otros")
@@ -641,14 +719,14 @@ def build_letter_pdf(sale: dict, settings: dict, cliente: dict = None) -> bytes:
 
     story = []
 
-    # --- Encabezado: empresa (izq) + logo (der) ---
+    # --- Encabezado: empresa (izq) + logo oficial (der, proporción real) ---
     logos = []
-    lu = settings.get("logo_url") or ""
-    if lu and "/api/files/" in lu:
+    lp = logo_local(settings)
+    if lp:
         try:
-            lp = get_safe_local_path(lu.split("/api/files/", 1)[1])
-            if os.path.isfile(lp):
-                logos.append(Image(lp, width=38 * mm, height=34 * mm))
+            img = imagen_con_proporcion(lp, ancho_max_mm=40, alto_max_mm=26)
+            if img is not None:
+                logos.append(img)
         except Exception:
             logos = []
     emp_lines = [Paragraph("<b>" + (settings.get("empresa_nombre") or "Grupo RYSA") + "</b>", sEmpresa)]

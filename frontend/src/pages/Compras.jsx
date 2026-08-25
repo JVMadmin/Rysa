@@ -17,7 +17,9 @@ const METODOS_PAGO = [
 ];
 const CATEGORIAS = ["Renta", "Luz", "Internet", "Gasolina", "Mantenimiento", "Papelería", "Servicios", "Publicidad", "Transporte", "Honorarios", "Otros"];
 
-const prodBlank = () => ({ descripcion: "", codigo: "", categoria: "", costo: "0", iva_tasa: "16", unidad_medida: "PZA", existencia: "0" });
+const prodBlank = () => ({ descripcion: "", codigo: "", categoria: "", costo: "0", precio_publico: "", iva_tasa: "8", unidad_medida: "PZA", existencia: "0", codigos_barras: [] });
+// Unidades fallback si /settings aún no tiene configuradas.
+const UNIDADES_FRONT = ["PZA", "CAJA", "PAQUETE", "BOLSA", "SIX", "CUBETA", "PAR", "JUEGO", "KG", "GR", "LT", "ML", "MT", "ROL", "SERVICIO"];
 
 const ResumenReportes = ({ f }) => {
   const [rep, setRep] = useState(null);

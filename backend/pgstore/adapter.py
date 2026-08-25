@@ -219,10 +219,22 @@ def compile_filter(collection, flt, p) -> str:
                 if op in spec:
                     k = f"f{len(p)}"; p[k] = spec[op]
                     sqlop = {"$gt": ">", "$gte": ">=", "$lt": "<", "$lte": "<="}[op]
-                    # Guard de formato: si el texto no es numérico no participa
-                    # (antes un CAST sobre basura rompía la consulta completa).
-                    conds.append(
-                        f"(({expr}) ~ {_NUM_RE_SQL} AND CAST(({expr}) AS numeric) {sqlop} :{k})")
+                    _v = spec[op]
+                    if field in _typed_cols(collection):
+                        # Columna tipada NUMERIC real: comparación directa.
+                        # (El guard regex `expr ~ '...'` solo aplica a texto
+                        # JSONB; sobre NUMERIC lanza UndefinedFunctionError.)
+                        conds.append(f'({expr}) {sqlop} CAST(:{k} AS numeric)')
+                    elif isinstance(_v, str):
+                        # Texto (fechas ISO, códigos): comparación lexicográfica
+                        # directa. Antes se forzaba CAST numérico y rompía con
+                        # DataError para valores no numéricos.
+                        conds.append(f"(({expr}) IS NOT NULL AND ({expr}) {sqlop} :{k})")
+                    else:
+                        # Guard de formato: si el texto no es numérico no participa
+                        # (antes un CAST sobre basura rompía la consulta completa).
+                        conds.append(
+                            f"(({expr}) ~ {_NUM_RE_SQL} AND CAST(({expr}) AS numeric) {sqlop} :{k})")
                     continue
             if "$ne" in spec:
                 v = spec["$ne"]

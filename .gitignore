@@ -115,3 +115,10 @@ consultor-precios/build/
 
 # Logs
 *.log
+
+# RYSA runtime data (nunca subir)
+backend/backups/
+backend/uploads/
+*.sql
+*.xlsx.tmp
+

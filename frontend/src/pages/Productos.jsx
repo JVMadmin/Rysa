@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, Link } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import ProductForm from "@/components/ProductForm";
 import { TableScroller } from "@/components/TableScroller";
 import { toast } from "sonner";
-import { Plus, Search, Upload, Pencil, History, Loader2, Boxes, FileDown, FileSpreadsheet, FileText, ArrowDownUp, ArrowUp, ArrowDown, SlidersHorizontal } from "lucide-react";
+import { Plus, Search, Upload, Pencil, History, Loader2, Boxes, FileDown, FileSpreadsheet, FileText, ArrowDownUp, ArrowUp, ArrowDown, SlidersHorizontal, Tags } from "lucide-react";
 const dot = (p) => {
   const ex = Number(p.existencia || 0), min = Number(p.stock_minimo || 0);
   if (ex <= 0) return ["bg-red-500", "Sin existencia"];
@@ -264,6 +264,11 @@ export default function Productos() {
           <p className="text-slate-500 text-sm">{total} productos</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {can("producto.editar") && (
+            <Link to="/app/categorias" data-testid="categorias-btn">
+              <Button variant="outline"><Tags className="w-4 h-4 mr-1" /> Categorías</Button>
+            </Link>
+          )}
           <Button variant="outline" onClick={() => download("/products/plantilla/excel", "plantilla_productos.xlsx")} data-testid="plantilla-btn"><FileDown className="w-4 h-4 mr-1" /> Plantilla</Button>
           {can("importar") && <Button variant="outline" onClick={() => fileRef.current.click()} data-testid="import-btn"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
           <Button variant="outline" onClick={() => runExport("excel")} disabled={!!exporting} data-testid="export-excel-btn">
