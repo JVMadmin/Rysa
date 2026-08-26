@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useBranding, DEFAULT_LOGO } from "@/hooks/useBranding";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
@@ -99,6 +100,29 @@ export default function ErpLayout() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Notificación en vivo: comprobantes de pago enviados desde el QR (§12).
+  const puedeRevisarCxc = can("cxc.abono");
+  const [evPendientes, setEvPendientes] = useState(0);
+  useEffect(() => {
+    if (!puedeRevisarCxc) return;
+    let prev = null;
+    const tick = async () => {
+      try {
+        const { data } = await api.get("/comprobantes-pago/pendientes");
+        setEvPendientes(data.total || 0);
+        if (prev !== null && (data.total || 0) > prev) {
+          toast.info(`📥 Nuevo comprobante de pago recibido (${data.total} por revisar)`, {
+            action: { label: "Ver", onClick: () => nav("/app/cotizaciones") },
+          });
+        }
+        prev = data.total || 0;
+      } catch { /* silencioso */ }
+    };
+    tick();
+    const id = setInterval(tick, 60000);
+    return () => clearInterval(id);
+  }, [puedeRevisarCxc]);
 
   // Visibilidad: permiso requerido + ocultamiento por permiso excluyente
   // (p. ej. Mi Actividad se oculta para quien ya ve Supervisión Comercial).

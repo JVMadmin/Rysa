@@ -2934,6 +2934,20 @@ async def listar_comprobantes(sale_id: str, request: Request = None,
             "evidencias": evids}
 
 
+@api.get("/comprobantes-pago/pendientes")
+async def comprobantes_pendientes(user: dict = Depends(require_permission("cxc.abono"))):
+    """Conteo de evidencias por revisar (para notificación del layout)."""
+    total = await db.payment_evidence.count_documents(
+        {"estado": {"$in": ["pendiente", "aprobando"]}})
+    ultimo = ""
+    if total:
+        docs = await db.payment_evidence.find(
+            {"estado": "pendiente"}).sort("created_at", -1).to_list(1)
+        if docs:
+            ultimo = f"{docs[0].get('folio_cot','')} · {docs[0].get('metodo','')}"
+    return {"total": int(total or 0), "ultimo": ultimo}
+
+
 @api.get("/comprobantes-pago/{evid_id}/archivo")
 async def ver_comprobante_archivo(evid_id: str,
                                   user: dict = Depends(require_permission("cxc.abono"))):

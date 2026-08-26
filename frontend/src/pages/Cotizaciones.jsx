@@ -19,6 +19,7 @@ const ESTADOS_EV = {
 
 /* ============ Sección: Comprobantes de pago por QR (§12/§13/§19) ========== */
 function ComprobantesPago({ cot }) {
+  const { can } = useAuth();
   const puede = can("cxc.abono");
   const [info, setInfo] = useState(null);
   const [busy, setBusy] = useState("");
