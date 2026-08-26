@@ -122,3 +122,6 @@ backend/uploads/
 *.sql
 *.xlsx.tmp
 
+
+# Artefactos de build sueltos en raíz
+main-docker.js.map
