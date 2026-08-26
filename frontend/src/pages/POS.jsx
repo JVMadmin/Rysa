@@ -18,7 +18,7 @@ import {
   Banknote, ArrowLeftRight, CreditCard,   Tag, Printer, Hash, Keyboard, FileText,
   Smartphone, Landmark, Gift, DollarSign, User as UserIcon, Check, Tags, MessageCircle, Loader2,
   Star, Flame, LayoutGrid, HandCoins, UserPlus, AlertTriangle, Share2, Download, RefreshCw,
-  Wallet as Wallet2, Mail,
+  Wallet as Wallet2, Mail, Send as SendIcon,
 } from "lucide-react";
 
 const METODOS = [
@@ -60,10 +60,15 @@ const PRODUCT_EX_CLS = (ex) => {
   return "bg-green-100 text-green-700 border-green-300";
 };
 
-const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold }) => {
+const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva }) => {
   const neto = priceOf(p);
   const tasa = Number(p.iva_tasa || 8);
   const conIva = +(neto * (1 + tasa / 100)).toFixed(2);
+  // Precio destacado = el que realmente se cobra: con IVA cuando el toggle
+  // "Precios incluyen IVA" está activo; neto cuando está desactivado.
+  const principal = incluyeIva ? conIva : neto;
+  const secundario = incluyeIva ? neto : conIva;
+  const etiqueta = incluyeIva ? "sin IVA" : "con IVA";
   return (
   <div className="relative">
     <button onClick={onAdd} data-testid={`pos-prod-${p.codigo}`}
@@ -73,8 +78,8 @@ const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold }) => {
       <div className="text-xs font-medium line-clamp-2 h-7">{p.descripcion}</div>
       <div className="flex items-center justify-between mt-0.5">
         <div>
-          <span className="font-display font-bold text-[#C1401E] text-xs">{money(neto)}</span>
-          <span className="text-[9px] text-slate-400 ml-0.5">({money(conIva)})</span>
+          <span className="font-display font-bold text-[#C1401E] text-xs">{money(principal)}</span>
+          <span className="text-[9px] text-slate-400 ml-0.5">({etiqueta} {money(secundario)})</span>
         </div>
         <span className="flex items-center gap-0.5">
           {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="text-[9px] text-amber-600 border-amber-300 h-4 leading-none">{p.vendidas}</Badge>}
@@ -135,6 +140,10 @@ export default function POS({ windowId, windowLabel }) {
   const [suspended, setSuspended] = useState([]);
   const [suspOpen, setSuspOpen] = useState(false);
   const [ticket, setTicket] = useState(null);
+  // COTIZACIONES: flujo propio — sin ticket térmico; PDF carta con
+  // Descargar/Enviar. `cotBusy` = "" | "pdf" | "wa" (spinner del botón).
+  const [cotizacion, setCotizacion] = useState(null);
+  const [cotBusy, setCotBusy] = useState("");
   const [waPhone, setWaPhone] = useState("");
   const [waSending, setWaSending] = useState(false);
   const [settings, setSettings] = useState({});
@@ -161,7 +170,7 @@ export default function POS({ windowId, windowLabel }) {
   const [posComp, setPosComp] = useState(null); // comprobante de abono desde el POS
   const [posCompBusy, setPosCompBusy] = useState(false);
   const [printMode, setPrintMode] = useState("thermal"); // thermal | letter | invoice
-  // Generador ÚNICO: la carta comparte/descarga/imprime SIEMPRE este mismo PDF.
+  // Generador aNICO: la carta comparte/descarga/imprime SIEMPRE este mismo PDF.
   const [cartaUrl, setCartaUrl] = useState("");
   const [sucursales, setSucursales] = useState([]);
   const incluyeIvaDefault = useRef(true); // valor de settings.precios_incluyen_iva
@@ -296,7 +305,7 @@ export default function POS({ windowId, windowLabel }) {
   };
 
   // --- Formato carta: PDF real del comprobante comercial RYSA ---
-  // El backend es el GENERADOR ÚNICO: la primera llamada crea el archivo y
+  // El backend es el GENERADOR aNICO: la primera llamada crea el archivo y
   // todas las siguientes devuelven EL MISMO PDF (vista previa incluida).
   const generarCartaPDF = async () => {
     if (!ticket?.id) { toast.error("Ticket no disponible"); return null; }
@@ -611,9 +620,16 @@ export default function POS({ windowId, windowLabel }) {
       return tokens.every((tk) => hay.includes(tk));
     }).slice(0, 100);
   }, [clients, clientQuery]);
-  const setLinePrecio = (item, precio) => {
+  const setLinePrecio = (item, precioVista) => {
+    // El carrito guarda SIEMPRE el precio neto (así se envía al backend con el
+    // flag precios_incluyen_iva). Si el toggle "Precios incluyen IVA" está
+    // activo, lo que el cajero ve y captura es precio CON IVA: aquí se
+    // convierte a neto antes de guardar.
+    const tasa = Number(item?.iva_tasa || 0);
+    const f = incluyeIva ? 1 + tasa / 100 : 1;
+    const precio = +((Number(precioVista) || 0) / f).toFixed(4);
     const inCart = cart.some((i) => i.product_id === item.product_id);
-    if (inCart) setCart((c) => c.map((i) => (i.product_id === item.product_id ? { ...i, precio: Number(precio) || 0 } : i)));
+    if (inCart) setCart((c) => c.map((i) => (i.product_id === item.product_id ? { ...i, precio } : i)));
     else addToCartWithPrice(item, precio);
     setLinePrice(null); setLibreVal("");
   };
@@ -656,6 +672,8 @@ export default function POS({ windowId, windowLabel }) {
 
   const pagado = pagos.reduce((s, p) => s + Number(p.monto || 0), 0);
   const cambio = Math.max(0, +(pagado - totals.total).toFixed(2));
+  // Factor de vista del diálogo de precio por línea (mismo toggle de IVA):
+  const fDlg = incluyeIva && linePrice ? 1 + Number(linePrice.iva_tasa || 0) / 100 : 1;
 
   // Atajos de teclado F6-F9
   useEffect(() => {
@@ -673,12 +691,13 @@ export default function POS({ windowId, windowLabel }) {
         if (!(prod.precios?.length || prod.precio_minimo != null)) return toast.error("El producto no tiene precios configurados");
         const precio = item ? item.precio : calcListPrice(prod, lista, listasPct);
         setLinePrice({ ...prod, product_id: prod.product_id || prod.id, precio });
-        setLibreVal(String(precio));
+        const fv = incluyeIva ? 1 + Number(prod.iva_tasa ?? prod.iva ?? 8) / 100 : 1;
+        setLibreVal(String(+(precio * fv).toFixed(2)));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, cart, selProd, lista, listasPct]);
+  }, [selected, cart, selProd, lista, listasPct, incluyeIva]);
 
   const pcSearch = async (val) => {
     setPcQuery(val);
@@ -752,6 +771,7 @@ export default function POS({ windowId, windowLabel }) {
     setAbono({ monto: "", metodo: "efectivo", referencia: "" });
     setPrintMode("thermal");
     setTicket(null);
+    setCotizacion(null);
     setPrintFail(false);
     setNuevoClienteOpen(false);
     setNcDup([]);
@@ -762,7 +782,7 @@ export default function POS({ windowId, windowLabel }) {
   }, [windowId, clearCartState, pubClientId, refreshFolio, setClienteId]);
 
   const confirmar = async () => {
-    // §3.7 — Aviso obligatorio de venta directa desde campo (vendedor_campo):
+    // §3.7 â€” Aviso obligatorio de venta directa desde campo (vendedor_campo):
     if (esVendedorCampo && !avisoCampoOk) {
       setAvisoCampoOpen(true);
       return;
@@ -791,6 +811,15 @@ export default function POS({ windowId, windowLabel }) {
       setCartaUrl(""); // documento nuevo = archivos nuevos
       ticketPdfRef.current = "";
       blobCacheRef.current = {};
+      setWaPhone(clienteSel?.whatsapp || clienteSel?.telefono || clienteSel?.celular || "");
+      setPrintFail(false);
+      if (data.tipo_venta === "cotizacion") {
+        // Bifurcación COTIZACIÓN: modal propio con PDF carta (sin térmico).
+        setCotizacion(data);
+        toast.success(`Cotización ${data.folio} registrada`);
+        loadCaja();
+        return;
+      }
       setTicket(data);
       // Precarga en segundo plano de ticket + carta (PDF y blob): así el
       // primer clic en WhatsApp/Descargar comparte INMEDIATAMENTE.
@@ -798,12 +827,10 @@ export default function POS({ windowId, windowLabel }) {
         asegurarTicketPdf().then((u) => u && prefetchBlob(u)).catch(() => {});
         generarCartaPDF().then((u) => u && prefetchBlob(u)).catch(() => {});
       }, 50);
-      setWaPhone(clienteSel?.whatsapp || clienteSel?.telefono || clienteSel?.celular || "");
-      setPrintFail(false);
-      toast.success(`${tipoVenta === "cotizacion" ? "Cotización" : "Venta"} ${data.folio} registrada`);
+      toast.success(`Venta ${data.folio} registrada`);
       loadCaja();
       // Impresión automática: un error aquí NUNCA cancela ni revierte la venta.
-      if (settings.ticket_config?.auto_print && data.tipo_venta !== "cotizacion") {
+      if (settings.ticket_config?.auto_print) {
         imprimirTicket();
       }
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
@@ -861,6 +888,36 @@ export default function POS({ windowId, windowLabel }) {
       if (modo === "share") toast.success("PDF adjuntado. Selecciona WhatsApp en el menú de compartir.");
       else toast.info("El PDF se descargó. Adjúntalo manualmente en WhatsApp.");
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  // ===== COTIZACIONES: PDF tamaño carta (Descargar / Enviar) =====
+  const cotGenPdf = async () => {
+    const { data } = await api.post(`/sales/${cotizacion.id}/cotizacion-pdf`);
+    return data; // {path, url}
+  };
+  const cotDescargar = async () => {
+    setCotBusy("pdf");
+    try {
+      const d = await cotGenPdf();
+      const a = document.createElement("a");
+      a.href = fileUrl(d.url);
+      a.download = `cotizacion-${cotizacion.folio}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast.success("Cotización descargada");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setCotBusy(""); }
+  };
+  const cotEnviarWhatsApp = async () => {
+    setCotBusy("wa");
+    try {
+      const d = await cotGenPdf();
+      const venc = String(cotizacion.fecha_vencimiento || "").slice(0, 10);
+      const msg = `Hola${cotizacion.cliente_nombre ? " " + cotizacion.cliente_nombre : ""}, le compartimos su cotización ${cotizacion.folio}${venc ? ` (vigente hasta el ${venc})` : ""}. Total: ${money(cotizacion.total)}.`;
+      const modo = await adjuntarPdf(d.url, `cotizacion-${cotizacion.folio}.pdf`, `Cotización ${cotizacion.folio}`, msg);
+      if (modo === "share") toast.success("PDF adjuntado. Selecciona WhatsApp en el menú de compartir.");
+      else toast.info("El PDF se descargó. Adjúntalo manualmente en WhatsApp.");
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setCotBusy(""); }
   };
 
   const folioActual = tipoVenta === "cotizacion" ? nextFolio.cotizacion : nextFolio.venta;
@@ -996,15 +1053,21 @@ export default function POS({ windowId, windowLabel }) {
                     <th className="px-1.5 py-1.5 font-semibold">Unidad</th>
                     <th className="px-1.5 py-1.5 font-semibold">Descripción</th>
                     <th className="px-1.5 py-1.5 font-semibold text-right">IVA %</th>
-                    <th className="px-1.5 py-1.5 font-semibold text-right">Precio</th>
-                    <th className="px-1.5 py-1.5 font-semibold text-right">Importe</th>
+                    <th className="px-1.5 py-1.5 font-semibold text-right">Precio{incluyeIva && <span className="text-[8px] font-normal normal-case text-slate-400"> c/IVA</span>}</th>
+                    <th className="px-1.5 py-1.5 font-semibold text-right">Importe{incluyeIva && <span className="text-[8px] font-normal normal-case text-slate-400"> c/IVA</span>}</th>
                     <th className="px-1.5 py-1.5 font-semibold text-center">Comentario</th>
                     <th className="px-1.5 py-1.5 font-semibold text-center">+/-</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {cart.map((i) => {
-                    const importe = +(i.cantidad * i.precio).toFixed(2);
+                    // Vista de la línea: cuando "Precios incluyen IVA" está
+                    // activo, Precio e Importe se muestran CON IVA (el carrito
+                    // sigue guardando neto internamente).
+                    const fIva = incluyeIva ? 1 + Number(i.iva_tasa || 0) / 100 : 1;
+                    const precioVista = +(i.precio * fIva).toFixed(2);
+                    const brutoVista = +(i.cantidad * i.precio * fIva).toFixed(2);
+                    const importeVista = +((i.cantidad * i.precio - (i.descuento || 0)) * fIva).toFixed(2);
                     return (
                       <tr key={i.product_id} onClick={() => setSelected(i.product_id)}
                         className={`cursor-pointer align-middle ${selected === i.product_id ? "bg-[#C1401E]/[0.04]" : "hover:bg-slate-50"}`}
@@ -1032,18 +1095,21 @@ export default function POS({ windowId, windowLabel }) {
                         </td>
                         <td className="px-1.5 py-1 text-right tabular-nums text-slate-500 whitespace-nowrap">{i.iva_tasa}%</td>
                         <td className="px-1.5 py-1 text-right tabular-nums whitespace-nowrap">
-                          <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(i.precio)); }}
+                          <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(precioVista)); }}
                             className="underline decoration-dotted hover:text-[#C1401E]" data-testid={`cart-price-${i.codigo}`}>
-                            {money(i.precio)}
+                            {money(precioVista)}
                           </button>
                         </td>
                         <td className="px-1.5 py-1 text-right font-semibold tabular-nums whitespace-nowrap">
-                          {!(i.descuento > 0) && money(importe)}
-                          {i.descuento > 0 && <span className="line-through text-slate-400">{money(importe)}</span>}
+                          {!(i.descuento > 0) && money(importeVista)}
+                          {i.descuento > 0 && <>
+                            <span className="line-through text-slate-400 font-normal">{money(brutoVista)}</span>
+                            {" "}{money(importeVista)}
+                          </>}
                         </td>
                         <td className="px-1.5 py-1" onClick={(e) => e.stopPropagation()}>
                           <Input value={i.comentario || ""} onChange={(e) => setLineComentario(i.product_id, e.target.value)}
-                            placeholder="…" className="w-24 h-6 p-0 text-[11px] justify-self-end" data-testid={`cart-comentario-${i.codigo}`} />
+                            placeholder="⬦" className="w-24 h-6 p-0 text-[11px] justify-self-end" data-testid={`cart-comentario-${i.codigo}`} />
                         </td>
                         <td className="px-1.5 py-1 text-center whitespace-nowrap">
                           <button onClick={(e) => { e.stopPropagation(); remove(i.product_id); }} className="text-slate-400 hover:text-red-600" data-testid={`cart-remove-${i.codigo}`}><Trash2 className="w-3.5 h-3.5" /></button>
@@ -1142,7 +1208,7 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="mt-6 flex flex-wrap gap-2 justify-center text-xs text-slate-400">
                   <span className="flex items-center gap-1"><Keyboard className="w-3.5 h-3.5" /> Atajos:</span>
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F8</kbd> +cantidad</span>
-                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F9</kbd> −cantidad</span>
+                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F9</kbd> âˆ’cantidad</span>
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F7</kbd> verificar precio</span>
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F6</kbd> precios del producto</span>
                 </div>
@@ -1150,7 +1216,7 @@ export default function POS({ windowId, windowLabel }) {
             ) : (
               <div className="grid grid-cols-1 gap-1 p-1">
                 {results.map((p) => (
-                  <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} />
+                  <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} incluyeIva={incluyeIva} />
                 ))}
               </div>
             )
@@ -1163,7 +1229,7 @@ export default function POS({ windowId, windowLabel }) {
             ) : (
               <div className="grid grid-cols-1 gap-1 p-1">
                 {catalogo.map((p) => (
-                  <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} mostrarSold={vista === "mas_vendidos"} />
+                  <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} mostrarSold={vista === "mas_vendidos"} incluyeIva={incluyeIva} />
                 ))}
               </div>
             )
@@ -1271,7 +1337,7 @@ export default function POS({ windowId, windowLabel }) {
             <ul className="text-slate-600 list-disc pl-5 text-sm">
               {(invOverride || []).map((i) => (
                 <li key={i.product_id} data-testid="inv-override-item">
-                  <b>{i.descripcion}</b> — disp {Number(i.existencia ?? 0)} · pedido {Number(i.cantidad)}
+                  <b>{i.descripcion}</b> â€” disp {Number(i.existencia ?? 0)} · pedido {Number(i.cantidad)}
                 </li>
               ))}
             </ul>
@@ -1297,21 +1363,21 @@ export default function POS({ windowId, windowLabel }) {
                 {listaNames.map((_, i) => {
                   const pr = priceFromList(linePrice, i + 1);
                   return (
-                    <button key={i} onClick={() => setLinePrecio(linePrice, pr)} data-testid={`line-precio-${i + 1}`}
+                    <button key={i} onClick={() => setLinePrecio(linePrice, pr * fDlg)} data-testid={`line-precio-${i + 1}`}
                       className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-[#C1401E] ${Math.abs(linePrice.precio - pr) < 0.001 ? "border-[#C1401E] bg-[#C1401E]/5" : "border-slate-200"}`}>
                       <span className="text-sm text-slate-500">{listaNames[i] || `Precio ${i + 1}`}</span>
-                      <span className="font-display font-bold text-[#C1401E]">{money(pr)}</span>
+                      <span className="font-display font-bold text-[#C1401E]">{money(pr * fDlg)}</span>
                     </button>
                   );
                 })}
-                <button onClick={() => setLinePrecio(linePrice, linePrice.precio_minimo)} data-testid="line-precio-min"
+                <button onClick={() => setLinePrecio(linePrice, (linePrice.precio_minimo || 0) * fDlg)} data-testid="line-precio-min"
                   className="flex items-center justify-between border rounded-md px-3 py-2 hover:border-amber-500 border-slate-200">
                   <span className="text-sm text-slate-500">Precio mínimo</span>
-                  <span className="font-display font-bold text-amber-600">{money(linePrice.precio_minimo || 0)}</span>
+                  <span className="font-display font-bold text-amber-600">{money((linePrice.precio_minimo || 0) * fDlg)}</span>
                 </button>
               </div>
               <div className="border-t pt-3">
-                <Label className="text-xs uppercase tracking-wider text-slate-500">Precio libre</Label>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">{incluyeIva ? "Precio libre (c/IVA)" : "Precio libre"}</Label>
                 {can("producto.precio") ? (
                   <div className="flex gap-2 mt-1">
                     <Input type="number" value={libreVal} onChange={(e) => setLibreVal(e.target.value)} placeholder="0.00" data-testid="line-precio-libre-input" />
@@ -1417,7 +1483,7 @@ export default function POS({ windowId, windowLabel }) {
                 </div>
                 {settings.ticket_config?.encabezado && <div className="text-center text-[11px]">{settings.ticket_config.encabezado}</div>}
                 <div className="border-t border-dashed border-black my-1" />
-                <div>{ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FOLIO"}: {ticket.folio}</div>
+                <div>{ticket.tipo_venta === "cotizacion" ? "COTIZACIN" : "FOLIO"}: {ticket.folio}</div>
                 <div>Fecha: {ticket.fecha?.slice(0, 16).replace("T", " ")}</div>
                 <div>Cliente: {ticket.cliente_nombre}</div>
                 <div className="border-t border-dashed border-black my-1" />
@@ -1429,7 +1495,7 @@ export default function POS({ windowId, windowLabel }) {
                   return (
                     <div key={k}>
                       <div>{i.descripcion}</div>
-                      {i.comentario && <div className="text-[11px] text-slate-600">• {i.comentario}</div>}
+                      {i.comentario && <div className="text-[11px] text-slate-600">⬢ {i.comentario}</div>}
                       <div className="flex justify-between">
                         <span className="whitespace-pre">{String(i.cantidad).padEnd(2)}{i.unidad}</span>
                         <span>{money(i.cantidad * i.precio)}</span>
@@ -1446,7 +1512,7 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="flex justify-between font-bold text-[14px]"><span>Total a pagar</span><span>{money(ticket.total)}</span></div>
                 <div className="text-center font-bold text-[10px]">({numeroALetras(ticket.total)})</div>
                 {ticket.tipo_venta === "directa" && ticket.condicion === "contado" && (<><div className="flex justify-between mt-1"><span>Recibido</span><span>{money((ticket.pagos || []).reduce((s, p) => s + p.monto, 0))}</span></div><div className="flex justify-between"><span>Cambio</span><span>{money(ticket.cambio)}</span></div></>)}
-                {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CRÉDITO ** Saldo: {money(ticket.saldo)}</div>}
+                {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CR0DITO ** Saldo: {money(ticket.saldo)}</div>}
                 <div className="flex justify-between"><span>Articulos vendidos</span><span>{ticket.items.reduce((s, i) => s + Number(i.cantidad || 0), 0)}</span></div>
                 <div className="flex justify-between"><span>Atendido por</span><span>{ticket.vendedor_nombre}</span></div>
                 <div className="text-center font-bold mt-1">Verifique su compra y cambio</div>
@@ -1462,7 +1528,7 @@ export default function POS({ windowId, windowLabel }) {
               </div>
               )}
 
-              {/* Formato carta RYSA — GENERADOR ÚNICO: se muestra el PDF real
+              {/* Formato carta RYSA â€” GENERADOR aNICO: se muestra el PDF real
                   persistido; lo que se ve aquí es EXACTAMENTE el archivo que
                   se descarga, imprime y comparte por WhatsApp/correo. */}
               {printMode === "letter" && (
@@ -1549,7 +1615,7 @@ export default function POS({ windowId, windowLabel }) {
                 {/* Título */}
                 <div className="text-center mb-5">
                   <div style={{ fontSize: "18pt", fontWeight: 800, color: "#C1401E", letterSpacing: 2 }}>
-                    {ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FACTURA"}
+                    {ticket.tipo_venta === "cotizacion" ? "COTIZACIN" : "FACTURA"}
                   </div>
                   <div style={{ fontSize: "10pt", color: "#64748B" }}>Folio: {ticket.folio}</div>
                 </div>
@@ -1595,7 +1661,7 @@ export default function POS({ windowId, windowLabel }) {
                       return (
                         <tr key={k}>
                           <td style={{ fontSize: "8pt" }}>{i.codigo}</td>
-                          <td>{i.descripcion}{i.comentario ? <><br /><span style={{ fontSize: "7.5pt", color: "#C1401E" }}>• {i.comentario}</span></> : null}</td>
+                          <td>{i.descripcion}{i.comentario ? <><br /><span style={{ fontSize: "7.5pt", color: "#C1401E" }}>⬢ {i.comentario}</span></> : null}</td>
                           <td>{i.unidad}</td>
                           <td className="text-right">{i.cantidad}</td>
                           <td className="text-right">{money(uniPrecio)}</td>
@@ -1677,6 +1743,49 @@ export default function POS({ windowId, windowLabel }) {
               <Printer className="w-4 h-4 mr-1" /> Imprimir {ticket?.tipo_venta === "cotizacion" ? "cotización" : "factura"}
             </Button>
             <Button onClick={() => setTicket(null)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="ticket-nueva">Nueva venta</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* COTIZACION generada: PDF carta con Descargar/Enviar (sin ticket termico) */}
+      <Dialog open={!!cotizacion} onOpenChange={(o) => { if (!o) setCotizacion(null); }}>
+        <DialogContent className="max-w-md" data-testid="cotizacion-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <FileText className="w-5 h-5 text-[#C1401E]" /> Cotización {cotizacion?.folio}
+            </DialogTitle>
+          </DialogHeader>
+          {cotizacion && (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-[#F4ECE7] p-3 text-sm space-y-1">
+                <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Cliente</span><b className="truncate">{cotizacion.cliente_nombre || "Público General"}</b></div>
+                <div className="flex justify-between"><span className="text-slate-500">Emisión</span><b>{String(cotizacion.fecha || "").slice(0, 10)}</b></div>
+                <div className="flex justify-between"><span className="text-slate-500">Vence (auto: emisión + 2 días)</span><b>{String(cotizacion.fecha_vencimiento || "").slice(0, 10) || "—"}</b></div>
+                <div className="flex justify-between"><span className="text-slate-500">Partidas</span><b>{(cotizacion.items || []).length}</b></div>
+                <div className="flex justify-between border-t border-[#E5D5CC] pt-1">
+                  <span className="font-bold text-[#C1401E]">TOTAL (IVA incluido)</span>
+                  <span className="font-display font-black text-[#C1401E]">{money(cotizacion.total)}</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-snug">
+                Las cotizaciones no imprimen ticket térmico. Se genera un PDF tamaño carta:
+                hoja 1 la cotización y hoja 2 las cuentas bancarias para pago (si existen).
+              </p>
+              <Input value={waPhone} onChange={(e) => setWaPhone(e.target.value)}
+                     placeholder="Teléfono WhatsApp (10 dígitos)" data-testid="cot-wa-phone" />
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={cotDescargar} disabled={!!cotBusy} data-testid="cot-descargar">
+                  {cotBusy === "pdf" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Download className="w-4 h-4 mr-1" />} Descargar
+                </Button>
+                <Button onClick={cotEnviarWhatsApp} disabled={!!cotBusy}
+                        className="bg-[#25D366] hover:bg-[#1ebe57] text-white" data-testid="cot-enviar">
+                  {cotBusy === "wa" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <SendIcon className="w-4 h-4 mr-1" />} Enviar
+                </Button>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCotizacion(null)} data-testid="cot-nueva">Nueva venta</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1802,7 +1911,7 @@ export default function POS({ windowId, windowLabel }) {
               {tipoVenta === "cotizacion"
                 ? <><FileText className="w-7 h-7 mr-2" /> Guardar cotización</>
                 : <><HandCoins className="w-7 h-7 mr-2" /> COBRAR · {money(totals.total)}</>}
-              <kbd className="ml-4 hidden lg:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white/20 text-sm font-bold border border-white/40" title="Atajo de teclado: Ctrl + Enter">Ctrl <span>+</span> Enter ↵</kbd>
+              <kbd className="ml-4 hidden lg:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white/20 text-sm font-bold border border-white/40" title="Atajo de teclado: Ctrl + Enter">Ctrl <span>+</span> Enter â†µ</kbd>
             </Button>
           </div>
         </div>

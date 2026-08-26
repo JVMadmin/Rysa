@@ -148,7 +148,7 @@ def _num_a_letras(valor):
     unidades = ["", "UNO", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE",
                 "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISÉIS", "DIECISIETE",
                 "DIECIOCHO", "DIECINUEVE", "VEINTE"]
-    decenas = ["", "VEINTI", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"]
+    decenas = ["", "", "", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"]
     centenas = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS",
                 "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"]
     def tres(n):
@@ -885,7 +885,7 @@ def _metodo_abono_label(abono: dict) -> str:
     m = (abono or {}).get("metodo", "otros")
     nombres = {
         "efectivo": "Efectivo", "tarjeta": "Tarjeta", "transferencia": "Transferencia",
-        "spei": "SPEI", "deposito": "Dep�sito", "otros": "Otro",
+        "spei": "SPEI", "deposito": "Depósito", "otros": "Otro",
     }
     return nombres.get(m, str(m).capitalize())
 
@@ -968,7 +968,7 @@ def build_abono_pdf(abono: dict, settings: dict, cliente: dict = None) -> bytes:
     story.append(head)
     story.append(HRFlowable(width="100%", thickness=2, color=TERRA, spaceBefore=6, spaceAfter=10))
 
-    # --- T�tulo + folio/fecha/hora ---
+    # --- Título + folio/fecha/hora ---
     fec = str(abono.get("fecha") or "")
     fecha = fec[:10]
     hora = fec[11:16]
@@ -1015,7 +1015,7 @@ def build_abono_pdf(abono: dict, settings: dict, cliente: dict = None) -> bytes:
          Paragraph("<b>%s</b>" % _money(abono.get("monto")), es(font="Helvetica-Bold", fontSize=13, textColor=TERRA, alignment=TA_RIGHT))],
         [Paragraph("<b>SALDO RESTANTE:</b>", es(font="Helvetica-Bold", fontSize=11, textColor=INK, alignment=TA_LEFT)),
          Paragraph("<b>%s</b>" % _money(abono.get("saldo_restante")), es(font="Helvetica-Bold", fontSize=13, textColor=INK, alignment=TA_RIGHT))],
-        [Paragraph("M�todo:", sAmtL), Paragraph(_metodo_abono_label(abono), sAmt)],
+        [Paragraph("Método:", sAmtL), Paragraph(_metodo_abono_label(abono), sAmt)],
     ]
     if abono.get("referencia"):
         rows.append([Paragraph("Referencia:", sAmtL), Paragraph(str(abono["referencia"]), sAmt)])
@@ -1034,8 +1034,8 @@ def build_abono_pdf(abono: dict, settings: dict, cliente: dict = None) -> bytes:
 
     story.append(Spacer(1, 8))
     sPieFooter = es(font="Helvetica-Bold", fontSize=8.5, leading=12, textColor=colors.white, alignment=TA_CENTER)
-    footer_band = Table([[Paragraph("�GRACIAS POR SU PAGO!", sPie)], [
-        Paragraph((settings.get("empresa_nombre") or "Grupo RYSA") + " � RFC: " + (settings.get("rfc") or ""), sPieFooter)]],
+    footer_band = Table([[Paragraph("¡GRACIAS POR SU PAGO!", sPie)], [
+        Paragraph((settings.get("empresa_nombre") or "Grupo RYSA") + " · RFC: " + (settings.get("rfc") or ""), sPieFooter)]],
         colWidths=[None])
     footer_band.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), TERRA),
@@ -1222,6 +1222,289 @@ def build_compra_pdf(compra: dict, settings: dict, proveedor: dict = None) -> by
     doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=16 * mm, rightMargin=16 * mm,
                             topMargin=18 * mm, bottomMargin=16 * mm, title="Comprobante de Compra RYSA",
                             author="Grupo RYSA")
+    doc.build(story)
+    buf.seek(0)
+    return buf.read()
+
+
+def build_cotizacion_pdf(sale: dict, settings: dict, cliente: dict = None,
+                         cuentas: list = None) -> bytes:
+    """COTIZACIÓN oficial RYSA — PDF tamaño carta con DOS hojas:
+    Hoja 1: logotipo grande a la IZQUIERDA + datos de empresa a la derecha,
+            folio/fechas/condición, cliente completo, partidas con % descuento,
+            totales con IVA y total en letra, pie de firma del vendedor.
+    Hoja 2 (solo si existen): cuentas bancarias ACTIVAS para pago.
+    Identidad visual RYSA (terracota #C1401E). NO es ticket térmico."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                    TableStyle, Image, HRFlowable, PageBreak)
+
+    TERRA = colors.HexColor("#C1401E")
+    INK = colors.HexColor("#1F1F1F")
+    GRIS = colors.HexColor("#6B7280")
+    CLARO = colors.HexColor("#F4ECE7")
+    LINEA = colors.HexColor("#E5E0DA")
+
+    def es(font="Helvetica", **kw):
+        return ParagraphStyle("s", fontName=font, **kw)
+
+    sEmpN = es(font="Helvetica-Bold", fontSize=13, leading=16, textColor=TERRA, alignment=TA_RIGHT)
+    sEmpL = es(fontSize=8.5, leading=12, textColor=GRIS, alignment=TA_RIGHT)
+    sTitulo = es(font="Helvetica-Bold", fontSize=17, leading=20, textColor=TERRA)
+    sMetaR = es(fontSize=9.5, leading=14, textColor=INK, alignment=TA_RIGHT)
+    sCli = es(fontSize=9, leading=13, textColor=INK)
+    sCel = es(fontSize=8, leading=11, textColor=INK)
+    sCelR = es(fontSize=8, leading=11, textColor=INK, alignment=TA_RIGHT)
+    sCelC = es(fontSize=8, leading=11, textColor=INK, alignment=TA_CENTER)
+    sHead = es(font="Helvetica-Bold", fontSize=8.5, leading=11, textColor=colors.white)
+    sAmtL = es(fontSize=9.5, leading=14, textColor=INK)
+    sAmt = es(fontSize=9.5, leading=14, textColor=INK, alignment=TA_RIGHT)
+    sTotB = es(font="Helvetica-Bold", fontSize=13, leading=17, textColor=TERRA, alignment=TA_RIGHT)
+    sLetras = es(font="Helvetica-Oblique", fontSize=8.5, leading=12, textColor=GRIS)
+    sFoot = es(fontSize=7.5, leading=10, textColor=GRIS, alignment=TA_CENTER)
+    sFirma = es(fontSize=9.5, leading=13, textColor=INK, alignment=TA_CENTER)
+
+    story = []
+
+    # --- Encabezado: EMPRESA a la IZQUIERDA (logo grande encima) + folio/fechas derecha ---
+    logos = []
+    lp = logo_local(settings)
+    if lp:
+        try:
+            img = imagen_con_proporcion(lp, ancho_max_mm=52, alto_max_mm=30)
+            if img is not None:
+                logos.append(img)
+        except Exception:
+            logos = []
+    sEmpIzq = es(font="Helvetica-Bold", fontSize=13.5, leading=17, textColor=TERRA)
+    sEmpLin = es(fontSize=9, leading=12.5, textColor=INK)
+    emp_lines = [Paragraph("<b>%s</b>" % (settings.get("empresa_nombre") or "Grupo RYSA"), sEmpIzq)]
+    for lin in [
+        settings.get("direccion") or "",
+        ", ".join(filter(None, [settings.get("ciudad"), settings.get("estado")])),
+        settings.get("pais") or "México",
+        " ".join(filter(None, [settings.get("colonia"),
+                               ("C.P. %s" % settings["cp"]) if settings.get("cp") else ""])),
+        ("RFC: %s" % settings.get("rfc")) if settings.get("rfc") else "",
+        ("Tel: %s" % settings.get("telefono")) if settings.get("telefono") else "",
+    ]:
+        if lin.strip():
+            emp_lines.append(Paragraph(lin, sEmpLin))
+    empresa_block = (logos or []) + [Spacer(1, 4)] + emp_lines
+    cond_txt = "Crédito" if sale.get("condicion") == "credito" else "Contado"
+    venc = str(sale.get("fecha_vencimiento") or "")[:10]
+    meta_right = [
+        Paragraph("<b>FOLIO:</b> <font color='#C1401E'><b>%s</b></font>" % sale.get("folio", ""), sMetaR),
+        Paragraph("<b>Fecha de emisión:</b> %s" % str(sale.get("fecha") or "")[:10], sMetaR),
+        Paragraph("<b>Fecha de vencimiento:</b> %s" % (venc or "—"), sMetaR),
+        Paragraph("<b>Condición:</b> %s" % cond_txt, sMetaR),
+    ]
+    head = Table([[empresa_block, meta_right]], colWidths=[100 * mm, 86 * mm])
+    head.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(head)
+    story.append(HRFlowable(width="100%", thickness=2.2, color=TERRA, spaceBefore=6, spaceAfter=8))
+    story.append(Paragraph("COTIZACIÓN", sTitulo))
+    story.append(HRFlowable(width="100%", thickness=0.6, color=LINEA, spaceBefore=3, spaceAfter=8))
+
+    # --- Cliente: nombre + dirección fiscal completa ---
+    cli = cliente or {}
+    dir_linea = "<b>Calle:</b> %s" % (cli.get("direccion") or sale.get("cliente_direccion") or "—")
+    cli_cells = [
+        Paragraph("<b>Nombre / Razón social:</b> %s" % (
+            cli.get("nombre") or sale.get("cliente_nombre") or "Público General"), sCli),
+        Paragraph(dir_linea, sCli),
+    ]
+    fila2 = []
+    if cli.get("colonia"):
+        fila2.append("<b>Colonia:</b> %s" % cli["colonia"])
+    if cli.get("cp"):
+        fila2.append("<b>C.P.:</b> %s" % cli["cp"])
+    if fila2:
+        cli_cells.append(Paragraph("&nbsp;&nbsp;|&nbsp;&nbsp;".join(fila2), sCli))
+    fila3 = []
+    if cli.get("ciudad"):
+        fila3.append("<b>Localidad:</b> %s" % cli["ciudad"])
+    if cli.get("municipio"):
+        fila3.append("<b>Municipio:</b> %s" % cli["municipio"])
+    if cli.get("estado_geo"):
+        fila3.append("<b>Estado:</b> %s" % cli["estado_geo"])
+    if fila3:
+        cli_cells.append(Paragraph("&nbsp;&nbsp;|&nbsp;&nbsp;".join(fila3), sCli))
+    if cli.get("rfc"):
+        cli_cells.append(Paragraph("<b>RFC:</b> %s" % cli["rfc"], sCli))
+    tel = cli.get("telefono")
+    if tel:
+        cli_cells.append(Paragraph("<b>Teléfono:</b> %s" % tel, sCli))
+    t_cli = Table([[
+        Paragraph("CLIENTE", es(font="Helvetica-Bold", fontSize=9, leading=12, textColor=TERRA)),
+    ], [cli_cells]], colWidths=[None])
+    t_cli.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), CLARO),
+        ("BOX", (0, 0), (-1, -1), 0.6, LINEA),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(t_cli)
+    story.append(Spacer(1, 8))
+
+    # --- Partidas: Cant | Unidad | Código | Descripción | %Desc | P.Unit | Importe ---
+    head_row = [Paragraph("<b>%s</b>" % h, sHead) for h in
+                ["Cant.", "Unidad", "Código", "Descripción", "% Desc.", "P. Unitario", "Importe"]]
+    rows = [head_row]
+    for it in (sale.get("items") or []):
+        cant = float(it.get("cantidad") or 0)
+        precio = it.get("precio_bruto") if it.get("precio_bruto") is not None else \
+            it.get("precio", it.get("precio_neto"))
+        importe = it.get("importe_bruto")
+        if importe is None:
+            importe = cant * float(precio or 0) - float(it.get("descuento", 0) or 0)
+        base = cant * float(precio or 0)
+        pct_desc = ""
+        if base > 0 and float(it.get("descuento", 0) or 0) > 0:
+            pct_desc = "%.1f%%" % round(float(it["descuento"]) / base * 100, 1)
+        rows.append([
+            Paragraph(str(it.get("cantidad")), sCelR),
+            Paragraph(str(it.get("unidad") or ""), sCelC),
+            Paragraph(str(it.get("codigo") or ""), sCel),
+            Paragraph(str(it.get("descripcion") or ""), sCel),
+            Paragraph(pct_desc, sCelC),
+            Paragraph(_money(precio), sCelR),
+            Paragraph(_money(importe), sCelR),
+        ])
+    colW = [15 * mm, 15 * mm, 22 * mm, 63 * mm, 14 * mm, 24 * mm, 25 * mm]
+    t_items = Table(rows, colWidths=colW, repeatRows=1)
+    t_items.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), TERRA),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 1), (-1, -1), 0.4, LINEA),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    story.append(t_items)
+    story.append(Spacer(1, 6))
+
+    # --- Totales + total en letra ---
+    tasas = sorted({float(i.get("iva_tasa", 0) or 0) for i in (sale.get("items") or [])
+                    if float(i.get("iva_tasa", 0) or 0) > 0})
+    iva_label = ("IVA (%s):" % ("%".join(("%g" % t) for t in tasas))) if tasas else "IVA:"
+    tot_rows = []
+    if sale.get("subtotal") is not None:
+        tot_rows.append([Paragraph("Subtotal:", sAmtL), Paragraph(_money(sale.get("subtotal")), sAmt)])
+    if float(sale.get("descuento_total", 0) or 0) > 0:
+        tot_rows.append([Paragraph('<font color="#C1401E">Descuento:</font>', sAmtL),
+                         Paragraph('<font color="#C1401E">-%s</font>' % _money(sale.get("descuento_total")), sAmt)])
+    if float(sale.get("iva_total", 0) or 0) > 0:
+        tot_rows.append([Paragraph(iva_label, sAmtL), Paragraph(_money(sale.get("iva_total")), sAmt)])
+    tot_rows.append([Paragraph("TOTAL:", sTotB), Paragraph(_money(sale.get("total")), sTotB)])
+    t_tot = Table(tot_rows, colWidths=[112 * mm, 42 * mm])
+    t_tot.setStyle(TableStyle([
+        ("LINEABOVE", (0, len(tot_rows) - 1), (1, len(tot_rows) - 1), 1.4, TERRA),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    story.append(Table([[t_tot]], colWidths=[None], hAlign="RIGHT"))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph("Son: <b>(%s)</b>" % _num_a_letras(sale.get("total")), sLetras))
+
+    # --- Pie de firma ---
+    story.append(Spacer(1, 34))
+    vendedor = sale.get("vendedor_nombre") or sale.get("usuario_nombre") or ""
+    firma = Table([
+        [Paragraph("_" * 38, sFirma)],
+        [Paragraph("Atentamente", sFirma)],
+        [Paragraph("<b>%s</b>" % vendedor, sFirma)],
+    ], colWidths=[None])
+    firma.setStyle(TableStyle([
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+    ]))
+    story.append(firma)
+    story.append(Spacer(1, 14))
+    nota = "Esta cotización es válida hasta el %s. Precios sujetos a cambio sin previo aviso." % (venc or "la fecha de vigencia indicada")
+    story.append(HRFlowable(width="100%", thickness=0.6, color=LINEA, spaceBefore=6, spaceAfter=6))
+    story.append(Paragraph(nota, sFoot))
+    story.append(Paragraph("%s · RFC: %s · Tel: %s" % (
+        settings.get("empresa_nombre") or "Grupo RYSA", settings.get("rfc") or "-",
+        settings.get("telefono") or "-"), sFoot))
+
+    # --- HOJA 2: cuentas bancarias activas (se omite si no hay) ---
+    import bancos as _bancos
+    cuentas = cuentas or []
+    if cuentas:
+        story.append(PageBreak())
+        story.append(Table([[logos or [Paragraph("", sCel)],
+                             [Paragraph("<b>FORMAS DE PAGO</b>", sTitulo),
+                              Paragraph("Cuentas bancarias de %s" % (
+                                  settings.get("empresa_nombre") or "Grupo RYSA"), sLetras)]]],
+                           colWidths=[55 * mm, 131 * mm]))
+        story.append(HRFlowable(width="100%", thickness=2.2, color=TERRA, spaceBefore=6, spaceAfter=12))
+        for cta in cuentas:
+            # Logo real del banco si coincide con el catálogo; si no, monograma.
+            logo_path = _bancos.ruta_logo(cta.get("banco"))
+            logo_cell = None
+            if logo_path:
+                try:
+                    from reportlab.lib.utils import ImageReader
+                    iw, ih = ImageReader(logo_path).getSize()
+                    w = 30 * mm
+                    logo_cell = Image(logo_path, width=w, height=max(10 * mm, w * ih / max(iw, 1)))
+                except Exception:
+                    logo_cell = None
+            filas = [
+                Paragraph("<b><font color='#C1401E'>%s</font></b>%s" % (
+                    cta.get("banco") or "Banco",
+                    " · %s" % cta["alias"] if cta.get("alias") else ""), sCli),
+            ]
+            if cta.get("titular"):
+                filas.append(Paragraph("<b>Titular:</b> %s" % cta["titular"], sCli))
+            if cta.get("numero_cuenta"):
+                filas.append(Paragraph("<b>Cuenta:</b> %s" % cta["numero_cuenta"], sCli))
+            if cta.get("sucursal"):
+                filas.append(Paragraph("<b>Sucursal:</b> %s" % cta["sucursal"], sCli))
+            if cta.get("clabe"):
+                filas.append(Paragraph("<b>CLABE:</b> %s" % cta["clabe"], sCli))
+            extra = " · ".join(filter(None, [cta.get("tipo_cuenta"), cta.get("moneda")]))
+            if extra:
+                filas.append(Paragraph(extra, sLetras))
+            celda_izq = [logo_cell] if logo_cell else [
+                Paragraph("<b><font size='16' color='%s'>%s</font></b>" % (
+                    (_bancos.resolver_banco(cta.get("banco")) or {}).get("color", "#C1401E"),
+                    (cta.get("banco") or "B")[:2].upper()), sCel)]
+            box = Table([[celda_izq, filas]], colWidths=[34 * mm, None])
+            box.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.8, LINEA),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LINEBEFORE", (0, 0), (0, -1), 3, TERRA),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]))
+            story.append(box)
+            story.append(Spacer(1, 8))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph("Realizado su pago, envíe su comprobante a su asesor de ventas. Gracias por su preferencia.", sFoot))
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=15 * mm, rightMargin=15 * mm,
+                            topMargin=16 * mm, bottomMargin=14 * mm,
+                            title="Cotización %s" % sale.get("folio", ""),
+                            author=settings.get("empresa_nombre") or "Grupo RYSA")
     doc.build(story)
     buf.seek(0)
     return buf.read()

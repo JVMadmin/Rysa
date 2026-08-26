@@ -54,6 +54,25 @@ export default function Configuracion() {
   const [ctaForm, setCtaForm] = useState(ctaBlank());
   const [ctaEditId, setCtaEditId] = useState(null);
   const [ctaSaving, setCtaSaving] = useState(false);
+  // Catálogo de bancos con logo (fuente única: /api/catalogo-bancos).
+  const [catBancos, setCatBancos] = useState([]);
+  useEffect(() => { api.get("/catalogo-bancos").then((r) => setCatBancos(r.data || [])).catch(() => {}); }, []);
+  const normTxt = (t) => (t || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const bancoCat = (nombre) => {
+    const n = normTxt(nombre);
+    if (!n || !catBancos.length) return null;
+    for (const b of catBancos) {
+      const cands = [b.nombre, ...(b.aliases || [])].map(normTxt);
+      if (cands.includes(n)) return b;
+    }
+    for (const b of catBancos)
+      for (const c of [b.nombre, ...(b.aliases || [])]) {
+        const cn = normTxt(c);
+        if (cn.length >= 5 && n.includes(cn)) return b;
+      }
+    return null;
+  };
+  const logoBanco = (nombre) => bancoCat(nombre)?.logo_url || null;
   const loadCuentas = async () => { try { const { data } = await api.get("/cuentas-bancarias"); setCuentas(data); } catch { setCuentas([]); } };
   useEffect(() => { loadCuentas(); /* eslint-disable-next-line */ }, []);
   const guardarCuenta = async () => {
@@ -285,9 +304,11 @@ export default function Configuracion() {
             {I("Correo", "correo")}
             <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold mt-2"><MapPin className="w-4 h-4 text-[#C1401E]" /> Ubicación</div>
             <div className="col-span-2">{I("Dirección", "direccion")}</div>
+            {I("Colonia", "colonia")}
             {I("Ciudad", "ciudad")}
             {I("Estado", "estado")}
             {I("Código Postal", "cp")}
+            {I("País", "pais")}
           </div>
         </TabsContent>
 
@@ -635,7 +656,29 @@ export default function Configuracion() {
             <div className="border border-slate-200 rounded-lg p-4 space-y-3">
               <div className="text-xs uppercase tracking-wider text-slate-500">{ctaEditId ? "Editar cuenta" : "Nueva cuenta"}</div>
               <div className="grid grid-cols-2 gap-3">
-                <div><Label className="text-xs text-slate-500">Banco</Label><Input value={ctaForm.banco} onChange={(e) => setCtaForm((s) => ({ ...s, banco: e.target.value }))} className="mt-1" placeholder="BBVA" data-testid="cta-banco" /></div>
+                <div>
+                  <Label className="text-xs text-slate-500">Banco</Label>
+                  <Select value={ctaForm.banco} onValueChange={(v) => setCtaForm((s) => ({ ...s, banco: v }))}>
+                    <SelectTrigger className="mt-1" data-testid="cta-banco"><SelectValue placeholder="Selecciona un banco…" /></SelectTrigger>
+                    <SelectContent>
+                      {catBancos.map((b) => (
+                        <SelectItem key={b.nombre} value={b.nombre} data-testid={`cta-banco-opt-${normTxt(b.nombre).replace(/\s+/g, "-")}`}>
+                          <span className="flex items-center gap-2">
+                            {b.logo_url && <img src={b.logo_url} alt="" className="h-4 w-4 object-contain" />}
+                            {b.nombre}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {ctaForm.banco && logoBanco(ctaForm.banco) && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <img src={logoBanco(ctaForm.banco)} alt={ctaForm.banco}
+                           className="h-7 w-auto max-w-[80px] object-contain" data-testid="cta-banco-preview" />
+                      <span className="text-[11px] text-slate-400">Logo asignado automáticamente</span>
+                    </div>
+                  )}
+                </div>
                 <div><Label className="text-xs text-slate-500">Alias</Label><Input value={ctaForm.alias} onChange={(e) => setCtaForm((s) => ({ ...s, alias: e.target.value }))} className="mt-1" placeholder="Cuenta principal" data-testid="cta-alias" /></div>
                 <div><Label className="text-xs text-slate-500">Número de cuenta</Label><Input value={ctaForm.numero_cuenta} onChange={(e) => setCtaForm((s) => ({ ...s, numero_cuenta: e.target.value }))} className="mt-1 font-mono" data-testid="cta-numero" /></div>
                 <div><Label className="text-xs text-slate-500">CLABE</Label><Input value={ctaForm.clabe} onChange={(e) => setCtaForm((s) => ({ ...s, clabe: e.target.value }))} className="mt-1 font-mono" /></div>
@@ -665,10 +708,22 @@ export default function Configuracion() {
               {cuentas.length === 0 && <p className="text-sm text-slate-400">Aún no tienes cuentas bancarias.</p>}
               {cuentas.map((c) => (
                 <div key={c.id} className="border border-slate-200 rounded-lg p-3 flex items-center gap-3" data-testid={`cta-row-${c.id}`}>
-                  <div className="h-10 w-10 rounded-lg bg-[#C1401E]/10 text-[#C1401E] flex items-center justify-center shrink-0"><Landmark className="w-5 h-5" /></div>
+                  {logoBanco(c.banco) ? (
+                    <img src={logoBanco(c.banco)} alt={c.banco}
+                         className="h-10 w-10 object-contain rounded-lg border border-slate-200 bg-white p-1 shrink-0"
+                         data-testid={`cta-logo-${c.id}`} />
+                  ) : (
+                    <div className="h-10 w-10 rounded-lg bg-[#C1401E]/10 text-[#C1401E] flex flex-col items-center justify-center shrink-0">
+                      <Landmark className="w-5 h-5" />
+                      {c.banco && <span className="text-[8px] leading-none mt-0.5">revisar</span>}
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="font-semibold">{c.banco}</span>
+                      {!bancoCat(c.banco) && c.banco && (
+                        <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-700">Fuera de catálogo — editar para elegir banco</Badge>
+                      )}
                       {c.predeterminada && <Star className="w-3.5 h-3.5 text-amber-500" data-testid={`cta-pred-${c.id}`} />}
                       <Badge className={c.activa ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}>{c.activa ? "Activa" : "Inactiva"}</Badge>
                     </div>

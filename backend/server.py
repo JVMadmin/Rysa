@@ -853,9 +853,11 @@ class SettingsInput(BaseModel):
     telefono: Optional[str] = ""
     correo: Optional[str] = ""
     direccion: Optional[str] = ""
+    colonia: Optional[str] = ""
     ciudad: Optional[str] = ""
     estado: Optional[str] = ""
     cp: Optional[str] = ""
+    pais: Optional[str] = "México"
     iva_tasa: float = 8.0
     moneda: str = "MXN"
     precios_incluyen_iva: bool = True
@@ -2590,7 +2592,11 @@ async def _crear_venta(user: dict, data: SaleInput):
     if es_cotizacion:
         folio = await next_counter("cotizacion", "COT", 6)
         estado = "cotizacion"
+        # Regla de vencimiento de cotizaciones: SIEMPRE emisión + 2 días
+        # (calculado en el servidor; no editable desde el POS).
+        fecha_vencimiento = (now_utc() + timedelta(days=2)).strftime("%Y-%m-%d")
     else:
+        fecha_vencimiento = ""
         if data.condicion == "contado":
             if round(pagado, 2) + 0.01 < round(total, 2):
                 raise HTTPException(400, f"El pago ({round(pagado,2)}) es menor al total ({round(total,2)})")
@@ -2616,6 +2622,7 @@ async def _crear_venta(user: dict, data: SaleInput):
         "factura": False, "caja_id": caja["id"] if (caja and not es_cotizacion) else None,
         "sucursal_id": (caja or {}).get("sucursal_id") or user.get("sucursal_id"),
         "lista_precios": data.lista_precios,
+        "fecha_vencimiento": fecha_vencimiento,
     }
     if override_inv:
         sale["inventario_override"] = override_inv
@@ -3377,6 +3384,28 @@ async def cuentas_bancarias_list(user: dict = Depends(get_current_user)):
     docs = await db.cuentas_bancarias.find({}, {"_id": 0}).to_list(5000)
     docs.sort(key=lambda d: (0 if d.get("predeterminada") else 1, (d.get("banco") or "").lower()))
     return docs
+
+
+# --- Catálogo de bancos + logos (selector UI y PDF de cotizaciones) ----------
+@api.get("/catalogo-bancos")
+async def catalogo_bancos(user: dict = Depends(get_current_user)):
+    """Catálogo fijo de bancos con logo_url; única fuente para el selector."""
+    import bancos as _bancos
+    return [{"nombre": b["nombre"], "aliases": b.get("aliases", []),
+             "color": b.get("color", "#C1401E"),
+             "logo_url": "/api/bancos-logo/%s" % b["logo"]} for b in _bancos.BANCOS]
+
+
+@api.get("/bancos-logo/{archivo}")
+def bancos_logo_get(archivo: str):
+    """Asset estático del logo del banco (público: solo imágenes, sin datos).
+    Público a propósito: las etiquetas <img> del frontend no envían Authorization."""
+    import bancos as _bancos
+    from fastapi.responses import FileResponse
+    try:
+        return _bancos.servir_logo(archivo)
+    except FileNotFoundError:
+        raise HTTPException(404, "Logo no encontrado")
 
 @api.post("/cuentas-bancarias")
 async def cuenta_bancaria_create(data: CuentaBancariaInput,
@@ -5922,6 +5951,27 @@ async def sale_letter_pdf(sale_id: str, regenerar: bool = False,
     r = res.get("carta") or {}
     if not r.get("url"):
         raise HTTPException(502, "No se pudo generar el comprobante en formato carta.")
+    return {"path": r["path"], "url": r["url"]}
+
+
+@api.post("/sales/{sale_id}/cotizacion-pdf")
+async def sale_cotizacion_pdf(sale_id: str, regenerar: bool = False,
+                              user: dict = Depends(get_current_user)):
+    """COTIZACIÓN en PDF tamaño carta (2 hojas: cotización + cuentas bancarias).
+    Es el documento oficial de este tipo; NO usa ticket térmico. Mismo
+    generador central: un solo archivo por cotización."""
+    import documentos as _docs
+    try:
+        res = await _docs.asegurar_documentos(sale_id, formatos=("cotizacion",),
+                                              regenerar=regenerar)
+    except ValueError:
+        raise HTTPException(404, "Venta no encontrada")
+    except Exception as e:
+        logger.error("PDF de cotización falló: %s", str(e)[:200])
+        raise HTTPException(502, "No se pudo generar el PDF de la cotización.")
+    r = res.get("cotizacion") or {}
+    if not r.get("url"):
+        raise HTTPException(502, "No se pudo generar el PDF de la cotización.")
     return {"path": r["path"], "url": r["url"]}
 
 

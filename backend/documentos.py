@@ -45,6 +45,7 @@ async def _cliente_doc(sale: dict) -> dict | None:
         "correo": c.get("correo") or c.get("correos"),
         "direccion": c.get("direccion"), "colonia": c.get("colonia"),
         "ciudad": c.get("ciudad"), "estado_geo": c.get("estado_geo"), "cp": c.get("cp"),
+        "municipio": c.get("municipio") or c.get("municipio_geo") or "",
     }
 
 
@@ -73,6 +74,7 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
 
     out = {}
     cliente = None
+    cuentas = None
     for fmt in formatos:
         campo = f"doc_{fmt}_pdf"
         url_previa = sale.get(campo)
@@ -82,8 +84,14 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
                         "regenerado": False}
             continue
 
-        if cliente is None and fmt == "carta":
+        if cliente is None and fmt in ("carta", "cotizacion"):
             cliente = await _cliente_doc(sale)
+        if cuentas is None and fmt == "cotizacion":
+            # Hoja 2: cuentas bancarias ACTIVAS (predeterminada primero).
+            cuentas = await db.cuentas_bancarias.find(
+                {"activa": {"$ne": False}}, {"_id": 0}).to_list(100)
+            cuentas.sort(key=lambda d: (0 if d.get("predeterminada") else 1,
+                                        (d.get("banco") or "").lower()))
 
         if fmt == "ticket":
             pdf_bytes = storage.build_ticket_pdf(sale, settings)
@@ -91,6 +99,9 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
         elif fmt == "carta":
             pdf_bytes = storage.build_letter_pdf(sale, settings, cliente)
             filename = f"carta-{sale.get('folio')}.pdf"
+        elif fmt == "cotizacion":
+            pdf_bytes = storage.build_cotizacion_pdf(sale, settings, cliente, cuentas)
+            filename = f"cotizacion-{sale.get('folio')}.pdf"
         else:
             continue
 
