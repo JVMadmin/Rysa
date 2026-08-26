@@ -31,6 +31,8 @@ KNOWN_COLLECTIONS = [
     "compras_ordenes", "compras_recepciones", "presupuestos",
     "centros_costo", "recurrentes",
     "pedidos",
+    # Comprobantes de pago por QR (cotizaciones)
+    "cot_pago_tokens", "payment_evidence",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.

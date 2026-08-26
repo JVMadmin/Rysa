@@ -14,13 +14,19 @@ Garantías:
 """
 import hashlib
 import uuid
+from datetime import timedelta
 
 import storage
-from deps import db, iso_now
+from deps import db, iso_now, now_utc
 
 
 def _uid() -> str:
     return uuid.uuid4().hex
+
+
+async def _link_activo_de(cotizacion_id: str) -> dict | None:
+    return await db.cot_pago_tokens.find_one(
+        {"cotizacion_id": cotizacion_id, "estado": "activo"}, {"_id": 0})
 
 
 def _folio_clean(sale: dict) -> str:
@@ -64,9 +70,11 @@ async def _registrar_archivo(storage_path: str, filename: str,
 
 
 async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
-                              regenerar: bool = False) -> dict:
+                              regenerar: bool = False,
+                              base_url: str = "") -> dict:
     """Devuelve {formato: {"url","path","regenerado"}} garantizando que exista
-    UN archivo por venta+formato. Si ya está generado lo reutiliza tal cual."""
+    UN archivo por venta+formato. Si ya está generado lo reutiliza tal cual.
+    base_url: raíz pública del sitio para el QR de comprobante de pago."""
     sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
     if not sale:
         raise ValueError("Venta no encontrada")
@@ -100,7 +108,33 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
             pdf_bytes = storage.build_letter_pdf(sale, settings, cliente)
             filename = f"carta-{sale.get('folio')}.pdf"
         elif fmt == "cotizacion":
-            pdf_bytes = storage.build_cotizacion_pdf(sale, settings, cliente, cuentas)
+            # QR de comprobante de pago (§17-18): enlace/token PERSISTENTE por
+            # cotización; regenerar el PDF NO rota el token (solo el endpoint
+            # explícito de regeneración lo revoca).
+            pago_url = ""
+            try:
+                import pago_qr as _pq
+                cfg = settings.get("qr_comprobante") or {}
+                if cfg.get("activo", True):
+                    link = await _link_activo_de(sale["id"])
+                    if not link:
+                        from datetime import timedelta
+                        token = _pq.nuevo_token()
+                        vdias = max(1, int(cfg.get("vigencia_dias", 30) or 30))
+                        link = {
+                            "id": _uid(), "cotizacion_id": sale["id"],
+                            "folio": sale.get("folio"), "token": token,
+                            "token_hash": _pq.hash_token(token),
+                            "estado": "activo", "creado_por": "sistema (PDF)",
+                            "created_at": iso_now(),
+                            "expires_at": (now_utc() + timedelta(days=vdias)).isoformat(),
+                        }
+                        await db.cot_pago_tokens.insert_one(dict(link))
+                    pago_url = _pq.armar_url(base_url, link["token"])
+            except Exception:
+                pago_url = ""
+            pdf_bytes = storage.build_cotizacion_pdf(sale, settings, cliente, cuentas,
+                                                     pago_url=pago_url)
             filename = f"cotizacion-{sale.get('folio')}.pdf"
         else:
             continue

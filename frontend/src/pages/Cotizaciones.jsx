@@ -8,7 +8,120 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Receipt, Eye, RefreshCw, Search, ArrowRightCircle, FileText } from "lucide-react";
+import { Loader2, Receipt, Eye, RefreshCw, Search, ArrowRightCircle, FileText, Link2, Copy, QrCode, CheckCircle2, XCircle } from "lucide-react";
+
+const ESTADOS_EV = {
+  pendiente: ["bg-amber-100 text-amber-700", "PENDIENTE"],
+  aprobando: ["bg-blue-100 text-blue-700", "EN REVISIÓN"],
+  aprobado: ["bg-green-100 text-green-700", "APROBADO"],
+  rechazado: ["bg-red-100 text-red-700", "RECHAZADO"],
+};
+
+/* ============ Sección: Comprobantes de pago por QR (§12/§13/§19) ========== */
+function ComprobantesPago({ cot }) {
+  const puede = can("cxc.abono");
+  const [info, setInfo] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [verBlob, setVerBlob] = useState("");
+
+  const cargar = async () => {
+    try { setInfo((await api.get(`/sales/${cot.id}/comprobantes`)).data); }
+    catch { setInfo({ link: {}, evidencias: [] }); }
+  };
+  useEffect(() => { if (puede) cargar(); /* eslint-disable-next-line */ }, [cot?.id]);
+
+  if (!puede) return null;
+
+  const copiar = async () => {
+    if (!info?.link?.url) return toast.error("Genera el enlace primero (abre el PDF de la cotización).");
+    try { await navigator.clipboard.writeText(info.link.url); toast.success("Enlace copiado"); }
+    catch { toast.error("No se pudo copiar"); }
+  };
+  const regenerar = async () => {
+    if (!window.confirm("¿Regenerar el enlace? El QR anterior dejará de funcionar de inmediato.")) return;
+    setBusy("reg");
+    try {
+      await api.post(`/sales/${cot.id}/pago-link?regenerar=true`);
+      toast.success("Enlace regenerado; el anterior fue revocado");
+      cargar();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(""); }
+  };
+  const accion = async (id, act) => {
+    let comentario = "";
+    if (act === "rechazar") {
+      comentario = window.prompt("Comentario del rechazo (opcional):") ?? "";
+      if (comentario === null) return;
+    }
+    setBusy(id + act);
+    try {
+      const { data } = await api.post(`/comprobantes-pago/${id}/${act}`, { comentario });
+      toast.success(act === "aprobar"
+        ? `Aprobado${data.abono_folio ? ` · abono ${data.abono_folio} registrado en CxC` : " (sin venta convertida aún)"}`
+        : "Comprobante rechazado");
+      cargar();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setBusy(""); }
+  };
+  const verArchivo = async (e) => {
+    setBusy(e.id + "ver");
+    try {
+      const r = await api.get(`/comprobantes-pago/${e.id}/archivo`, { responseType: "blob" });
+      const url = URL.createObjectURL(r.data);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch { toast.error("No se pudo abrir el archivo"); }
+    finally { setBusy(""); }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-3 space-y-3" data-testid="cot-comprobantes">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold flex items-center gap-1.5"><QrCode className="w-4 h-4 text-[#C1401E]" /> Comprobantes de pago</span>
+        <div className="flex gap-1.5">
+          <Button size="sm" variant="outline" onClick={copiar} data-testid="cot-link-copiar"><Copy className="w-3.5 h-3.5 mr-1" /> Copiar enlace</Button>
+          <Button size="sm" variant="outline" onClick={regenerar} disabled={!!busy} data-testid="cot-link-regenerar">
+            {busy === "reg" ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Link2 className="w-3.5 h-3.5 mr-1" />} Regenerar
+          </Button>
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-400 -mt-2">
+        El QR dentro del PDF apunta aquí. Regenerar revoca el enlace anterior.
+        {info?.link?.expires_at && <> Vigente hasta <b>{String(info.link.expires_at).slice(0, 10)}</b>.</>}
+      </p>
+
+      {(info?.evidencias || []).length === 0 && (
+        <p className="text-xs text-slate-400">Sin comprobantes recibidos todavía.</p>
+      )}
+      <div className="space-y-2">
+        {(info?.evidencias || []).map((e, i) => {
+          const [cls, label] = ESTADOS_EV[e.estado] || ["bg-slate-100 text-slate-600", e.estado];
+          return (
+            <div key={e.id} className="border border-slate-100 rounded-md p-2.5 text-xs space-y-1.5" data-testid={`cot-ev-${i}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold">Comprobante #{(info.evidencias.length - i)}</span>
+                <Badge className={cls}>{label}</Badge>
+              </div>
+              <div className="text-slate-500">{(e.created_at || "").slice(0, 16).replace("T", " ")} · {e.metodo}{e.referencia ? ` · Ref: ${e.referencia}` : ""}</div>
+              <div className="text-[10px] text-slate-400 truncate">{e.original_filename} · {Math.round((e.file_size || 0) / 1024)} KB{e.reviewed_by ? ` · revisó ${e.reviewed_by}` : ""}</div>
+              {e.review_comentario && <div className="text-[11px] text-slate-500 italic">"{e.review_comentario}"</div>}
+              {e.abono_folio && <div className="text-[11px] text-emerald-700 font-medium">Abono aplicado a CxC: {e.abono_folio}</div>}
+              <div className="flex gap-1.5 pt-0.5">
+                <Button size="sm" variant="outline" onClick={() => verArchivo(e)} disabled={!!busy}><Eye className="w-3.5 h-3.5 mr-1" /> Ver</Button>
+                {e.estado === "pendiente" && <>
+                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => accion(e.id, "aprobar")} disabled={!!busy}
+                          data-testid={`ev-aprobar-${i}`}><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Aprobar</Button>
+                  <Button size="sm" variant="destructive" onClick={() => accion(e.id, "rechazar")} disabled={!!busy}
+                          data-testid={`ev-rechazar-${i}`}><XCircle className="w-3.5 h-3.5 mr-1" /> Rechazar</Button>
+                </>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 const ESTADOS = {
   cotizacion: ["bg-blue-100 text-blue-700", "Vigente"],
@@ -172,6 +285,7 @@ export default function Cotizaciones() {
                 <div className="flex justify-between"><span className="text-slate-500">IVA</span><span>{money(det.iva_total)}</span></div>
                 <div className="flex justify-between font-bold border-t pt-1"><span>TOTAL</span><span>{money(det.total)}</span></div>
               </div></div>
+              {det.tipo_venta === "cotizacion" && <ComprobantesPago cot={det} />}
               <DialogFooter><Button variant="outline" onClick={() => setDet(null)}>Cerrar</Button></DialogFooter>
             </div>
           )}

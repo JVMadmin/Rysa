@@ -1228,11 +1228,12 @@ def build_compra_pdf(compra: dict, settings: dict, proveedor: dict = None) -> by
 
 
 def build_cotizacion_pdf(sale: dict, settings: dict, cliente: dict = None,
-                         cuentas: list = None) -> bytes:
+                         cuentas: list = None, pago_url: str = "") -> bytes:
     """COTIZACIÓN oficial RYSA — PDF tamaño carta con DOS hojas:
-    Hoja 1: logotipo grande a la IZQUIERDA + datos de empresa a la derecha,
-            folio/fechas/condición, cliente completo, partidas con % descuento,
-            totales con IVA y total en letra, pie de firma del vendedor.
+    Hoja 1: logotipo grande a la IZQUIERDA + datos de empresa debajo a la
+            izquierda, folio/fechas/condición a la derecha, cliente completo,
+            partidas con % descuento, totales con IVA y total en letra, pie de
+            firma del vendedor y QR para enviar comprobante de pago.
     Hoja 2 (solo si existen): cuentas bancarias ACTIVAS para pago.
     Identidad visual RYSA (terracota #C1401E). NO es ticket térmico."""
     from reportlab.lib import colors
@@ -1441,6 +1442,34 @@ def build_cotizacion_pdf(sale: dict, settings: dict, cliente: dict = None,
     story.append(Paragraph("%s · RFC: %s · Tel: %s" % (
         settings.get("empresa_nombre") or "Grupo RYSA", settings.get("rfc") or "-",
         settings.get("telefono") or "-"), sFoot))
+
+    # --- QR "¿Ya realizaste tu pago?" (§17): margen blanco, sin deformar ---
+    if pago_url:
+        try:
+            import qrcode as _qrcode
+            qr_img = _qrcode.make(pago_url, box_size=10, border=3)
+            bq = io.BytesIO()
+            qr_img.save(bq, format="PNG")
+            bq.seek(0)
+            qr_cell = Image(bq, width=27 * mm, height=27 * mm)  # cuadrado: no se deforma
+            caption = [
+                Paragraph("<b>¿Ya realizaste tu pago?</b>", es(font="Helvetica-Bold", fontSize=10, leading=13, textColor=INK)),
+                Paragraph("Escanea este código para enviar tu comprobante.", es(fontSize=8.5, leading=12, textColor=GRIS)),
+            ]
+            t_qr = Table([[qr_cell, caption]], colWidths=[36 * mm, None])
+            t_qr.setStyle(TableStyle([
+                ("BOX", (0, 0), (-1, -1), 0.9, LINEA),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.white),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            story.append(Spacer(1, 10))
+            story.append(t_qr)
+        except Exception:
+            pass
 
     # --- HOJA 2: cuentas bancarias activas (se omite si no hay) ---
     import bancos as _bancos

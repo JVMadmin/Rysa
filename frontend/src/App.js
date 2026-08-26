@@ -16,6 +16,7 @@ import CuentasPorCobrar from "@/pages/CuentasPorCobrar";
 import Facturacion from "@/pages/Facturacion";
 import Reportes from "@/pages/Reportes";
 import TicketVerificar from "@/pages/TicketVerificar";
+import PagoComprobante from "@/pages/PagoComprobante";
 import Caja from "@/pages/Caja";
 import POS from "@/pages/POS";
 import MultiPos from "@/pages/MultiPos";
@@ -70,6 +71,7 @@ function App() {
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/verificar/:saleId" element={<TicketVerificar />} />
+          <Route path="/pago/comprobante/:token" element={<PagoComprobante />} />
           <Route element={<ProtectedRoute><ErpLayout /></ProtectedRoute>}>
             <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
             <Route path="/app/dashboard" element={<Dashboard />} />

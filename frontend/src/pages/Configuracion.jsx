@@ -309,6 +309,29 @@ export default function Configuracion() {
             {I("Estado", "estado")}
             {I("Código Postal", "cp")}
             {I("País", "pais")}
+            {I("WhatsApp de la empresa (10 dígitos)", "whatsapp_empresa")}
+            <div className="col-span-2 grid grid-cols-3 gap-3 items-end rounded-lg bg-slate-50 border border-slate-200 p-3">
+              <div>
+                <Label className="text-xs text-slate-500">Vigencia enlace QR (días)</Label>
+                <Input type="number" min="1" className="mt-1 h-9"
+                       value={s.qr_comprobante?.vigencia_dias ?? 30}
+                       onChange={(e) => setS((x) => ({ ...x, qr_comprobante: { ...(x.qr_comprobante || {}), activo: x.qr_comprobante?.activo ?? true, max_mb: x.qr_comprobante?.max_mb ?? 10, max_archivos: x.qr_comprobante?.max_archivos ?? 6, vigencia_dias: Number(e.target.value) || 30 } }))} />
+              </div>
+              <div>
+                <Label className="text-xs text-slate-500">Máx. comprobante (MB)</Label>
+                <Input type="number" min="1" max="25" className="mt-1 h-9"
+                       value={s.qr_comprobante?.max_mb ?? 10}
+                       onChange={(e) => setS((x) => ({ ...x, qr_comprobante: { ...(x.qr_comprobante || {}), activo: x.qr_comprobante?.activo ?? true, vigencia_dias: x.qr_comprobante?.vigencia_dias ?? 30, max_archivos: x.qr_comprobante?.max_archivos ?? 6, max_mb: Number(e.target.value) || 10 } }))} />
+              </div>
+              <div>
+                <Label className="text-xs text-slate-500">QR de comprobantes</Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <Switch checked={s.qr_comprobante?.activo ?? true}
+                          onCheckedChange={(v) => setS((x) => ({ ...x, qr_comprobante: { ...(x.qr_comprobante || {}), vigencia_dias: x.qr_comprobante?.vigencia_dias ?? 30, max_mb: x.qr_comprobante?.max_mb ?? 10, max_archivos: x.qr_comprobante?.max_archivos ?? 6, activo: v } }))} />
+                  <span className="text-sm text-slate-500">{(s.qr_comprobante?.activo ?? true) ? "Activo" : "Desactivado"}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </TabsContent>
 

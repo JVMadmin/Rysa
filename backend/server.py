@@ -23,7 +23,7 @@ import logging
 import mimetypes
 import jwt
 from typing import List, Optional
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -870,6 +870,11 @@ class SettingsInput(BaseModel):
     storage: dict = Field(default_factory=dict)
     # Impresoras configuradas (lista) + predeterminadas por tipo de documento.
     printers: dict = Field(default_factory=dict)
+    # Número de WhatsApp de la EMPRESA para recibir comprobantes (wa.me).
+    whatsapp_empresa: Optional[str] = ""
+    # QR de comprobante de pago en cotizaciones (§20): configurable, con defaults.
+    qr_comprobante: dict = Field(default_factory=lambda: {
+        "activo": True, "vigencia_dias": 30, "max_mb": 10, "max_archivos": 6})
 
 # =========================================================================
 # INVENTARIO (KARDEX) - helper
@@ -2715,6 +2720,298 @@ async def cotizacion_convertir(cot_id: str, data: CotizacionConvertInput,
     await log_audit(user, "cotizacion_convertir", "venta", cot_id,
                     f"{cot.get('folio')} -> venta {sale['folio']}")
     return sale
+
+
+# =========================================================================
+# COMPROBANTES DE PAGO POR QR (cotizaciones) — §1-31
+# Enlace público por token seguro + recepción de evidencia + revisión.
+# ENVIAR COMPROBANTE ≠ PAGO VALIDADO: la aprobación es manual (§8).
+# =========================================================================
+class RevisionInput(BaseModel):
+    comentario: str = ""
+
+
+def _qr_cfg(settings: dict) -> dict:
+    c = settings.get("qr_comprobante") or {}
+    return {
+        "activo": bool(c.get("activo", True)),
+        "vigencia_dias": max(1, int(c.get("vigencia_dias", 30) or 30)),
+        "max_mb": max(1, int(c.get("max_mb", 10) or 10)),
+        "max_archivos": max(1, int(c.get("max_archivos", 6) or 6)),
+    }
+
+
+async def _link_activo(cotizacion_id: str):
+    return await db.cot_pago_tokens.find_one(
+        {"cotizacion_id": cotizacion_id, "estado": "activo"}, {"_id": 0})
+
+
+@api.post("/sales/{sale_id}/pago-link")
+async def crear_pago_link(sale_id: str, regenerar: bool = False,
+                          request: Request = None,
+                          user: dict = Depends(require_permission("cxc.abono"))):
+    """Crea/reutiliza el enlace público de comprobante de la cotización.
+    regenerar=true revoca el enlace anterior (los QR viejos mueren, §19)."""
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
+    if not sale or sale.get("tipo_venta") != "cotizacion":
+        raise HTTPException(404, "Cotización no encontrada")
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    cfg = _qr_cfg(settings)
+    if not cfg["activo"]:
+        raise HTTPException(400, "El QR de comprobantes está desactivado en Configuración")
+    import pago_qr as pq
+    if regenerar:
+        rev = await db.cot_pago_tokens.update_many(
+            {"cotizacion_id": sale_id, "estado": "activo"},
+            {"$set": {"estado": "revocado", "revocado_en": iso_now(),
+                      "revocado_por": user["name"]}})
+        if getattr(rev, "modified_count", 0):
+            await log_audit(user, "pago_link_revocado", "cotizacion", sale_id,
+                            f"{rev.modified_count} enlace(s) revocado(s)")
+    link = await _link_activo(sale_id)
+    creado = False
+    if not link:
+        token = pq.nuevo_token()
+        from datetime import timedelta
+        link = {
+            "id": uid(), "cotizacion_id": sale_id, "folio": sale.get("folio"),
+            "token": token, "token_hash": pq.hash_token(token),
+            "estado": "activo", "creado_por": user["name"],
+            "created_at": iso_now(),
+            "expires_at": (now_utc() + timedelta(days=cfg["vigencia_dias"])).isoformat(),
+        }
+        await db.cot_pago_tokens.insert_one(dict(link))
+        creado = True
+        await log_audit(user, "pago_link_creado", "cotizacion", sale_id,
+                        f"vigencia {cfg['vigencia_dias']} días")
+    base = os.environ.get("PUBLIC_BASE_URL", "") or (str(request.base_url).rstrip("/") if request else "")
+    url = f"{base.rstrip('/')}/pago/comprobante/{link['token']}" if base else ""
+    return {"ok": True, "url": url, "expires_at": link.get("expires_at"),
+            "nuevo": creado}
+
+
+async def _validar_token_publico(token: str) -> dict:
+    """Hash-lookup + vigencia. Misma respuesta para inválido/expirado/revocado."""
+    import pago_qr as _pq
+    tok = await db.cot_pago_tokens.find_one(
+        {"token_hash": _pq.hash_token(token)}, {"_id": 0})
+    if not tok or tok.get("estado") != "activo":
+        raise HTTPException(410, "Enlace no disponible")
+    exp = str(tok.get("expires_at") or "")
+    if exp and exp < now_utc().isoformat():
+        raise HTTPException(410, "Enlace no disponible")
+    return tok
+
+
+@api.get("/public/pago-comprobante/{token}")
+async def public_pago_info(request: Request, token: str):
+    """Página pública: SOLO datos estrictamente necesarios (§5/§15)."""
+    import pago_qr as _pq
+    ip = request.client.host if request.client else "?"
+    if not _pq.permitir(f"info:{ip}:{token[:6]}", 60, 3600):
+        raise HTTPException(429, "Demasiadas consultas; intenta más tarde")
+    try:
+        tok = await _validar_token_publico(token)
+    except HTTPException:
+        raise HTTPException(410, "Enlace no disponible")
+    sale = await db.sales.find_one({"id": tok["cotizacion_id"]},
+                                   {"_id": 0, "folio": 1, "cliente_nombre": 1,
+                                    "total": 1, "fecha_vencimiento": 1, "estado": 1})
+    if not sale:
+        raise HTTPException(410, "Enlace no disponible")
+    settings = await db.settings.find_one({"_id": "app"},
+                                          {"_id": 0, "empresa_nombre": 1,
+                                           "moneda": 1, "whatsapp_empresa": 1}) or {}
+    return {
+        "folio": sale.get("folio"), "cliente": sale.get("cliente_nombre") or "",
+        "importe": float(sale.get("total") or 0),
+        "moneda": settings.get("moneda", "MXN"),
+        "vence": str(sale.get("fecha_vencimiento") or "")[:10],
+        "empresa": settings.get("empresa_nombre", "Grupo RYSA"),
+        "whatsapp_empresa": settings.get("whatsapp_empresa", ""),
+        "metodos": ["transferencia", "deposito", "tarjeta", "otros"],
+    }
+
+
+@api.post("/public/pago-comprobante/{token}")
+async def public_pago_upload(request: Request, token: str,
+                             comprobante: UploadFile = File(...),
+                             metodo: str = Form("transferencia"),
+                             referencia: str = Form(""),
+                             comentarios: str = Form("")):
+    """Recepción PÚBLICA del comprobante. Queda PENDIENTE de revisión;
+    NUNCA registra pago ni toca CxC por sí solo (§8)."""
+    import pago_qr as _pq
+    ip = request.client.host if request.client else "?"
+    if not _pq.permitir(f"up:{ip}:{token[:6]}", 5, 3600):
+        raise HTTPException(429, "Límite de envíos alcanzado; intenta más tarde")
+    try:
+        tok = await _validar_token_publico(token)
+    except HTTPException:
+        raise HTTPException(410, "Enlace no disponible")
+    sale = await db.sales.find_one(
+        {"id": tok["cotizacion_id"]},
+        {"_id": 0, "id": 1, "folio": 1, "cliente_id": 1, "cliente_nombre": 1,
+         "total": 1, "estado": 1})
+    if not sale or sale.get("estado") not in ("cotizacion", "convertida"):
+        raise HTTPException(410, "Enlace no disponible")
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    cfg = _qr_cfg(settings)
+
+    data = await comprobante.read()
+    ok, msg = _pq.validar_archivo(comprobante.filename, data, cfg["max_mb"])
+    if not ok:
+        raise HTTPException(400, msg)
+    metodo_n = (metodo or "").strip().lower()
+    if metodo_n not in ("transferencia", "deposito", "tarjeta", "otros"):
+        raise HTTPException(400, "Método de pago inválido")
+
+    # Anti-duplicados (§25): misma referencia+metodo viva en esta cotización.
+    ref = (referencia or "").strip()
+    if ref:
+        dup = await db.payment_evidence.find_one(
+            {"cotizacion_id": sale["id"], "metodo": metodo_n, "referencia": ref,
+             "estado": {"$ne": "rechazado"}})
+        if dup:
+            raise HTTPException(409, "Ya existe un comprobante con esa referencia")
+
+    total_ev = await db.payment_evidence.count_documents(
+        {"cotizacion_id": sale["id"], "estado": {"$ne": "rechazado"}})
+    if total_ev >= cfg["max_archivos"]:
+        raise HTTPException(409, "Ya se recibieron los comprobantes permitidos")
+
+    ext = os.path.splitext(_pq.sanitizar_nombre(comprobante.filename))[1].lower() or ".bin"
+    path = f"comprobantes/{sale.get('folio')}-{int(now_utc().timestamp())}-{_pq.nuevo_token()[:8]}{ext}"
+    storage.put_object(path, data, comprobante.content_type or "application/octet-stream")
+    ev = {
+        "id": uid(), "cotizacion_id": sale["id"], "folio_cot": sale.get("folio"),
+        "link_id": tok["id"], "storage_path": path,
+        "original_filename": _pq.sanitizar_nombre(comprobante.filename),
+        "mime_type": storage.detect_mime_type(data), "file_size": len(data),
+        "metodo": metodo_n, "referencia": ref,
+        "comentarios": (comentarios or "").strip()[:500],
+        "estado": "pendiente", "ip": ip,
+        "created_at": iso_now(),
+        "reviewed_at": "", "reviewed_by": "", "review_comentario": "",
+        "abono_folio": "", "abono_id": "",
+    }
+    await db.payment_evidence.insert_one(dict(ev))
+    await log_audit({"id": "publico", "name": f"anon:{ip}"}, "comprobante_recibido",
+                    "payment_evidence", ev["id"], f"{sale.get('folio')} · {metodo_n}")
+    wa_txt = _pq.mensaje_wa(sale.get("folio", ""), sale.get("cliente_nombre", ""),
+                            money_fmt(sale.get("total")))
+    return {"ok": True, "mensaje": "Comprobante recibido correctamente.",
+            "whatsapp_empresa": settings.get("whatsapp_empresa", ""),
+            "wa_texto": wa_txt}
+
+
+def money_fmt(v) -> str:
+    try:
+        return f"${float(v):,.2f} MXN"
+    except Exception:
+        return f"{v} MXN"
+
+
+@api.get("/sales/{sale_id}/comprobantes")
+async def listar_comprobantes(sale_id: str, request: Request = None,
+                              user: dict = Depends(require_permission("cxc.abono"))):
+    """Historial de evidencias + enlace vigente (§12)."""
+    sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
+    if not sale:
+        raise HTTPException(404, "Cotización no encontrada")
+    import pago_qr as _pq
+    link = await _link_activo(sale_id)
+    url = ""
+    if link and link.get("token"):
+        base = os.environ.get("PUBLIC_BASE_URL", "") or (str(request.base_url).rstrip("/") if request else "")
+        url = f"{base.rstrip('/')}/pago/comprobante/{link['token']}" if base else ""
+    evids = await db.payment_evidence.find(
+        {"cotizacion_id": sale_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    for e in evids:
+        e.pop("storage_path", None)  # ruta interna nunca sale del backend
+    return {"link": {"url": url, "estado": (link or {}).get("estado", ""),
+                     "expires_at": (link or {}).get("expires_at", "")},
+            "evidencias": evids}
+
+
+@api.get("/comprobantes-pago/{evid_id}/archivo")
+async def ver_comprobante_archivo(evid_id: str,
+                                  user: dict = Depends(require_permission("cxc.abono"))):
+    """Descarga/vista del archivo SOLO para personal autorizado."""
+    ev = await db.payment_evidence.find_one({"id": evid_id}, {"_id": 0})
+    if not ev or not ev.get("storage_path"):
+        raise HTTPException(404, "Comprobante no encontrado")
+    try:
+        data, ctype = storage.get_object(ev["storage_path"])
+    except Exception:
+        raise HTTPException(404, "Archivo no disponible")
+    from fastapi.responses import Response as FastResponse
+    return FastResponse(content=data, media_type=ev.get("mime_type") or ctype)
+
+
+@api.post("/comprobantes-pago/{evid_id}/aprobar")
+async def aprobar_comprobante(evid_id: str, data: RevisionInput,
+                              user: dict = Depends(require_permission("cxc.abono"))):
+    """Aprobación manual (§14): registra el pago vía abonar_pg si la
+    cotización ya fue convertida a venta; lock optimista anti-doble (§25)."""
+    ev = await db.payment_evidence.find_one({"id": evid_id}, {"_id": 0})
+    if not ev:
+        raise HTTPException(404, "Comprobante no encontrado")
+    if ev["estado"] == "aprobando":
+        raise HTTPException(409, "La revisión está en proceso")
+    # PGCollection.update_one devuelve el nº de documentos modificados.
+    locked = await db.payment_evidence.update_one(
+        {"id": evid_id, "estado": "pendiente"},
+        {"$set": {"estado": "aprobando"}})
+    if not locked:
+        raise HTTPException(409, "Este comprobante ya fue procesado")
+
+    def _revertir():
+        db_sync = db.payment_evidence.update_one(
+            {"id": evid_id, "estado": "aprobando"},
+            {"$set": {"estado": "pendiente"}})
+
+    sale = await db.sales.find_one({"id": ev["cotizacion_id"]}, {"_id": 0}) or {}
+    abono_info = ""
+    try:
+        if sale.get("convertida_a") and sale.get("cliente_id"):
+            caja = await caja_abierta_de(user["id"])
+            folio_ab = await next_counter("abono", "AB", 6)
+            metodo = ev["metodo"] if ev["metodo"] in ("efectivo", "tarjeta", "transferencia", "deposito") else "otros"
+            res = await _pgcxc.abonar_pg(
+                client_id=sale["cliente_id"], monto=round(float(sale.get("total") or 0), 2),
+                metodo=metodo, referencia=f"EVID-{ev['id'][:8]} {ev.get('referencia','')}".strip(),
+                nota=f"Comprobante QR cotización {ev.get('folio_cot','')}",
+                user=user, caja=caja, folio=folio_ab)
+            abono_info = res.get("abono", {}).get("folio", folio_ab)
+    except Exception as e:
+        await _revertir()
+        raise HTTPException(400, f"No se pudo registrar el pago: {str(e)[:140]}")
+
+    upd = await db.payment_evidence.update_one(
+        {"id": evid_id, "estado": "aprobando"},
+        {"$set": {"estado": "aprobado", "reviewed_by": user["name"],
+                  "reviewed_at": iso_now(), "review_comentario": data.comentario[:400],
+                  "abono_folio": abono_info}})
+    if not upd:  # carrera extrema: verificar estado manualmente
+        raise HTTPException(409, "Conflicto de concurrencia; verifica el estado")
+    await log_audit(user, "comprobante_aprobado", "payment_evidence", evid_id,
+                    f"{ev.get('folio_cot')} · abono {abono_info or 'N/A (sin venta convertida)'}")
+    return {"ok": True, "abono_folio": abono_info}
+
+
+@api.post("/comprobantes-pago/{evid_id}/rechazar")
+async def rechazar_comprobante(evid_id: str, data: RevisionInput,
+                               user: dict = Depends(require_permission("cxc.abono"))):
+    upd = await db.payment_evidence.update_one(
+        {"id": evid_id, "estado": "pendiente"},
+        {"$set": {"estado": "rechazado", "reviewed_by": user["name"],
+                  "reviewed_at": iso_now(), "review_comentario": data.comentario[:400]}})
+    if not upd:
+        raise HTTPException(409, "Este comprobante ya fue procesado o está en proceso")
+    await log_audit(user, "comprobante_rechazado", "payment_evidence", evid_id,
+                    data.comentario[:120])
+    return {"ok": True}
 
 
 # =========================================================================
@@ -5956,14 +6253,16 @@ async def sale_letter_pdf(sale_id: str, regenerar: bool = False,
 
 @api.post("/sales/{sale_id}/cotizacion-pdf")
 async def sale_cotizacion_pdf(sale_id: str, regenerar: bool = False,
+                              request: Request = None,
                               user: dict = Depends(get_current_user)):
     """COTIZACIÓN en PDF tamaño carta (2 hojas: cotización + cuentas bancarias).
     Es el documento oficial de este tipo; NO usa ticket térmico. Mismo
     generador central: un solo archivo por cotización."""
     import documentos as _docs
+    base_url = str(request.base_url).rstrip("/") if request else ""
     try:
         res = await _docs.asegurar_documentos(sale_id, formatos=("cotizacion",),
-                                              regenerar=regenerar)
+                                              regenerar=regenerar, base_url=base_url)
     except ValueError:
         raise HTTPException(404, "Venta no encontrada")
     except Exception as e:
