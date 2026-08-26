@@ -33,8 +33,12 @@ def hash_token(token: str) -> str:
 
 
 def armar_url(base_url: str | None, token: str) -> str:
-    """URL pública absoluta del comprobante. Sin hardcodear dominio (§2)."""
-    base = (base_url or os.environ.get("PUBLIC_BASE_URL", "") or "").rstrip("/")
+    """URL pública absoluta del comprobante (§2).
+    Prioridad: PUBLIC_BASE_URL (config explícita) ⤵ base del request.
+    En desarrollo backend y frontend viven en orígenes distintos, por lo que
+    PUBLIC_BASE_URL debe apuntar al ORIGEN DEL FRONTEND (donde vive la ruta
+    /pago/comprobante/:token)."""
+    base = (os.environ.get("PUBLIC_BASE_URL") or base_url or "").rstrip("/")
     return f"{base}/pago/comprobante/{quote(token, safe='')}" if base else ""
 
 
