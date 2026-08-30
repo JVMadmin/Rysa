@@ -125,3 +125,9 @@ backend/uploads/
 
 # Artefactos de build sueltos en raíz
 main-docker.js.map
+
+# Datos Legacy del negocio (NUNCA subir a GitHub)
+legacy_data/
+legacy_data_v7_test/
+legacy_data_v7_probe/
+legacy_reports/

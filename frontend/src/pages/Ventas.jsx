@@ -39,8 +39,10 @@ export default function Ventas() {
   const [busy, setBusy] = useState("");
   const [sel, setSel] = useState([]);
   const [sort, setSort] = useState({ key: "fecha", dir: "desc" });
+  const [origen, setOrigen] = useState("all");
   const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
-  const sorted = [...rows];
+  const sorted = [...rows].filter((s) =>
+    origen === "all" ? true : origen === "legacy" ? s.source === "LEGACY" : s.source !== "LEGACY");
   if (sort.key) {
     sorted.sort((a, b) => {
       const getV = (r) => {
@@ -292,6 +294,10 @@ export default function Ventas() {
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="all">Todos estados</SelectItem><SelectItem value="confirmada">Confirmadas</SelectItem><SelectItem value="cancelada">Canceladas</SelectItem><SelectItem value="cotizacion">Cotizaciones</SelectItem></SelectContent>
           </Select>
+          <Select value={origen} onValueChange={setOrigen}>
+            <SelectTrigger className="w-36" data-testid="filtro-origen"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="all">Todos origen</SelectItem><SelectItem value="rysa">RYSA</SelectItem><SelectItem value="legacy">LEGACY</SelectItem></SelectContent>
+          </Select>
           <div className="relative flex-1 min-w-[180px]">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <Input placeholder="Buscar folio o cliente (incluye histórico)..." value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && buscarHistorica()} className="pl-9" data-testid="buscar-venta" />
@@ -320,7 +326,8 @@ export default function Ventas() {
             {loading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
             {!loading && sorted.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-400"><Receipt className="w-8 h-8 mx-auto mb-2" />Sin ventas.</td></tr>}
             {!loading && sorted.map((s) => {
-              const facturable = s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion";
+              const legacy = s.source === "LEGACY";
+              const facturable = s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion" && !legacy;
               return (
               <tr key={s.id} className={`border-t border-slate-100 hover:bg-slate-50 ${s._abono ? "bg-blue-50/40" : ""}`} data-testid={`venta-row-${s.folio}`}>
                 <td className="p-3">{can("venta.facturar") && facturable ? <input type="checkbox" checked={sel.includes(s.id)} onChange={() => toggleSel(s.id)} data-testid={`sel-${s.folio}`} /> : null}</td>
@@ -328,6 +335,7 @@ export default function Ventas() {
                   {s._abono
                     ? <Badge className="bg-blue-100 text-blue-700">Abono a cuenta</Badge>
                     : <Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : s.estado === "cotizacion" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge>}
+                  {legacy && <Badge className="ml-1 bg-[#C1401E] text-white">LEGACY</Badge>}
                 </td>
                 <td className="p-3 font-medium text-[#C1401E]">{s.folio}</td>
                 <td className="p-3 text-slate-500">{s.fecha?.slice(0, 10)} {s.hora}</td>
@@ -339,7 +347,7 @@ export default function Ventas() {
                 <td className="p-3">
                   <div className="flex gap-1 justify-end">
                     <Button size="icon" variant="ghost" onClick={() => setDetalle(s)} data-testid={`ver-${s.folio}`}><Eye className="w-4 h-4" /></Button>
-                    {!s._abono && <>
+                    {!s._abono && !legacy && <>
                       <Button size="icon" variant="ghost" title="Reimprimir PDF (ticket)" onClick={() => reimprimir(s)} data-testid={`reimprimir-${s.folio}`}><Printer className="w-4 h-4" /></Button>
                       <Button size="icon" variant="ghost" title="Reenviar por WhatsApp" onClick={() => reenviar(s)} disabled={busy === `wa-${s.id}`} data-testid={`reenviar-${s.folio}`}>{busy === `wa-${s.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}</Button>
                       {s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion" &&
@@ -386,9 +394,17 @@ export default function Ventas() {
             </>
           ) : (
           <>
-          <DialogHeader><DialogTitle className="font-display">Venta {detalle?.folio}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2">Venta {detalle?.folio}
+            {detalle?.source === "LEGACY" && <Badge className="bg-[#C1401E] text-white">DOCUMENTO HISTÓRICO · SOLO LECTURA</Badge>}
+          </DialogTitle></DialogHeader>
           {detalle && (
             <div className="text-sm">
+              {detalle.source === "LEGACY" && (
+                <div className="mb-2 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                  <b>Origen: Sistema Legacy</b> · Serie {detalle.legacy_serie} · Folio {detalle.legacy_folio} · Cliente legacy: {detalle.legacy_cliente}
+                  {detalle.legacy_cancelado ? " · Cancelado en el sistema Legacy" : ""} · Este documento es histórico y no puede modificarse, cancelarse ni reimprimirse como venta actual.
+                </div>
+              )}
               <div className="text-slate-500 mb-2">{detalle.fecha?.slice(0, 16).replace("T", " ")} · Cliente: {detalle.cliente_nombre} · Vendedor: {detalle.vendedor_nombre || detalle.usuario_nombre}</div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-slate-600">
                 <span>Condición: <b>{detalle.condicion === "credito" ? "Crédito" : "Contado"}</b></span>
@@ -420,9 +436,14 @@ export default function Ventas() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => reimprimir(detalle)}><Printer className="w-4 h-4 mr-1" /> Ticket PDF</Button>
-            <Button variant="outline" onClick={() => descargarCarta(detalle)}><FileText className="w-4 h-4 mr-1" /> Carta PDF</Button>
-            <Button variant="outline" onClick={() => reenviar(detalle)} disabled={busy === `wa-${detalle?.id}`}>{busy === `wa-${detalle?.id}` ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <><Send className="w-4 h-4 mr-1" /> Reenviar</>}</Button>
+            {detalle?.source !== "LEGACY" && <>
+              <Button variant="outline" onClick={() => reimprimir(detalle)}><Printer className="w-4 h-4 mr-1" /> Ticket PDF</Button>
+              <Button variant="outline" onClick={() => descargarCarta(detalle)}><FileText className="w-4 h-4 mr-1" /> Carta PDF</Button>
+              <Button variant="outline" onClick={() => reenviar(detalle)} disabled={busy === `wa-${detalle?.id}`}>{busy === `wa-${detalle?.id}` ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <><Send className="w-4 h-4 mr-1" /> Reenviar</>}</Button>
+            </>}
+            {detalle?.source === "LEGACY" && (
+              <span className="text-xs text-slate-400">Histórico documental · pagos de deuda legacy: usar el flujo normal de CxC</span>
+            )}
           </DialogFooter>
           </>
           )}

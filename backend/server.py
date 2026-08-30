@@ -51,6 +51,7 @@ import ocr_invoice as _ocr_invoice
 import pac_provider
 import moneycalc
 import developer as _devmod
+import legacyadmin as _legacymod
 
 _APP_ENV = os.environ.get("ENVIRONMENT", "development").lower()
 logging.basicConfig(level=logging.DEBUG if _APP_ENV == "development" else logging.INFO)
@@ -1756,7 +1757,10 @@ async def list_clients(q: Optional[str] = None, estado: Optional[str] = None,
     now = now_utc()
     mes = now.strftime("%Y-%m")
     anio = str(now.year)
-    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0, "cliente_id": 1, "total": 1, "fecha": 1}).to_list(20000)
+    # Estadísticas operativas del cliente: excluyen documentos LEGACY
+    # (el histórico se consulta en su propia pestaña, no contamina stats).
+    sales = await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}},
+                                {"_id": 0, "cliente_id": 1, "total": 1, "fecha": 1}).to_list(20000)
     mes_map, anio_map = {}, {}
     for s in sales:
         cid = s.get("cliente_id")
@@ -4821,7 +4825,7 @@ async def dashboard(user: dict = Depends(get_current_user)):
     mes = now.strftime("%Y-%m")
     # Modo: admin/propietario/dev ven el negocio completo; el resto solo su operación
     es_global = "*" in effective_permissions(user)
-    mq = {"estado": "confirmada"}
+    mq = {"estado": "confirmada", "source": {"$ne": "LEGACY"}}
     if not es_global:
         mq["usuario_id"] = user["id"]
     sales = await db.sales.find(mq, {"_id": 0}).to_list(5000)
@@ -4895,7 +4899,8 @@ async def finanzas_resumen(desde: Optional[str] = None, hasta: Optional[str] = N
     d = desde[:10] if desde else (hoy[0:8] + "01")  # default: mes actual
     h = hasta[:10] if hasta else hoy
 
-    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(300000)
+    sales = await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}},
+                                {"_id": 0}).to_list(300000)
     if not es_global:
         sales = [s for s in sales if s.get("usuario_id") == user["id"]]
     sales = [s for s in sales if d <= (s.get("fecha") or "")[:10] <= h]
@@ -5011,8 +5016,10 @@ async def finanzas_export(fmt: str = "excel", desde: Optional[str] = None, hasta
 
 
 async def _dashboard_global_breakdown() -> dict:
-    """Desglose global: ventas por caja y por usuario (solo admin/propietario)."""
-    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(100000)
+    """Desglose global: ventas por caja y por usuario (solo admin/propietario).
+    Excluye documentos LEGACY (histórico documental, no operación actual)."""
+    sales = await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}},
+                                {"_id": 0}).to_list(100000)
     # Por usuario
     por_usuario = {}
     for s in sales:
@@ -5887,7 +5894,7 @@ async def dev_diagnostico(user: dict = Depends(_dev_only)):
     try:
         client_ids = {c["id"] for c in await db.clients.find({}, {"id": 1}).to_list(20000)}
         user_ids = {u["id"] for u in await db.users.find({}, {"id": 1}).to_list(20000)}
-        ventas = await db.sales.find({}, {"cliente_id": 1}).to_list(5000)
+        ventas = await db.sales.find({"source": {"$ne": "LEGACY"}}, {"cliente_id": 1}).to_list(5000)
         visitas = await db.visits.find({}, {"cliente_id": 1, "vendedor_id": 1}).to_list(5000)
         clientes = await db.clients.find({}, {"vendedor_id": 1}).to_list(20000)
         diag["integridad"] = {
@@ -6500,7 +6507,9 @@ async def list_cfdi(user: dict = Depends(get_current_user)):
 @api.get("/facturacion/facturables")
 async def ventas_facturables(user: dict = Depends(get_current_user)):
     sales = await db.sales.find({"tipo_venta": {"$ne": "cotizacion"}, "estado": "confirmada",
-                                 "facturado": {"$ne": True}}, {"_id": 0}).sort("fecha", -1).to_list(500)
+                                 "facturado": {"$ne": True},
+                                 "source": {"$ne": "LEGACY"}},
+                                {"_id": 0}).sort("fecha", -1).to_list(500)
     return sales
 
 class FacturacionInput(BaseModel):
@@ -6681,6 +6690,8 @@ async def _build_reporte(desde, hasta, group, vendedor_id=None, q=None,
         query["vendedor_id"] = user["id"]
     if query_extra:
         query.update(query_extra)
+    # Reportes operativos: excluyen el histórico LEGACY (se consulta aparte).
+    query.setdefault("source", {"$ne": "LEGACY"})
     sales = await db.sales.find(query, {"_id": 0}).to_list(50000)
     sales = [s for s in sales if d <= s.get("fecha", "")[:10] <= h]
 
@@ -7089,7 +7100,8 @@ async def _build_inventario(desde: str = "", hasta: str = "", q: str = "",
     ventas_rango = {}
     d = (desde[:10] or now_utc().strftime("%Y-%m-01"))
     h = (hasta[:10] or now_utc().date().isoformat())
-    srows = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(100000)
+    srows = await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}},
+                                {"_id": 0}).to_list(100000)
     for s in srows:
         if not (d <= s.get("fecha", "")[:10] <= h):
             continue
@@ -7192,7 +7204,8 @@ async def reporte_centro(desde: Optional[str] = None, hasta: Optional[str] = Non
     ayer = (now - timedelta(days=1)).date().isoformat()
     d = (desde[:10] if desde else now.strftime("%Y-%m-01"))
     h = (hasta[:10] if hasta else hoy)
-    sales = await db.sales.find({"estado": "confirmada"}, {"_id": 0}).to_list(100000)
+    sales = await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}},
+                                {"_id": 0}).to_list(100000)
     sales = [s for s in sales if d <= s.get("fecha", "")[:10] <= h]
 
     dias = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
@@ -7381,6 +7394,11 @@ app.include_router(field_ops.router)
 # Las rutas destructivas solo se registran si entorno != production Y
 # DEVELOPER_MODE=true (ver developer.py).
 app.include_router(_devmod.router)
+
+# Módulo MIGRACIÓN LEGACY: importación controlada del histórico + consulta.
+# Protegido por las mismas capas que /dev/* + LEGACY_MIGRATION_ENABLED
+# (ver legacyadmin.py). NO importa nada por sí solo.
+app.include_router(_legacymod.router)
 
 # Configuración dinámica de CORS
 env = os.environ.get("ENVIRONMENT", "development").lower()

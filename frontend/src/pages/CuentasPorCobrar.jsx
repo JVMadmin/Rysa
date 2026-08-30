@@ -35,6 +35,7 @@ export default function CuentasPorCobrar() {
   const [estado, setEstado] = useState("todos");
   const [facturada, setFacturada] = useState("todas");
   const [sort, setSort] = useState({ key: "saldo", dir: "desc" });
+  const [legacyRes, setLegacyRes] = useState(null);
   const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
   const sorted = [...(data.clientes || [])];
   if (sort.key) {
@@ -77,6 +78,8 @@ export default function CuentasPorCobrar() {
     setData(data); setLoading(false);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [soloVencidos, estado, facturada]);
+  // Resumen del histórico Legacy (agregado, sin datos técnicos)
+  useEffect(() => { api.get("/legacy/public-summary").then((r) => setLegacyRes(r.data)).catch(() => setLegacyRes(null)); }, []);
 
   // Preselección desde "Mi Ruta" (botón Cobrar del mapa de campo).
   useEffect(() => {
@@ -167,6 +170,13 @@ export default function CuentasPorCobrar() {
         <Card label="Vencido" value={money(t.vencido || 0)} icon={AlertTriangle} iconCls="text-red-500" valueCls="text-red-700" testid="cxc-vencido" />
         <Card label="Clientes con adeudo" value={t.clientes || 0} icon={Users} iconCls="text-amber-500" valueCls="text-amber-700" testid="cxc-nclientes" />
       </div>
+
+      {legacyRes?.disponible && (legacyRes.cxc_pendientes > 0 || legacyRes.tickets_legacy > 0) && (
+        <div className="rounded-lg border border-[#C1401E]/30 bg-orange-50/60 px-4 py-3 flex items-center gap-2 text-sm text-slate-700" data-testid="cxc-legacy-banner">
+          <Receipt className="w-4 h-4 text-[#C1401E]" />
+          <span>La cartera incluye <b>{legacyRes.cxc_pendientes}</b> documento(s) histórico(s) <Badge className="bg-[#C1401E] text-white mx-1">LEGACY</Badge> por <b>{money(legacyRes.cxc_saldo)}</b> ({legacyRes.tickets_legacy} tickets históricos consultables). Los pagos se registran con el flujo normal (FIFO).</span>
+        </div>
+      )}
 
       {/* Antigüedad global */}
       <div className="card-soft p-4">

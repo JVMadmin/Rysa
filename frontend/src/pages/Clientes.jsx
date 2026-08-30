@@ -108,6 +108,18 @@ export default function Clientes() {
   const [f, setF] = useState(blank());
   const [editId, setEditId] = useState(null);
   const [saving, setSaving] = useState(false);
+  // Histórico Legacy del cliente (solo lectura)
+  const [histLegacy, setHistLegacy] = useState(null);
+  const [histLoading, setHistLoading] = useState(false);
+  useEffect(() => {
+    if (open && editId && f.codigo) {
+      setHistLoading(true); setHistLegacy(null);
+      api.get("/legacy/estado-cuenta", { params: { codigo: f.codigo } })
+        .then(({ data }) => setHistLegacy(data))
+        .catch(() => setHistLegacy(null))
+        .finally(() => setHistLoading(false));
+    } else { setHistLegacy(null); }
+  }, [open, editId, f.codigo]);
   const fileRef = useRef();
   // Importación con preview
   const [impOpen, setImpOpen] = useState(false);
@@ -476,6 +488,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
               <TabsTrigger value="credito" data-testid="tab-credito">Crédito</TabsTrigger>
               <TabsTrigger value="retenciones" data-testid="tab-retenciones">Retenciones</TabsTrigger>
               <TabsTrigger value="stats" data-testid="tab-stats">Estadísticas</TabsTrigger>
+              <TabsTrigger value="historico" data-testid="tab-historico">Histórico</TabsTrigger>
               <TabsTrigger value="comentarios" data-testid="tab-comentarios">Comentarios</TabsTrigger>
               <TabsTrigger value="config" data-testid="tab-config">Configuración</TabsTrigger>
             </TabsList>
@@ -620,6 +633,54 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                   <SelectContent><SelectItem value="activo">Activo</SelectItem><SelectItem value="suspendido">Suspendido</SelectItem><SelectItem value="inactivo">Inactivo</SelectItem></SelectContent>
                 </Select></div>
               {I("Contraseña (portal)", "contrasena")}
+            </TabsContent>
+
+            <TabsContent value="historico" className="pt-2" data-testid="cli-historico">
+              {histLoading ? (
+                <div className="py-8 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-slate-300" /></div>
+              ) : (histLegacy?.total_documentos || 0) === 0 ? (
+                <p className="text-sm text-slate-400 py-6 text-center">Sin documentos históricos Legacy para este cliente.</p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Badge className="bg-[#C1401E] text-white">LEGACY</Badge>
+                      <span className="text-slate-500">{histLegacy.total_documentos} documentos históricos</span>
+                    </div>
+                    <div className="text-sm">
+                      Saldo histórico pendiente: <b className="text-[#C1401E]">{money(histLegacy.saldo_historico)}</b>
+                    </div>
+                  </div>
+                  <div className="border rounded-lg overflow-auto max-h-80">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 sticky top-0"><tr className="text-left text-xs uppercase tracking-wider text-slate-400">
+                        <th className="p-2">Fecha</th><th className="p-2">Documento</th><th className="p-2">Condición</th>
+                        <th className="p-2 text-right">Total</th><th className="p-2 text-right">Saldo</th><th className="p-2">Estado</th></tr></thead>
+                      <tbody>
+                        {(histLegacy.documentos || []).map((d, i) => (
+                          <tr key={i} className="border-t border-slate-100">
+                            <td className="p-2 text-slate-500">{d.fecha}</td>
+                            <td className="p-2 font-medium text-[#C1401E]">{d.folio}</td>
+                            <td className="p-2">{d.condicion === "credito" ? "Crédito" : "Contado"}</td>
+                            <td className="p-2 text-right">{money(d.total)}</td>
+                            <td className="p-2 text-right">{money(d.saldo)}</td>
+                            <td className="p-2">
+                              {d.cancelado
+                                ? <Badge className="bg-red-100 text-red-700 text-[10px]">Cancelado</Badge>
+                                : (d.saldo || 0) > 0
+                                  ? <Badge className="bg-amber-100 text-amber-700 text-[10px]">Con saldo</Badge>
+                                  : <Badge className="bg-slate-100 text-slate-500 text-[10px]">Pagado</Badge>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-2">
+                    Documentos históricos del sistema anterior (solo lectura). Los pagos sobre deuda histórica se registran desde Cuentas por Cobrar con el flujo normal.
+                  </p>
+                </>
+              )}
             </TabsContent>
           </Tabs>
 

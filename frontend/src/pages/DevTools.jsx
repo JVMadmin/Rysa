@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import LegacyMigration from "./LegacyMigration";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -313,6 +314,7 @@ export default function DevTools() {
     puedeInfo && { id: "diagnostico", label: "Diagnóstico" },
     puedeErrores && { id: "depuracion", label: "Depuración" },
     puedeInfo && { id: "basedatos", label: "Base de datos" },
+    puedeDev && { id: "legacy", label: "Migración Legacy" },
     puedeDev && { id: "limpieza", label: "Limpieza de datos" },
     puedeMant && { id: "pruebas", label: "Datos de prueba" },
     puedeMant && { id: "preproduccion", label: "Pre-producción" },
@@ -589,6 +591,13 @@ export default function DevTools() {
                 </div>
               )}
             </div>
+          </TabsContent>
+        )}
+
+        {/* ========================= MIGRACIÓN LEGACY ========================== */}
+        {puedeDev && (
+          <TabsContent value="legacy" className="mt-4">
+            <LegacyMigration />
           </TabsContent>
         )}
 
