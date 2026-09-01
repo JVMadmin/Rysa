@@ -318,13 +318,22 @@ async def legacy_snapshots(user: dict = Depends(legacy_read)):
 # --------------------------------------------------------------------------- #
 @router.get("/legacy/review")
 async def legacy_review(motivo: str = "", user: dict = Depends(legacy_read)):
-    """Documentos CxC en revisión + negativos + excluidos, filtrables."""
-    where = "WHERE status IN ('REVIEW_REQUIRED','NEGATIVE','EXCLUDED')"
-    params = {}
-    if motivo:
-        where += " AND review_reason LIKE :m"
-        params["m"] = f"%{motivo}%"
+    """Documentos CxC en revisión + negativos + excluidos, filtrables.
+    Si el staging todavía no existe (no se ha corrido), devuelve vacío en
+    lugar de 500."""
+    vacio = {"documentos": [], "resumen": [], "productos": [], "clientes": []}
     async with transaction() as conn:
+        staging_ok = (await conn.execute(text(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_name IN ('legacy_cxc_snapshot','legacy_product_mapping',"
+            "'legacy_customer_mapping')"))).scalar() or 0
+        if staging_ok < 3:
+            return vacio
+        where = "WHERE status IN ('REVIEW_REQUIRED','NEGATIVE','EXCLUDED')"
+        params = {}
+        if motivo:
+            where += " AND review_reason LIKE :m"
+            params["m"] = f"%{motivo}%"
         rows = (await conn.execute(text(
             f"SELECT legacy_key, legacy_serie, legacy_folio, legacy_cliente, "
             f"legacy_condicion, legacy_saldo, calculated_saldo, difference, "
