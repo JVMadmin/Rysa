@@ -23,7 +23,7 @@ import logging
 import mimetypes
 import jwt
 from typing import List, Optional
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File, Form, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Response, UploadFile, File, Form, Request, Body
 from fastapi.responses import StreamingResponse, JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
@@ -2444,12 +2444,18 @@ def calcular_venta(items: List[dict], descuento_global: float, precios_incluyen_
 async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
                      desde: Optional[str] = None, hasta: Optional[str] = None,
                      vendedor_id: Optional[str] = None, q: Optional[str] = None,
+                     origen: Optional[str] = None,
+                     page: Optional[int] = None, page_size: Optional[int] = None,
                      user: dict = Depends(get_current_user)):
     if vendedor_id and not ver_todas_ventas(user):
         raise HTTPException(403, "No tienes permiso para filtrar ventas de otros operadores")
     query = {}
     if estado:
         query["estado"] = estado
+    if origen == "legacy":
+        query["source"] = "LEGACY"
+    elif origen == "rysa":
+        query["source"] = {"$ne": "LEGACY"}
     if not ver_todas_ventas(user):
         # Usuario normal: solo ve SUS ventas (las realiza él mismo).
         query["vendedor_id"] = user["id"]
@@ -2458,7 +2464,8 @@ async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
     if q:
         rx = {"$regex": sanitize_search_term(q), "$options": "i"}
         query["$or"] = [{"folio": rx}, {"cliente_nombre": rx}]
-    sales = await db.sales.find(query, {"_id": 0}).sort("fecha", -1).to_list(3000)
+    # Rango de fechas traducido al query (comparación lexicográfica ISO en
+    # PostgreSQL) para poder paginar y contar en la BD sin traer todo.
     now = now_utc()
     d = desde[:10] if desde else None
     h = hasta[:10] if hasta else None
@@ -2475,8 +2482,26 @@ async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
             d = last_prev.strftime("%Y-%m-01"); h = last_prev.date().isoformat()
         elif rango == "anio":
             d = f"{now.year}-01-01"; h = now.date().isoformat()
-    if d or h:
-        sales = [s for s in sales if (not d or s.get("fecha", "")[:10] >= d) and (not h or s.get("fecha", "")[:10] <= h)]
+    if d:
+        query["fecha"] = {"$gte": d}
+    if h:
+        try:
+            # Exclusivo al día siguiente: cubre fechas date-only (LEGACY) y
+            # datetimes ISO del mismo día.
+            h_next = (datetime.strptime(h, "%Y-%m-%d").date() + timedelta(days=1)).isoformat()
+            query.setdefault("fecha", {})["$lt"] = h_next
+        except ValueError:
+            pass
+    if page is not None and page > 0:
+        ps = max(1, min(int(page_size or 50), 200))
+        total = await db.sales.count_documents(query)
+        items = await db.sales.find(query, {"_id": 0}).sort("fecha", -1)\
+            .skip((page - 1) * ps).limit(ps).to_list(ps)
+        return {"items": items, "total": total, "page": page, "page_size": ps,
+                "pages": (total + ps - 1) // ps}
+    # Modo legacy sin paginación: tope ampliado (el histórico LEGACY son las
+    # fechas más antiguas y con el tope de 3000 se caían del listado).
+    sales = await db.sales.find(query, {"_id": 0}).sort("fecha", -1).to_list(10000)
     return sales
 
 @api.get("/sales/por-folio")
@@ -3407,7 +3432,10 @@ async def cxc_detail(client_id: str, user: dict = Depends(require_permission("cx
     if not cli:
         raise HTTPException(404, "Cliente no encontrado")
     hoy = now_utc().date()
-    sales = await db.sales.find({"cliente_id": client_id, "condicion": "credito", "estado": "confirmada"},
+    # Historial COMPLETO de documentos confirmados del cliente (crédito y
+    # contado, legacy o nuevos, pagados o con saldo) — mismo criterio que el
+    # PDF de adeudo. El saldo de cada doc viene por venta.
+    sales = await db.sales.find({"cliente_id": client_id, "estado": "confirmada"},
                                 {"_id": 0}).sort("fecha", 1).to_list(20000)
     ventas = []
     for s in sales:
@@ -3415,15 +3443,18 @@ async def cxc_detail(client_id: str, user: dict = Depends(require_permission("cx
         saldo = round(float(s.get("saldo", 0)), 2)
         ventas.append({"id": s["id"], "folio": s["folio"], "fecha": s["fecha"], "total": s["total"],
                        "saldo": saldo, "vence": vence, "dias_vencido": max(dv, 0),
+                       "interes_acumulado": round(float(s.get("interes_acumulado", 0) or 0), 2),
+                       "condicion": s.get("condicion"), "source": s.get("source"),
                        "pagada": saldo <= 0.001})
     abonos = await db.abonos.find({"cliente_id": client_id}, {"_id": 0}).sort("fecha", -1).to_list(5000)
+    cargos = await db.cxc_cargos.find({"cliente_id": client_id}, {"_id": 0}).sort("fecha", -1).to_list(200)
     return {
         "cliente": {"id": cli["id"], "codigo": cli.get("codigo"), "nombre": cli.get("nombre"),
                     "telefono": cli.get("telefono"), "celular": cli.get("celular"),
                     "limite_credito": round(float(cli.get("limite_credito", 0)), 2),
                     "dias_credito": cli.get("dias_credito", 0),
                     "saldo": round(float(cli.get("saldo", 0)), 2)},
-        "ventas": ventas, "abonos": abonos,
+        "ventas": ventas, "abonos": abonos, "cargos": cargos,
     }
 
 @api.get("/cxc/{client_id}/adeudo-pdf")
@@ -3530,6 +3561,58 @@ async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(requi
             client_id=client_id, monto=monto, metodo=data.metodo,
             referencia=data.referencia or "", nota=data.nota or "",
             user=user, caja=caja, folio=folio)
+    except _pgcxc.CxcError as e:
+        raise HTTPException(e.status, e.message)
+
+# =========================================================================
+# INTERÉS MORATORIO: recálculo de deuda vencida (admin/gerente)
+# =========================================================================
+class InteresInput(BaseModel):
+    tasa_pct: float = Field(gt=0, le=100)
+    nota: str = ""
+    # Modo SELECCIÓN: documentos específicos (legacy o nuevos) en lugar de
+    # todas las ventas vencidas del cliente.
+    sale_ids: Optional[List[str]] = None
+    # Días a cobrar en modo selección (si se omite, se usan los días vencidos
+    # reales; documentos no vencidos requieren días > 0 explícitos).
+    dias: Optional[int] = Field(default=None, ge=1, le=3650)
+    # Cálculo: "moratorio" (prorrateo días/30) o "inmediato" (una sola vez
+    # sobre el saldo base, sin días).
+    calculo: str = "moratorio"
+
+@api.post("/cxc/{client_id}/interes")
+async def cxc_aplicar_interes(client_id: str, data: InteresInput,
+                              user: dict = Depends(require_permission("cxc.interes"))):
+    """Aplica interés: por cliente (todas sus ventas vencidas) o por SELECCIÓN
+    de documentos (sale_ids; legacy o nuevos, uno o varios tickets). Cálculo
+    moratorio (base · tasa% · días/30) o inmediato (base · tasa% una vez).
+    Suma el interés al saldo de cada venta y al saldo del cliente; queda
+    registrado y es reversible una sola vez (cancelar cargo)."""
+    if data.calculo not in ("moratorio", "inmediato"):
+        raise HTTPException(400, "Cálculo inválido (moratorio|inmediato)")
+    try:
+        return await _pgcxc.aplicar_interes_pg(
+            client_id=client_id, tasa_pct=data.tasa_pct, nota=data.nota, user=user,
+            sale_ids=data.sale_ids, dias=data.dias, calculo=data.calculo)
+    except _pgcxc.CxcError as e:
+        raise HTTPException(e.status, e.message)
+
+@api.get("/cxc/{client_id}/cargos")
+async def cxc_cargos_list(client_id: str, user: dict = Depends(require_permission("cxc.ver"))):
+    """Historial de cargos por interés de un cliente (vivos y cancelados)."""
+    docs = await db.cxc_cargos.find({"cliente_id": client_id}, {"_id": 0})\
+        .sort("fecha", -1).to_list(500)
+    return docs
+
+@api.post("/cxc/cargos/{cargo_id}/cancelar")
+async def cxc_cancelar_cargo(cargo_id: str, body: dict = Body(...),
+                             user: dict = Depends(require_permission("cxc.interes"))):
+    """Cancela un cargo de interés reversible una sola vez (recomputa saldos)."""
+    motivo = (body.get("motivo") or "").strip()
+    if not motivo:
+        raise HTTPException(400, "Indica el motivo de la cancelación")
+    try:
+        return await _pgcxc.cancelar_cargo_pg(cargo_id=cargo_id, motivo=motivo, user=user)
     except _pgcxc.CxcError as e:
         raise HTTPException(e.status, e.message)
 

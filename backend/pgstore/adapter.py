@@ -33,6 +33,8 @@ KNOWN_COLLECTIONS = [
     "pedidos",
     # Comprobantes de pago por QR (cotizaciones)
     "cot_pago_tokens", "payment_evidence",
+    # Cargos por interés moratorio (CxC)
+    "cxc_cargos",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.

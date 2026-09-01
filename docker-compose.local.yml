@@ -47,7 +47,8 @@ services:
       # Migración legacy: código + datos DBF montados del host (no van en la
       # imagen del backend); reports CSV quedan persistentes en el host.
       - ./tools:/app/tools:ro
-      - ./legacy_data:/app/legacy_data:ro
+      # rw: el despliegue por ZIP (Herramientas > Legacy > Datos) escribe aquí
+      - ./legacy_data:/app/legacy_data
       - ./legacy_reports:/app/legacy_reports
     depends_on:
       postgres:

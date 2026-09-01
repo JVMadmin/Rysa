@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -18,7 +18,7 @@ export default function Ventas() {
   const nav = useNavigate();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [rango, setRango] = useState("mes");
+  const [rango, setRango] = useState("all");
   const [estado, setEstado] = useState("all");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
@@ -39,10 +39,13 @@ export default function Ventas() {
   const [busy, setBusy] = useState("");
   const [sel, setSel] = useState([]);
   const [sort, setSort] = useState({ key: "fecha", dir: "desc" });
-  const [origen, setOrigen] = useState("all");
+  const [origen, setOrigen] = useState("all"); // "rysa" oculta el histórico LEGACY
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pages, setPages] = useState(1);
+  const PAGE_SIZE = 50;
   const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
-  const sorted = [...rows].filter((s) =>
-    origen === "all" ? true : origen === "legacy" ? s.source === "LEGACY" : s.source !== "LEGACY");
+  const sorted = [...rows];
   if (sort.key) {
     sorted.sort((a, b) => {
       const getV = (r) => {
@@ -89,25 +92,28 @@ export default function Ventas() {
     return { d: null, h: null }; // all
   };
 
-  const load = async () => {
+  const load = async (pg = page) => {
     setLoading(true);
-    const params = {};
+    const params = { page: pg, page_size: PAGE_SIZE };
     if (rango === "rango") { if (desde) params.desde = desde; if (hasta) params.hasta = hasta; }
     else if (rango !== "all") params.rango = rango;
     if (estado !== "all") params.estado = estado;
     if (vendedorId !== "all") params.vendedor_id = vendedorId;
-    if (q) params.q = q;
+    if (origen !== "all") params.origen = origen;
     try {
+      const { d, h } = rangoFechas();
+      const abonosParams = {};
+      if (d) abonosParams.desde = d;
+      if (h) abonosParams.hasta = h;
       const [{ data }, abonosRes] = await Promise.all([
         api.get("/sales", { params }),
-        api.get("/abonos").catch(() => ({ data: [] })),
+        api.get("/abonos", { params: abonosParams }).catch(() => ({ data: [] })),
       ]);
       // Abonos como concepto "Abono a cuenta": se muestran cronológicamente
       // junto a las ventas pero NO cuentan como ventas ni son facturables/
       // cancelables desde aquí (eso vive en Cuentas por cobrar).
       let abonoRows = [];
       if (estado === "all") {
-        const { d, h } = rangoFechas();
         abonoRows = (Array.isArray(abonosRes.data) ? abonosRes.data : [])
           .filter((a) => a.estado !== "cancelado")
           .filter((a) => (!d || (a.fecha || "").slice(0, 10) >= d) && (!h || (a.fecha || "").slice(0, 10) <= h))
@@ -129,7 +135,10 @@ export default function Ventas() {
             _raw: a,
           }));
       }
-      setRows([...(data || []), ...abonoRows]);
+      setRows([...(data.items || []), ...abonoRows]);
+      setTotal(data.total || 0);
+      setPages(data.pages || 1);
+      if (pg > (data.pages || 1) && (data.pages || 1) >= 1 && pg !== 1) setPage(1);
     } catch (e) {
       toast.error(formatApiError(e.response?.data?.detail));
       setRows([]);
@@ -138,7 +147,19 @@ export default function Ventas() {
       setLoading(false);
     }
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [rango, estado, vendedorId, desde, hasta]);
+  // Recarga al cambiar página o filtros; un cambio de filtro reinicia a la
+  // página 1 con una sola petición.
+  const filtrosKey = `${rango}|${estado}|${vendedorId}|${desde}|${hasta}|${origen}`;
+  const lastKey = useRef(filtrosKey);
+  useEffect(() => {
+    if (lastKey.current !== filtrosKey) {
+      lastKey.current = filtrosKey;
+      if (page !== 1) setPage(1); else load(1);
+      return;
+    }
+    load(page);
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [page, filtrosKey]);
 
   // Búsqueda histórica: encuentra cualquier venta por folio/cliente, sin importar
   // la fecha ni el rango del listado (para reimprimir/reenviar tickets viejos).
@@ -148,6 +169,7 @@ export default function Ventas() {
     try {
       const { data } = await api.get("/sales/por-folio", { params: { folio: q } });
       setRows(data || []); setSel([]);
+      setTotal((data || []).length); setPages(1);
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); setRows([]); }
     finally { setLoading(false); }
   };
@@ -259,7 +281,7 @@ export default function Ventas() {
   return (
     <div className="space-y-5" data-testid="ventas-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="font-display text-2xl font-black tracking-tight">Ventas</h1><p className="text-slate-500 text-sm">{rows.length} registros</p></div>
+        <div><h1 className="font-display text-2xl font-black tracking-tight">Ventas</h1><p className="text-slate-500 text-sm">{total} registros</p></div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => nav("/app/reportes")} data-testid="ir-reportes"><BarChart3 className="w-4 h-4 mr-1" /> Reportes</Button>
           {can("venta.facturar") && (
@@ -361,11 +383,20 @@ export default function Ventas() {
             ); })}
           </tbody>
         </table>
+        {!loading && total > 0 && (
+          <div className="flex items-center justify-between p-3 text-sm border-t border-slate-100" data-testid="ventas-paginacion">
+            <span className="text-slate-500">Página {page} de {pages} · {total} registros</span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="ventas-pag-prev">Anterior</Button>
+              <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="ventas-pag-next">Siguiente</Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Detalle */}
       <Dialog open={!!detalle} onOpenChange={(o) => !o && setDetalle(null)}>
-        <DialogContent data-testid="venta-detalle">
+        <DialogContent className="max-w-3xl" data-testid="venta-detalle">
           {detalle?._abono ? (
             <>
               <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Badge className="bg-blue-100 text-blue-700">Abono a cuenta</Badge> {detalle.folio}</DialogTitle></DialogHeader>
@@ -418,7 +449,7 @@ export default function Ventas() {
                   <tr key={k} className="border-t border-slate-100">
                     <td className="py-1">{i.cantidad}</td>
                     <td className="py-1 text-slate-400">{i.unidad || "—"}</td>
-                    <td className="py-1">{i.descripcion}{i.comentario ? <span className="text-xs text-slate-400"> · {i.comentario}</span> : null}</td>
+                    <td className="py-1">{i.descripcion}{i.codigo_legacy && i.codigo_legacy !== i.descripcion ? <span className="text-xs text-slate-400"> · Cod. {i.codigo_legacy}</span> : null}{i.comentario ? <span className="text-xs text-slate-400"> · {i.comentario}</span> : null}</td>
                     <td className="py-1 text-right tabular-nums">{money(i.precio_bruto ?? i.precio)}</td>
                     <td className="py-1 text-right tabular-nums text-slate-400">{i.descuento ? money(i.descuento) : "—"}</td>
                     <td className="py-1 text-right font-medium tabular-nums">{money(i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0)))}</td>

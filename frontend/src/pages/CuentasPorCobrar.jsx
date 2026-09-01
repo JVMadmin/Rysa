@@ -64,8 +64,16 @@ export default function CuentasPorCobrar() {
   const [comp, setComp] = useState(null); // { abono, cliente }
   const [compBusy, setCompBusy] = useState(false);
   // Detalle
+  // Detalle
   const [detCli, setDetCli] = useState(null);
   const [detalle, setDetalle] = useState(null);
+  const [selVentas, setSelVentas] = useState([]);
+  // Interés moratorio
+  const [interesDlg, setInteresDlg] = useState(false);
+  const [interes, setInteres] = useState({ tasa: "", nota: "", dias: "", calculo: "moratorio" });
+  const [interesModo, setInteresModo] = useState("cliente"); // "cliente" | "seleccion"
+  const [interesBusy, setInteresBusy] = useState(false);
+  const puedeInteres = can("cxc.interes");
 
   const load = async () => {
     setLoading(true);
@@ -134,10 +142,11 @@ export default function CuentasPorCobrar() {
   const imprimirComp = () => { window.print(); };
 
   const openDetalle = async (c) => {
-    setDetCli(c); setDetalle(null);
+    setDetCli(c); setDetalle(null); setSelVentas([]);
     const { data } = await api.get(`/cxc/${c.cliente_id}`);
     setDetalle(data);
   };
+  const toggleSelVenta = (id) => setSelVentas((x) => (x.includes(id) ? x.filter((y) => y !== id) : [...x, id]));
 
   const generarPdf = async () => {
     try {
@@ -145,6 +154,80 @@ export default function CuentasPorCobrar() {
       const url = `${root}/api/cxc/${detCli.cliente_id}/adeudo-pdf`;
       window.open(url, "_blank");
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
+  // ---- Interés moratorio / inmediato ----
+  const previewInteres = (() => {
+    const tasa = Number(interes.tasa);
+    if (!tasa || tasa <= 0 || !detalle) return null;
+    const diasOverride = Number(interes.dias) || null;
+    const inmediato = interes.calculo === "inmediato";
+    let total = 0;
+    if (interesModo === "seleccion") {
+      for (const v of detalle.ventas) {
+        if (!selVentas.includes(v.id) || v.saldo <= 0) continue;
+        const base = Math.max(0, v.saldo - (v.interes_acumulado || 0));
+        if (base <= 0) continue;
+        if (inmediato) { total += base * (tasa / 100); continue; }
+        const diasCobrar = diasOverride || v.dias_vencido;
+        if (!diasCobrar || diasCobrar <= 0) continue;
+        total += base * (tasa / 100) * (diasCobrar / 30);
+      }
+    } else {
+      for (const v of detalle.ventas) {
+        if (v.saldo <= 0) continue;
+        const base = Math.max(0, v.saldo - (v.interes_acumulado || 0));
+        if (base <= 0) continue;
+        if (inmediato) { total += base * (tasa / 100); continue; }
+        if (v.dias_vencido <= 0) continue;
+        total += base * (tasa / 100) * (v.dias_vencido / 30);
+      }
+    }
+    return { total: Math.round(total * 100) / 100 };
+  })();
+  const aplicarInteres = async () => {
+    const tasa = Number(interes.tasa);
+    if (!tasa || tasa <= 0 || tasa > 100) return toast.error("Tasa inválida (0-100%)");
+    const esSel = interesModo === "seleccion";
+    if (esSel && selVentas.length === 0) return toast.error("Selecciona al menos un documento");
+    const esInmediato = interes.calculo === "inmediato";
+    let diasOverride = Number(interes.dias) || null;
+    if (!esInmediato && esSel && !diasOverride) {
+      const sinVencer = selVentas.filter((id) => {
+        const v = (detalle?.ventas || []).find((x) => x.id === id);
+        return v && v.saldo > 0 && v.dias_vencido <= 0;
+      }).length;
+      if (sinVencer > 0) {
+        const d = window.prompt(
+          `${sinVencer} documento(s) SIN VENCER seleccionado(s). El interés moratorio necesita días para prorratear; los sin vencer se omitirán si no indicas días.\n\nDías a cobrar (Enter para omitir los sin vencer, Cancelar para salir):`);
+        if (d === null) return;
+        diasOverride = Number(d) || null;
+      }
+    }
+    setInteresBusy(true);
+    try {
+      const body = { tasa_pct: tasa, nota: interes.nota, calculo: interes.calculo };
+      if (esSel) { body.sale_ids = selVentas; if (diasOverride) body.dias = diasOverride; }
+      const { data } = await api.post(`/cxc/${detCli.cliente_id}/interes`, body);
+      toast.success(`Interés aplicado: ${money(data.total_interes)} a ${data.ventas_afectadas} documento(s) (${data.folio})`
+        + (data.documentos_omitidos ? ` · ${data.documentos_omitidos} omitido(s) sin saldo base` : ""));
+      setInteresDlg(false); setInteres({ tasa: "", nota: "", dias: "", calculo: "moratorio" }); setSelVentas([]);
+      openDetalle(detCli);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setInteresBusy(false); }
+  };
+  const cancelarCargo = async (cargo) => {
+    const motivo = window.prompt(`Motivo de cancelación del cargo ${cargo.folio} (${money(cargo.total)}):`);
+    if (!motivo) return;
+    setInteresBusy(true);
+    try {
+      const { data } = await api.post(`/cxc/cargos/${cargo.id}/cancelar`, { motivo });
+      toast.success(`Cargo revertido: ${money(data.interes_revertido)}`);
+      openDetalle(detCli);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { setInteresBusy(false); }
   };
   const recordarWhatsApp = async () => {
     try {
@@ -320,20 +403,51 @@ export default function CuentasPorCobrar() {
               </div>
 
               <div>
-                <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">Ventas a crédito</div>
-                <div className="border border-slate-200 rounded-md overflow-hidden">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs uppercase tracking-wider text-slate-400">
+                    Historial de documentos ({detalle.ventas.length}) · {detalle.ventas.filter((v) => v.saldo > 0).length} con saldo
+                  </div>
+                  {puedeInteres && detalle.ventas.length > 0 && (
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" onClick={() => {
+                        const ids = detalle.ventas.map((v) => v.id);
+                        setSelVentas(selVentas.length === ids.length ? [] : ids);
+                      }} data-testid="cxc-sel-todas">
+                        {selVentas.length === detalle.ventas.length ? "Quitar selección" : "Seleccionar todos"}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => {
+                        const conSaldo = detalle.ventas.filter((v) => v.saldo > 0).map((v) => v.id);
+                        setSelVentas(selVentas.length === conSaldo.length ? [] : conSaldo);
+                      }} data-testid="cxc-sel-saldo">
+                        {selVentas.length === detalle.ventas.filter((v) => v.saldo > 0).length && detalle.ventas.some((v) => v.saldo > 0) ? "Quitar" : "Solo con saldo"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <div className="border border-slate-200 rounded-md overflow-hidden max-h-[45vh] overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="bg-slate-50"><tr className="text-left text-slate-500 uppercase tracking-wider">
-                      <th className="p-2">Folio</th><th className="p-2">Fecha</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Saldo</th><th className="p-2">Vence</th><th className="p-2 text-center">Estado</th>
+                    <thead className="bg-slate-50 sticky top-0"><tr className="text-left text-slate-500 uppercase tracking-wider">
+                      {puedeInteres && <th className="p-2 w-6"></th>}
+                      <th className="p-2">Folio</th><th className="p-2">Fecha</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Saldo</th><th className="p-2 text-right">Interés</th><th className="p-2">Vence</th><th className="p-2 text-center">Estado</th>
                     </tr></thead>
                     <tbody>
-                      {detalle.ventas.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-slate-400">Sin ventas a crédito.</td></tr>}
+                      {detalle.ventas.length === 0 && <tr><td colSpan={puedeInteres ? 8 : 7} className="p-4 text-center text-slate-400">Sin documentos.</td></tr>}
                       {detalle.ventas.map((v) => (
-                        <tr key={v.id} className="border-t border-slate-100">
-                          <td className="p-2 font-medium">{v.folio}</td>
+                        <tr key={v.id} className={`border-t border-slate-100 ${selVentas.includes(v.id) ? "bg-amber-50/60" : ""} ${v.pagada ? "opacity-60" : ""}`}>
+                          {puedeInteres && (
+                            <td className="p-2">
+                              <input type="checkbox" checked={selVentas.includes(v.id)} onChange={() => toggleSelVenta(v.id)} data-testid={`cxc-sel-${v.folio}`} />
+                            </td>
+                          )}
+                          <td className="p-2 font-medium">
+                            {v.folio}
+                            {v.source === "LEGACY" && <Badge className="ml-1 bg-[#C1401E] text-white">LEGACY</Badge>}
+                            {v.condicion === "contado" && <span className="ml-1 text-[10px] text-slate-400">contado</span>}
+                          </td>
                           <td className="p-2 text-slate-500">{(v.fecha || "").slice(0, 10)}</td>
                           <td className="p-2 text-right">{money(v.total)}</td>
                           <td className={`p-2 text-right font-semibold ${v.saldo > 0 ? "text-red-600" : "text-green-600"}`}>{money(v.saldo)}</td>
+                          <td className="p-2 text-right text-amber-700">{v.interes_acumulado > 0 ? money(v.interes_acumulado) : "—"}</td>
                           <td className="p-2 text-slate-500">{v.vence}</td>
                           <td className="p-2 text-center">
                             {v.pagada ? <Badge className="bg-green-100 text-green-700">Pagada</Badge>
@@ -348,7 +462,9 @@ export default function CuentasPorCobrar() {
               </div>
 
               <div>
-                <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">Historial de abonos</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs uppercase tracking-wider text-slate-400">Historial de abonos</div>
+                </div>
                 <div className="border border-slate-200 rounded-md overflow-hidden">
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50"><tr className="text-left text-slate-500 uppercase tracking-wider">
@@ -374,16 +490,138 @@ export default function CuentasPorCobrar() {
                   </table>
                 </div>
               </div>
+
+              {/* Cargos por interés moratorio */}
+              {puedeInteres && (
+                <div>
+                  <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">Cargos por interés moratorio</div>
+                  <div className="border border-slate-200 rounded-md overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50"><tr className="text-left text-slate-500 uppercase tracking-wider">
+                        <th className="p-2">Folio</th><th className="p-2">Fecha</th><th className="p-2 text-right">Tasa</th>
+                        <th className="p-2 text-right">Interés</th><th className="p-2 text-center">Ventas</th>
+                        <th className="p-2">Usuario</th><th className="p-2 text-center">Estado</th><th className="p-2"></th>
+                      </tr></thead>
+                      <tbody>
+                        {(detalle.cargos || []).length === 0 && <tr><td colSpan={8} className="p-4 text-center text-slate-400">Sin cargos de interés.</td></tr>}
+                        {(detalle.cargos || []).map((cg) => (
+                          <tr key={cg.id} className={`border-t border-slate-100 ${cg.estado === "cancelado" ? "opacity-50" : ""}`}>
+                            <td className="p-2 font-medium">{cg.folio}</td>
+                            <td className="p-2 text-slate-500">{(cg.fecha || "").slice(0, 10)}</td>
+                            <td className="p-2 text-right">{cg.tasa_pct}%</td>
+                            <td className="p-2 text-right font-semibold text-amber-700">{money(cg.total)}</td>
+                            <td className="p-2 text-center">{(cg.detalle || []).length}</td>
+                            <td className="p-2 text-slate-500">{cg.usuario_nombre}</td>
+                            <td className="p-2 text-center">
+                              {cg.estado === "cancelado" ? <Badge variant="outline" className="text-slate-500">Cancelado</Badge>
+                                : <Badge className="bg-amber-100 text-amber-700">Confirmado</Badge>}
+                            </td>
+                            <td className="p-2 text-center">
+                              {cg.estado === "confirmado" && cg.tipo === "interes_moratorio" && (
+                                <Button size="sm" variant="ghost" disabled={interesBusy}
+                                        onClick={() => cancelarCargo(cg)} title="Revertir cargo">
+                                  <AlertTriangle className="w-4 h-4 text-red-500" />
+                                </Button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
             {detCli && detalle && <>
+              {puedeInteres && detalle.cliente.saldo > 0 && selVentas.length === 0 &&
+                <Button variant="outline" className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                        onClick={() => { setInteresModo("cliente"); setInteres({ tasa: "", nota: "", dias: "", calculo: "moratorio" }); setInteresDlg(true); }} data-testid="detalle-interes">
+                  <ArrowUp className="w-4 h-4 mr-1 text-amber-600" /> Aplicar interés (todas las vencidas)
+                </Button>}
+              {puedeInteres && selVentas.length > 0 &&
+                <Button variant="outline" className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                        onClick={() => { setInteresModo("seleccion"); setInteres({ tasa: "", nota: "", dias: "", calculo: "moratorio" }); setInteresDlg(true); }} data-testid="detalle-interes-seleccion">
+                  <ArrowUp className="w-4 h-4 mr-1 text-amber-600" /> Cobrar interés a {selVentas.length} documento(s)
+                </Button>}
               <Button variant="outline" onClick={recordarWhatsApp} data-testid="detalle-recordar"><MessageCircle className="w-4 h-4 mr-1 text-green-600" /> Recordar por WhatsApp</Button>
               <Button variant="outline" onClick={generarPdf} data-testid="detalle-pdf"><FileText className="w-4 h-4 mr-1" /> PDF de adeudo</Button>
             </>}
             {detCli && puedeCobrar && detalle && detalle.cliente.saldo > 0 &&
               <Button className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setDetCli(null); openAbono(detCli); }} data-testid="detalle-abonar"><HandCoins className="w-4 h-4 mr-1" /> Registrar abono</Button>}
             <Button variant="outline" onClick={() => setDetCli(null)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo aplicar interés moratorio */}
+      <Dialog open={interesDlg} onOpenChange={(o) => !o && setInteresDlg(false)}>
+        <DialogContent className="max-w-md" data-testid="interes-dialog">
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ArrowUp className="w-5 h-5 text-amber-600" /> Aplicar interés moratorio{interesModo === "seleccion" ? ` · ${selVentas.length} documento(s)` : ""}</DialogTitle></DialogHeader>
+          {detCli && (
+            <div className="space-y-4">
+              <div className="flex justify-between text-sm">
+                <div><div className="text-xs text-slate-400">{detCli.codigo}</div><div className="font-semibold">{detCli.nombre}</div></div>
+                <div className="text-right"><div className="text-xs text-slate-400">Saldo actual</div><div className="font-display font-bold text-red-600">{money(detalle?.cliente.saldo)}</div></div>
+              </div>
+              {interesModo === "seleccion" && (
+                <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-600" data-testid="interes-seleccion-info">
+                  Se cobrará únicamente a los <b>{selVentas.length}</b> documento(s) marcados (LEGACY o nuevos,
+                  vencidos o no). Los pagados o sin saldo base se omiten automáticamente; en moratorio,
+                  los sin vencer requieren "Días a cobrar" o se omiten.
+                </div>
+              )}
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Tipo de interés</Label>
+                <Select value={interes.calculo} onValueChange={(v) => setInteres((s) => ({ ...s, calculo: v }))}>
+                  <SelectTrigger className="mt-1" data-testid="interes-calculo"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="moratorio">Moratorio · prorrateo días/30</SelectItem>
+                    <SelectItem value="inmediato">Inmediato · una sola vez sobre el saldo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Tasa de interés mensual (%)</Label>
+                <Input type="number" min="0" max="100" step="0.01" value={interes.tasa}
+                       onChange={(e) => setInteres((s) => ({ ...s, tasa: e.target.value }))}
+                       placeholder="Ej. 2.5" className="mt-1" data-testid="interes-tasa" />
+              </div>
+              {interesModo === "seleccion" && interes.calculo === "moratorio" && (
+                <div>
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">Días a cobrar (opcional)</Label>
+                  <Input type="number" min="1" step="1" value={interes.dias}
+                         onChange={(e) => setInteres((s) => ({ ...s, dias: e.target.value }))}
+                         placeholder="Vacío = días vencidos reales" className="mt-1" data-testid="interes-dias" />
+                  <p className="text-[11px] text-slate-400 mt-1">Necesario si alguno de los documentos aún no está vencido.</p>
+                </div>
+              )}
+              <div>
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Nota (opcional)</Label>
+                <Textarea value={interes.nota} onChange={(e) => setInteres((s) => ({ ...s, nota: e.target.value }))}
+                          placeholder="Ej. interés de agosto por atraso" className="mt-1" data-testid="interes-nota" />
+              </div>
+              {previewInteres && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">{interes.calculo === "inmediato" ? "Interés a cargar (inmediato, una sola vez)" : "Interés a cargar (prorrateo días vencido / 30)"}</span>
+                    <b className="text-amber-700">{money(previewInteres.total)}</b>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Se suma al saldo de cada documento y al saldo total del cliente.
+                    Queda registrado y es reversible una sola vez.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInteresDlg(false)}>Cancelar</Button>
+            <Button onClick={aplicarInteres} disabled={interesBusy || !interes.tasa}
+                    className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="interes-aplicar">
+              {interesBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Aplicar interés"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

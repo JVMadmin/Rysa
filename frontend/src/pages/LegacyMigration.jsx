@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import {
   AlertTriangle, CheckCircle2, Clock, Database, FileDown, History,
-  Loader2, Lock, RefreshCw, RotateCcw, ShieldAlert, Upload,
+  Loader2, Lock, RefreshCw, RotateCcw, ShieldAlert, Sparkles, Upload,
 } from "lucide-react";
 
 const TERRACOTA = "#C1401E";
@@ -68,6 +68,7 @@ export default function LegacyMigration() {
   const [busy, setBusy] = useState("");
   const [modal1, setModal1] = useState(false);
   const [modal2, setModal2] = useState(false);
+  const [modalInc, setModalInc] = useState(false);
   const [textoConfirm, setTextoConfirm] = useState("");
   const [backupOk, setBackupOk] = useState(false);
   const [modalRollback, setModalRollback] = useState(false);
@@ -77,7 +78,39 @@ export default function LegacyMigration() {
   const [recon, setRecon] = useState(null);
   const [filtroRecon, setFiltroRecon] = useState("");
   const [snapshots, setSnapshots] = useState(null);
+  const [dataStatus, setDataStatus] = useState(null);
+  const [dataBusy, setDataBusy] = useState(false);
+  const [dataResult, setDataResult] = useState(null);
+  const zipRef = useRef(null);
   const pollRef = useRef(null);
+
+  const cargarDatos = useCallback(async () => {
+    try {
+      const { data } = await api.get("/legacy/data/status");
+      setDataStatus(data);
+    } catch { setDataStatus(null); }
+  }, []);
+
+  useEffect(() => { cargarDatos(); }, [cargarDatos]);
+
+  const desplegarZip = useCallback(async () => {
+    const f = zipRef.current?.files?.[0];
+    if (!f) { toast.error("Selecciona el ZIP con los datos legacy (DBF/CDX/FPT)"); return; }
+    setDataBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      const { data } = await api.post("/legacy/data/deploy", fd);
+      setDataResult(data);
+      setDataStatus((s) => ({ ...s, ...data }));
+      if (zipRef.current) zipRef.current.value = "";
+      toast.success(`Desplegados ${nf.format(data.extraidos)} archivos en legacy_data`);
+    } catch (e) {
+      toast.error(e.response?.data?.detail || "No se pudo desplegar el ZIP");
+    } finally {
+      setDataBusy(false);
+    }
+  }, []);
 
   const cargarSnapshots = useCallback(async () => {
     try {
@@ -137,6 +170,27 @@ export default function LegacyMigration() {
         confirmacion: "IMPORTAR LEGACY", backup_confirmado: backupOk,
       });
       toast.success(`Importación iniciada (${data.batch_id})`);
+      setModal1(false); setModal2(false);
+      setTextoConfirm(""); setBackupOk(false);
+      cargar();
+    } catch (e) {
+      const d = e?.response?.data?.detail;
+      toast.error(typeof d === "object" ? d?.mensaje || "Importación bloqueada" : d || "No se pudo iniciar");
+    } finally { setBusy(""); }
+  };
+
+  const iniciarIncremental = async () => {
+    setBusy("incremental");
+    try {
+      const { data } = await api.post("/legacy/import-incremental", {
+        confirmacion: "IMPORTAR DELTA", backup_confirmado: backupOk,
+      });
+      if (data.sin_cambios) {
+        toast.info("Sin cambios: staging y producción ya están sincronizados");
+        setModal1(false);
+        return;
+      }
+      toast.success(`Importación incremental iniciada (${data.batch_id})`);
       setModal1(false); setModal2(false);
       setTextoConfirm(""); setBackupOk(false);
       cargar();
@@ -314,15 +368,116 @@ export default function LegacyMigration() {
         </p>
       )}
 
+      {/* Importación INCREMENTAL (delta) */}
+      {status.importado && (
+        <div className="card-soft p-5" data-testid="legacy-incremental">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm">
+              <div className="font-semibold text-slate-800 flex items-center gap-1">
+                <Sparkles className="w-4 h-4" style={{ color: TERRACOTA }} /> Importación incremental
+              </div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                Trae a producción la diferencia entre el staging vigente y lo ya importado:
+                <b className="mx-1 text-emerald-700">{nf.format(status.delta?.nuevos || 0)} tickets nuevos</b>·
+                <b className="text-amber-700">{nf.format(status.delta?.actualizables || 0)} modificados</b>
+                (cancelados/ajustados en legacy; los que tengan abonos aplicados se dejan en revisión).
+                El saldo de clientes NO se modifica (política V2).
+              </div>
+            </div>
+            <Button style={{ background: TERRACOTA }} className="hover:opacity-90 text-white"
+                    disabled={!status.import_incremental_habilitado || corriendo}
+                    onClick={() => setModalInc(true)} data-testid="legacy-incremental-btn">
+              <Upload className="w-4 h-4 mr-1" /> IMPORTAR INCREMENTAL
+            </Button>
+          </div>
+          {!status.import_incremental_habilitado && (
+            <p className="text-xs text-slate-400 mt-2 flex items-center gap-1">
+              <Lock className="w-3 h-3" /> Sin delta pendiente o entorno sin migración habilitada. Re-ejecuta STAGING tras desplegar datos nuevos.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Revisión y reportes */}
-      <Tabs defaultValue="revision">
+      <Tabs defaultValue="datos">
         <TabsList>
+          <TabsTrigger value="datos">Datos</TabsTrigger>
           <TabsTrigger value="revision">Revisión ({nf.format((review?.documentos || []).length)})</TabsTrigger>
           <TabsTrigger value="conciliacion">Conciliación</TabsTrigger>
           <TabsTrigger value="snapshots">Snapshots</TabsTrigger>
           <TabsTrigger value="clientes">Clientes sin match</TabsTrigger>
           <TabsTrigger value="productos">Productos Legacy</TabsTrigger>
         </TabsList>
+
+        {/* Despliegue de datos legacy por ZIP */}
+        <TabsContent value="datos" className="mt-4 space-y-3" data-testid="legacy-datos">
+          <p className="text-xs text-slate-400">
+            Sube un ZIP con los archivos legacy (DBF/CDX/FPT, máx
+            {dataStatus?.zip_max_mb || 300} MB) y desplégalos en la carpeta
+            <code className="mx-1 px-1 rounded bg-slate-100">legacy_data</code>
+            para ejecutar las fases de migración cuando se requiera. El
+            despliegue anterior se conserva como backup.
+          </p>
+          <div className="card-soft p-4 flex flex-wrap items-center gap-3">
+            <input ref={zipRef} type="file" accept=".zip" data-testid="legacy-zip-input"
+                   className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm hover:file:bg-slate-200" />
+            <Button style={{ background: TERRACOTA }} className="hover:opacity-90 text-white"
+                    disabled={dataBusy} onClick={desplegarZip} data-testid="legacy-zip-deploy">
+              {dataBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
+              Desplegar ZIP
+            </Button>
+            <Button variant="outline" onClick={cargarDatos} disabled={dataBusy}
+                    data-testid="legacy-datos-refresh">
+              <RefreshCw className={`w-4 h-4 mr-1 ${dataBusy ? "animate-spin" : ""}`} /> Refrescar
+            </Button>
+          </div>
+
+          {dataResult?.rechazados?.length > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              <b>Archivos rechazados ({dataResult.rechazados.length}):</b>
+              <div className="mt-1 max-h-32 overflow-auto">
+                {dataResult.rechazados.map((r, i) => <div key={i}>{r}</div>)}
+              </div>
+            </div>
+          )}
+
+          {dataStatus ? (
+            <div className="card-soft p-4 space-y-2" data-testid="legacy-datos-status">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <Database className="w-4 h-4" style={{ color: TERRACOTA }} />
+                {dataStatus.existe ? "Carpeta legacy_data desplegada" : "Sin datos desplegados"}
+                <Badge className="bg-slate-100 text-slate-600 text-[10px] ml-1">
+                  {nf.format(dataStatus.archivos || 0)} archivos
+                </Badge>
+              </div>
+              <div className="text-xs text-slate-500">{dataStatus.ruta}</div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {Object.entries(dataStatus.por_extension || {}).map(([ext, n]) => (
+                  <Badge key={ext} variant="outline" className="text-[11px]">
+                    {ext}: {nf.format(n)}
+                  </Badge>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 pt-2">
+                {Object.entries(dataStatus.tablas_clave || {}).map(([f, v]) => (
+                  <div key={f} className="rounded-md border border-slate-200 p-2 text-xs">
+                    <div className="font-medium text-slate-700">{f}</div>
+                    <div className="text-slate-400">{nf.format(Math.round(v.bytes / 1024))} KB · {v.modificado?.slice(0, 16)}</div>
+                  </div>
+                ))}
+              </div>
+              {dataStatus.backup_previo && (
+                <div className="text-[11px] text-slate-400">
+                  Backup anterior: <code className="bg-slate-100 px-1 rounded">{dataStatus.backup_previo}</code>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="card-soft p-6 text-center text-slate-400 text-sm">
+              No se pudo leer el estado de legacy_data (¿carpeta montada?).
+            </div>
+          )}
+        </TabsContent>
 
         <TabsContent value="revision" className="mt-4 space-y-3">
           <div className="flex gap-2 flex-wrap">
@@ -564,6 +719,54 @@ export default function LegacyMigration() {
                     onClick={iniciarImport} data-testid="legacy-confirmar">
               {busy === "import" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
               CONFIRMAR IMPORTACIÓN
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Modal incremental (una etapa) */}
+      <AlertDialog open={modalInc} onOpenChange={setModalInc}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5" style={{ color: TERRACOTA }} /> IMPORTACIÓN INCREMENTAL
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <p>Se importará la diferencia entre staging y producción:</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded bg-emerald-50 p-2 border border-emerald-200">
+                    <b className="text-emerald-700">{nf.format(status.delta?.nuevos || 0)}</b>
+                    <span className="text-xs text-slate-500"> tickets nuevos</span>
+                  </div>
+                  <div className="rounded bg-amber-50 p-2 border border-amber-200">
+                    <b className="text-amber-700">{nf.format(status.delta?.actualizables || 0)}</b>
+                    <span className="text-xs text-slate-500"> modificados en legacy</span>
+                  </div>
+                </div>
+                <p className="text-slate-500 text-xs">
+                  Los modificados SOLO se actualizan si ningún abono de producción ha tocado
+                  su saldo; en caso contrario quedan en revisión. Los tickets nuevos son
+                  revertibles con rollback; los actualizados conservan su batch original.
+                </p>
+                <label className="flex items-center gap-2 text-xs text-slate-700 select-none">
+                  <Checkbox checked={backupOk} onCheckedChange={(v) => setBackupOk(!!v)} />
+                  Confirmo que existe backup de la base de datos
+                </label>
+                <div>
+                  <div className="text-xs mb-1">Escribe <b className="text-red-700">IMPORTAR DELTA</b> para habilitar:</div>
+                  <Input value={textoConfirm} onChange={(e) => setTextoConfirm(e.target.value)}
+                         placeholder="IMPORTAR DELTA" autoFocus data-testid="legacy-incremental-confirm" />
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setTextoConfirm(""); setBackupOk(false); }}>Cancelar</AlertDialogCancel>
+            <Button variant="destructive" disabled={textoConfirm.trim() !== "IMPORTAR DELTA" || !backupOk || busy === "incremental"}
+                    onClick={iniciarIncremental} data-testid="legacy-incremental-go">
+              {busy === "incremental" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
+              CONFIRMAR DELTA
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

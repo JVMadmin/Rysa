@@ -38,6 +38,11 @@ services:
       UPLOAD_DIR: /app/uploads
     volumes:
       - uploads:/app/uploads
+      # Migración Legacy: código de las fases + datos DBF desplegables por
+      # ZIP (Herramientas > Legacy > Datos) + reportes persistentes.
+      - ./tools:/app/tools:ro
+      - ./legacy_data:/app/legacy_data
+      - ./legacy_reports:/app/legacy_reports
     depends_on:
       postgres:
         condition: service_healthy

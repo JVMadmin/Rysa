@@ -31,10 +31,12 @@ Garantías de la importación (V2, auditoría forense 2026-08-30):
 import asyncio
 import json
 import os
+import shutil
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, UploadFile, File
 from sqlalchemy import text
 
 import pgstore  # noqa: F401  (mantiene el patrón de los módulos del backend)
@@ -231,6 +233,12 @@ async def _status_payload(conn) -> dict:
         "import": bool(batch and batch["status"] == "COMPLETED"),
     }
     importado = bool(batch and batch["status"] == "COMPLETED")
+    # ---- Importación INCREMENTAL (delta): staging con claves nuevas o
+    # documentos modificados vs producción. Detectable solo si ya hubo import.
+    if staging_ok and importado:
+        delta = await _delta_counts(conn)
+    else:
+        delta = {"nuevos": 0, "actualizables": 0}
     return {
         "enabled": LEGACY_ENABLED,
         "developer_mode": DEVELOPER_MODE,
@@ -240,6 +248,11 @@ async def _status_payload(conn) -> dict:
                                   LEGACY_ENABLED, DEVELOPER_MODE,
                                   _APP_ENV != "production", not importado]),
         "importado": importado,
+        "import_incremental_habilitado": all([
+            etapas["staging"], etapas["dry_run"], importado,
+            LEGACY_ENABLED, DEVELOPER_MODE, _APP_ENV != "production",
+            (delta["nuevos"] + delta["actualizables"]) > 0]),
+        "delta": delta,
         "batch": batch,
         "snapshot": snapshot,
         "cambios": cambios,
@@ -544,16 +557,18 @@ def _sale_doc(t: dict, items: list, cxc: dict | None, batch_id: str,
     }
 
 
-def _legacy_item(d: dict) -> dict:
+def _legacy_item(d: dict, nombres: dict | None = None) -> dict:
     """Partida histórica compatible con el render de Ventas.jsx
     (descripcion/unidad/precio_bruto/importe_bruto) preservando los campos
-    legacy (código original cuando no existe producto RYSA)."""
+    legacy. `nombres` mapea código legacy -> descripción real del catálogo
+    RYSA (ARTICULO.DESCRIP) para mostrar el nombre y no solo el código."""
     cod = d["legacy_codigo"] or ""
     pid = d["rysa_product_id"]
+    nombre = (nombres or {}).get(cod) or cod
     return {
         "product_id": pid or None,
-        "descripcion": cod if not pid else cod,
-        "nombre": f"Producto Legacy ({cod})" if not pid else cod,
+        "descripcion": nombre,
+        "nombre": nombre,
         "unidad": "",
         "cantidad": float(d["legacy_cantidad"] or 0),
         "precio": float(d["legacy_precio"] or 0),
@@ -564,6 +579,17 @@ def _legacy_item(d: dict) -> dict:
         "codigo_legacy": cod,
         "mapping_status": d["mapping_status"],
     }
+
+
+async def _cargar_nombres_products(eng) -> dict:
+    """Mapa código legacy -> descripción real del catálogo RYSA (products,
+    importado de ARTICULO.DESCRIP). Para mostrar el nombre en las partidas."""
+    from sqlalchemy import text
+    async with eng.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT doc->>'codigo', doc->>'descripcion' FROM products "
+            "WHERE doc->>'codigo' IS NOT NULL"))).fetchall()
+    return {r[0]: r[1] for r in rows if r[1]}
 
 
 async def _run_import(batch_id: str, staging_batch: str | None, user: dict):
@@ -602,6 +628,7 @@ async def _run_import(batch_id: str, staging_batch: str | None, user: dict):
         cxc_sin_cliente = 0
 
         # ---- mapas desde staging (una sola lectura) ----
+        nombres_prod = await _cargar_nombres_products(eng)
         async with eng.connect() as conn:
             tickets = (await conn.execute(text(
                 "SELECT legacy_key, legacy_serie, legacy_folio, legacy_cliente, "
@@ -638,7 +665,7 @@ async def _run_import(batch_id: str, staging_batch: str | None, user: dict):
             async with eng.begin() as conn:
                 for t in lote:
                     key = t["legacy_key"]
-                    its = [_legacy_item(d) for d in details.get(key, [])]
+                    its = [_legacy_item(d, nombres_prod) for d in details.get(key, [])]
                     detalle_importados += len(its)
                     cli_clave = t["legacy_cliente"] or ""
                     cliente_id = mapping.get(cli_clave, "")
@@ -835,6 +862,301 @@ async def legacy_import(user: dict = Depends(legacy_admin),
             "mensaje": "Importación iniciada; consulta /legacy/status para progreso"}
 
 
+# --------------------------------------------------------------------------- #
+# IMPORTACIÓN INCREMENTAL (delta)                                             #
+#                                                                             #
+# Re-importa SOLO la diferencia entre el staging vigente y producción:        #
+#   * NUEVOS   : claves de staging ausentes en sales → INSERT (idempotente).  #
+#   * ACTUALIZ : documentos cuyo change_status (V7) es UPDATED/CANCELLED en   #
+#     tickets o en el snapshot CxC → se ACTUALIZAN solo si ningún abono de    #
+#     producción ha tocado su saldo (saldo == total); si hay abonos van a     #
+#     la cola de revisión y NO se tocan.                                      #
+# clients.saldo NUNCA se modifica (política V2). El rollback del batch solo   #
+# revierte los NUEVOS (los actualizados conservan su legacy_batch original).  #
+# --------------------------------------------------------------------------- #
+CONFIRMACION_INCREMENTAL = "IMPORTAR DELTA"
+
+
+@router.post("/legacy/import-incremental")
+async def legacy_import_incremental(user: dict = Depends(legacy_admin),
+                                    body: dict = Body(...)):
+    confirmacion = (body.get("confirmacion") or "").strip()
+    backup_ok = bool(body.get("backup_confirmado"))
+    if confirmacion != CONFIRMACION_INCREMENTAL:
+        raise HTTPException(status_code=400, detail=(
+            f"Confirmación inválida: escribe exactamente "
+            f"'{CONFIRMACION_INCREMENTAL}'"))
+    if not backup_ok:
+        raise HTTPException(status_code=400, detail=(
+            "Debes confirmar el backup de la base antes de importar"))
+    if _TAREA.get("corriendo"):
+        raise HTTPException(status_code=409, detail="Ya hay una importación en curso")
+    await _ensure_tables()
+    async with transaction() as conn:
+        ok, bloqueos, resumen = await _validate_import(conn)
+        if not ok:
+            raise HTTPException(status_code=409, detail={
+                "mensaje": "IMPORTACIÓN INCREMENTAL BLOQUEADA",
+                "bloqueos": bloqueos, "resumen": resumen})
+        delta = await _delta_counts(conn)
+    if (delta["nuevos"] + delta["actualizables"]) == 0:
+        return {"ok": True, "sin_cambios": True,
+                "mensaje": "Staging y producción ya están sincronizados; "
+                           "no hay nada que importar"}
+    batch_id = f"IMPINC-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    async with transaction() as conn:
+        await conn.execute(text(
+            "INSERT INTO legacy_import_batch (batch_id, staging_batch_id, status, "
+            "phase, created_by) VALUES (:b, :s, 'PENDING', 'inicio', :u)"),
+            {"b": batch_id, "s": resumen.get("staging_batch"), "u": user.get("name")})
+    _TAREA["corriendo"] = batch_id
+    asyncio.create_task(_run_incremental(batch_id, resumen.get("staging_batch"), user))
+    return {"ok": True, "batch_id": batch_id, "delta": delta,
+            "mensaje": "Importación incremental iniciada"}
+
+
+async def _delta_counts(conn) -> dict:
+    """Nuevos (staging sin venta en producción) y actualizables
+    (change_status UPDATED/CANCELLED en tickets o snapshot CxC)."""
+    nuevos = int((await conn.execute(text(
+        "SELECT count(*) FROM legacy_tickets t "
+        "LEFT JOIN sales s ON s.\"id\" = t.legacy_key "
+        "WHERE s.\"id\" IS NULL"))).scalar() or 0)
+    actualizables = int((await conn.execute(text(
+        "SELECT count(*) FROM legacy_tickets t JOIN sales s "
+        "ON s.\"id\" = t.legacy_key "
+        "WHERE t.change_status IN ('UPDATED','CANCELLED') "
+        "OR EXISTS (SELECT 1 FROM legacy_cxc_snapshot c "
+        "           WHERE c.legacy_key = t.legacy_key "
+        "           AND c.change_status IN ('UPDATED','CANCELLED'))")
+    )).scalar() or 0)
+    return {"nuevos": nuevos, "actualizables": actualizables}
+
+
+async def _run_incremental(batch_id: str, staging_batch: str | None, user: dict):
+    """Fase incremental: INSERT de nuevos + UPDATE condicional de modificados."""
+    from pgstore.database import get_engine
+    eng = get_engine()
+    try:
+        async with eng.begin() as conn:
+            await conn.execute(text(
+                "INSERT INTO legacy_import_backup (batch_id, kind, entity_key, payload) "
+                "SELECT :b, 'clients', \"_id\", doc FROM clients"), {"b": batch_id})
+            for tabla in ("sales", "abonos", "caja_movimientos",
+                          "inventory_movements", "products"):
+                n = (await conn.execute(text(
+                    f"SELECT count(*) FROM {tabla}"))).scalar() or 0
+                await conn.execute(text(
+                    "INSERT INTO legacy_import_backup (batch_id, kind, entity_key, payload) "
+                    "VALUES (:b, 'precount', :t, CAST(:p AS jsonb))"),
+                    {"b": batch_id, "t": tabla,
+                     "p": json.dumps({"count": int(n)})})
+            await conn.execute(text(
+                "UPDATE legacy_import_batch SET status='RUNNING', phase='backup' "
+                "WHERE batch_id=:b"), {"b": batch_id})
+
+        chunk = int(os.environ.get("LEGACY_IMPORT_CHUNK", "1000") or "1000")
+        nuevos = actualizados = saltados = revisar = 0
+        cxc_importados = 0
+        cxc_saldo_total = 0.0
+
+        nombres_prod = await _cargar_nombres_products(eng)
+        async with eng.connect() as conn:
+            tickets = (await conn.execute(text(
+                "SELECT legacy_key, legacy_serie, legacy_folio, legacy_cliente, "
+                "legacy_fecha, legacy_total, legacy_condicion, legacy_vendedor, "
+                "legacy_cancelado, legacy_saldo_original, change_status "
+                "FROM legacy_tickets ORDER BY legacy_folio"))).mappings().all()
+            details: dict[str, list] = {}
+            for d in (await conn.execute(text(
+                    "SELECT doc_key, legacy_codigo, legacy_cantidad, legacy_precio, "
+                    "legacy_importe_calculado, rysa_product_id, mapping_status "
+                    "FROM legacy_ticket_details ORDER BY doc_key, partida"
+            ))).mappings().all():
+                details.setdefault(d["doc_key"], []).append(d)
+            cxc_ready = {
+                r["legacy_key"]: {"saldo": float(r["legacy_saldo"] or 0)}
+                for r in (await conn.execute(text(
+                    "SELECT legacy_key, legacy_saldo FROM legacy_cxc_snapshot "
+                    "WHERE status='READY' AND legacy_saldo > 0.01"
+                ))).mappings().all()}
+            # claves modificadas en el snapshot CxC (V7)
+            cxc_changed = {r[0] for r in (await conn.execute(text(
+                "SELECT legacy_key FROM legacy_cxc_snapshot "
+                "WHERE change_status IN ('UPDATED','CANCELLED')"))).fetchall()}
+            mapping = {r["legacy_customer_key"]: r["rysa_customer_id"]
+                       for r in (await conn.execute(text(
+                    "SELECT legacy_customer_key, rysa_customer_id "
+                    "FROM legacy_customer_mapping WHERE status='MATCHED'"
+                ))).mappings().all()}
+            nombres = {r["legacy_customer_key"]: r["legacy_nombre"]
+                       for r in (await conn.execute(text(
+                    "SELECT legacy_customer_key, legacy_nombre "
+                    "FROM legacy_customer_mapping"))).mappings().all()}
+
+        # Procesar: nuevos (no existen) + modificados (change_status/cxc_changed)
+        pendientes = [t for t in tickets
+                      if t["change_status"] in ("CREATED", "UPDATED", "CANCELLED")
+                      or t["legacy_key"] in cxc_changed]
+        total = len(pendientes)
+        for i in range(0, total, chunk):
+            lote = pendientes[i:i + chunk]
+            async with eng.begin() as conn:
+                for t in lote:
+                    key = t["legacy_key"]
+                    cli_clave = t["legacy_cliente"] or ""
+                    cliente_id = mapping.get(cli_clave, "")
+                    cliente_nombre = nombres.get(cli_clave, cli_clave)
+                    existing = (await conn.execute(text(
+                        'SELECT "doc" FROM sales WHERE "id" = CAST(:k AS text) '
+                        'FOR UPDATE'), {"k": key})).first()
+                    if existing is None:
+                        # ---- NUEVO: mismo camino que el import completo ----
+                        its = [_legacy_item(d, nombres_prod) for d in details.get(key, [])]
+                        doc = _sale_doc(t, its, cxc_ready.get(key), batch_id,
+                                        cliente_id, cliente_nombre)
+                        es_cxc = key in cxc_ready
+                        await conn.execute(text(
+                            'INSERT INTO sales ("_id","id","doc","created_at","total","saldo") '
+                            'VALUES (:k,:k,CAST(:d AS jsonb),now(),:t,:s)'),
+                            {"k": key,
+                             "d": json.dumps(doc, ensure_ascii=False, default=str),
+                             "t": doc["total"], "s": doc["saldo"]})
+                        nuevos += 1
+                        if es_cxc:
+                            cxc_importados += 1
+                            cxc_saldo_total += doc["saldo"]
+                        continue
+                    # ---- MODIFICADO: update condicional ----
+                    ex = dict(existing[0])
+                    sal_actual = round(float(ex.get("saldo", 0) or 0), 2)
+                    total_doc = round(float(ex.get("total", 0) or 0), 2)
+                    # abonos de producción tocaron el saldo → NO tocar
+                    if abs(sal_actual - total_doc) > 0.01 and total_doc > 0:
+                        revisar += 1
+                        continue
+                    nuevo_saldo = (round(float(cxc_ready[key]["saldo"]), 2)
+                                   if key in cxc_ready else 0.0)
+                    cancelado = bool(t.get("legacy_cancelado"))
+                    its = [_legacy_item(d, nombres_prod) for d in details.get(key, [])]
+                    nuevo_doc = _sale_doc(t, its, cxc_ready.get(key),
+                                          ex.get("legacy_batch") or batch_id,
+                                          cliente_id, cliente_nombre)
+                    await conn.execute(text(
+                        'UPDATE sales SET "saldo" = :s, "total" = :t, '
+                        "doc = CAST(:d AS jsonb) "
+                        'WHERE "id" = CAST(:k AS text)'),
+                        {"s": nuevo_doc["saldo"], "t": nuevo_doc["total"],
+                         "d": json.dumps(nuevo_doc, ensure_ascii=False, default=str),
+                         "k": key})
+                    actualizados += 1
+            async with eng.begin() as conn:
+                await conn.execute(text(
+                    "UPDATE legacy_import_batch SET phase='tickets', "
+                    "tickets_imported=:n, details_imported=:a, "
+                    "cxc_imported=:c, cxc_saldo_total=:s, "
+                    "skipped_duplicates=:k, cxc_sin_cliente_rysa=:r "
+                    "WHERE batch_id=:b"),
+                    {"n": nuevos, "a": actualizados, "c": cxc_importados,
+                     "s": round(cxc_saldo_total, 2), "k": saltados,
+                     "r": revisar, "b": batch_id})
+
+        # ---- política V2: clients.saldo intocable ----
+        async with eng.begin() as conn:
+            await conn.execute(text(
+                "INSERT INTO legacy_import_audit (batch_id, kind, entity_key, payload) "
+                "VALUES (:b, 'saldo_policy_v2', 'clients', CAST(:p AS jsonb))"),
+                {"b": batch_id, "p": json.dumps({
+                    "politica": "clients.saldo no se modifica en el import incremental",
+                    "razon": "el maestro legacy ya está en clients.saldo"})})
+
+        # ---- validación post ----
+        async with eng.begin() as conn:
+            async def one(sql: str, params=None):
+                r = await conn.execute(text(sql), params or {})
+                return r.scalar() or 0
+
+            sl = await one("SELECT count(*) FROM sales WHERE doc->>'source'='LEGACY'")
+            claves_staging = await one("SELECT count(*) FROM legacy_tickets")
+            faltantes = await one(
+                "SELECT count(*) FROM legacy_tickets t "
+                "LEFT JOIN sales s ON s.\"id\" = t.legacy_key WHERE s.\"id\" IS NULL")
+            clientes_antes = float((await conn.execute(text(
+                "SELECT COALESCE(sum(COALESCE(\"saldo\",0)),0) FROM clients "
+                "WHERE \"_id\" IN (SELECT entity_key FROM legacy_import_backup "
+                "WHERE batch_id=:b AND kind='clients')"), {"b": batch_id}
+            )).scalar() or 0)
+            clientes_despues = float(await one(
+                "SELECT COALESCE(sum(COALESCE(\"saldo\",0)),0) FROM clients"))
+            precounts = {}
+            for r2 in (await conn.execute(text(
+                    "SELECT entity_key, (payload->>'count') AS n "
+                    "FROM legacy_import_backup WHERE batch_id=:b AND kind='precount'"),
+                    {"b": batch_id})).fetchall():
+                precounts[r2[0]] = int(r2[1] or 0)
+            sin_cambios = {}
+            for tabla in ("abonos", "caja_movimientos", "inventory_movements",
+                          "products"):
+                ahora = int(await one(f"SELECT count(*) FROM {tabla}"))
+                sin_cambios[tabla] = {"antes": precounts.get(tabla),
+                                      "despues": ahora,
+                                      "ok": precounts.get(tabla) == ahora}
+            validaciones = {
+                "universo_cubierto": {"staging": int(claves_staging),
+                                      "faltantes": int(faltantes),
+                                      "ok": int(faltantes) == 0},
+                "sales_legacy": {"antes": None, "despues": int(sl)},
+                "clients_saldo_intacto": {
+                    "antes": round(clientes_antes, 2),
+                    "despues": round(clientes_despues, 2),
+                    "ok": abs(clientes_antes - clientes_despues) <= 0.02},
+                "tablas_intactas": sin_cambios,
+            }
+            todo_ok = (int(faltantes) == 0
+                       and validaciones["clients_saldo_intacto"]["ok"]
+                       and all(v["ok"] for v in sin_cambios.values()))
+            await conn.execute(text(
+                "UPDATE legacy_import_batch SET status=:st, phase='validacion', "
+                "finished_at=now(), tickets_imported=:n, details_imported=:a, "
+                "cxc_imported=:c, cxc_saldo_total=:s, "
+                "clientes_saldo_actualizados=:r, errors=:e, "
+                "validations=CAST(:v AS jsonb) WHERE batch_id=:b"),
+                {"st": "COMPLETED" if todo_ok else "FAILED",
+                 "n": nuevos, "a": actualizados, "c": cxc_importados,
+                 "s": round(cxc_saldo_total, 2), "r": revisar,
+                 "e": 0 if todo_ok else 1,
+                 "v": json.dumps(validaciones, default=str), "b": batch_id})
+            if not todo_ok:
+                raise RuntimeError("validación post-import incremental falló: "
+                                   + json.dumps(validaciones, default=str)[:1500])
+            await conn.execute(text(
+                'INSERT INTO audit_logs ("_id","id","doc") '
+                'VALUES (CAST(:k AS text), CAST(:k AS text), CAST(:d AS jsonb))'),
+                {"k": uuid.uuid4().hex, "d": json.dumps({
+                    "id": uuid.uuid4().hex, "usuario_id": user.get("id"),
+                    "usuario_nombre": user.get("name"),
+                    "accion": "legacy_import_incremental",
+                    "entidad": "migracion_legacy", "registro_id": batch_id,
+                    "detalle": json.dumps({
+                        "batch": batch_id, "nuevos": nuevos,
+                        "actualizados": actualizados,
+                        "revisar_con_abonos": revisar,
+                        "cxc_nuevos": cxc_importados}),
+                    "fecha": iso_now()}, default=str)})
+    except Exception as exc:  # noqa: BLE001
+        try:
+            async with eng.begin() as conn:
+                await conn.execute(text(
+                    "UPDATE legacy_import_batch SET status='FAILED', "
+                    "finished_at=now(), error_detail=:e WHERE batch_id=:b "
+                    "AND status<>'ROLLED_BACK'"),
+                    {"e": str(exc)[:2000], "b": batch_id})
+        except Exception:
+            pass
+    finally:
+        _TAREA.pop("corriendo", None)
+
+
 @router.get("/legacy/progress")
 async def legacy_progress(user: dict = Depends(legacy_read)):
     await _ensure_tables()
@@ -943,3 +1265,225 @@ async def legacy_estado_cuenta(codigo: str,
     return {"codigo": codigo, "documentos": docs,
             "total_documentos": len(docs),
             "saldo_historico": round(sum(float(d.get("saldo") or 0) for d in docs), 2)}
+
+
+# --------------------------------------------------------------------------- #
+# Despliegue de datos legacy por ZIP (Herramientas de desarrollador)          #
+#                                                                             #
+# Permite subir un ZIP con los ~370 archivos DBF/CDX/FPT y desplegarlos en    #
+# la carpeta legacy_data desde la UI, para ejecutar las fases de migración    #
+# en el momento que se requiera sin copias manuales (docker cp / scp).        #
+#                                                                             #
+# NOTA de seguridad: a diferencia de las fases destructivas (import/rollback, #
+# 404 en producción), este endpoint SOLO despliega ARCHIVOS en la carpeta     #
+# legacy_data: no toca la base de datos. Por eso está disponible también en   #
+# producción, siempre con las capas 2-4 (DEVELOPER_MODE + LEGACY_ENABLED +    #
+# rol admin_desarrollador + permiso developer_tools). Cada despliegue queda   #
+# auditado en legacy_import_audit (kind='data_deploy').                       #
+# --------------------------------------------------------------------------- #
+_LEGACY_EXT_OK = {".dbf", ".cdx", ".fpt", ".bdf", ".dbt", ".mdx", ".ndx", ".tmp"}
+_LEGACY_KEY_FILES = ["ARTICULO.dbf", "NOTAVTA.dbf", "NVTAPAR.dbf",
+                     "CLIENTES.dbf", "CXCDOCS.dbf", "CUENXCOB.dbf"]
+_LEGACY_ZIP_MAX_MB = int(os.environ.get("LEGACY_ZIP_MAX_MB", "300") or "300")
+
+
+def _legacy_data_dir() -> Path:
+    """Misma resolución que tools/legacy_migration/config.py:
+    1. LEGACY_DATA_PATH (env) · 2. <cwd>/legacy_data."""
+    env = os.environ.get("LEGACY_DATA_PATH", "").strip()
+    if env:
+        return Path(env).expanduser().resolve()
+    return (Path(os.getcwd()) / "legacy_data").resolve()
+
+
+def _move_file(src: Path, dst: Path) -> None:
+    """Mueve un archivo (incluso entre bind mounts / dispositivos distintos).
+
+    shutil.copyfile usa os.copy_file_range/sendfile, que bajo presión de
+    memoria del host falla con [Errno 12] (ENOMEM, observable con
+    Kardex.cdx). Copia por chunks en user-space: robusto y de memoria plana.
+    """
+    CH = 4 * 1024 * 1024
+    try:
+        os.replace(src, dst)
+        return
+    except OSError:
+        pass
+    with src.open("rb") as fs, dst.open("wb") as fd:
+        while True:
+            buf = fs.read(CH)
+            if not buf:
+                break
+            fd.write(buf)
+    src.unlink(missing_ok=True)
+
+
+async def legacy_data_admin(user: dict = Depends(require_permission("developer_tools"))):
+    """Despliegue de datos legacy: mismo rol/permiso que las fases, PERO
+    disponible también en producción (no escribe en la BD)."""
+    if not DEVELOPER_MODE:
+        raise HTTPException(status_code=403, detail="DEVELOPER_MODE está desactivado")
+    if not LEGACY_ENABLED:
+        raise HTTPException(status_code=403, detail=(
+            "LEGACY_MIGRATION_ENABLED=false: el módulo Legacy está "
+            "deshabilitado en este entorno"))
+    if user.get("role") != DEV_ROLE:
+        raise HTTPException(status_code=403,
+                            detail="Se requiere el rol admin_desarrollador")
+    return user
+
+
+def _legacy_dir_summary(d: Path) -> dict:
+    """Inventario de la carpeta legacy_data (contadores por extensión)."""
+    if not d.is_dir():
+        return {"existe": False, "ruta": str(d), "archivos": 0,
+                "por_extension": {}, "bytes_total": 0,
+                "tablas_clave": {}, "actualizado": None}
+    por_ext: dict[str, int] = {}
+    bytes_total = 0
+    newest = 0.0
+    key: dict[str, dict] = {}
+    for p in d.iterdir():
+        if not p.is_file():
+            continue
+        ext = p.suffix.lower()
+        por_ext[ext] = por_ext.get(ext, 0) + 1
+        bytes_total += p.stat().st_size
+        newest = max(newest, p.stat().st_mtime)
+        if p.name in _LEGACY_KEY_FILES:
+            key[p.name] = {"bytes": p.stat().st_size,
+                           "modificado": datetime.fromtimestamp(
+                               p.stat().st_mtime, tz=timezone.utc).isoformat()}
+    return {"existe": True, "ruta": str(d), "archivos": sum(por_ext.values()),
+            "por_extension": por_ext, "bytes_total": bytes_total,
+            "tablas_clave": key,
+            "actualizado": datetime.fromtimestamp(newest, tz=timezone.utc).isoformat()
+            if newest else None}
+
+
+@router.get("/legacy/data/status")
+async def legacy_data_status(user: dict = Depends(legacy_data_admin)):
+    d = _legacy_data_dir()
+    s = _legacy_dir_summary(d)
+    prev = sorted(d.parent.glob(f"{d.name}_prev_*"))
+    s["backup_previo"] = prev[-1].name if prev else None
+    s["zip_max_mb"] = _LEGACY_ZIP_MAX_MB
+    s["extensiones_permitidas"] = sorted(_LEGACY_EXT_OK)
+    return s
+
+
+@router.post("/legacy/data/deploy")
+async def legacy_data_deploy(file: UploadFile = File(...),
+                             user: dict = Depends(legacy_data_admin)):
+    """Despliega un ZIP con los archivos legacy (DBF/CDX/FPT/...) en la
+    carpeta legacy_data. Atómico: extrae a un directorio temporal y hace
+    swap, conservando el despliegue anterior como legacy_data_prev_<ts>.
+
+    Validaciones: extensión permitida, sin rutas peligrosas (path traversal),
+    tope de tamaño (LEGACY_ZIP_MAX_MB, default 300 MB) y tope de archivos.
+    """
+    import zipfile
+    from io import BytesIO
+
+    d = _legacy_data_dir()
+    content = await file.read()
+    max_bytes = _LEGACY_ZIP_MAX_MB * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(400, f"El ZIP excede el tope de {_LEGACY_ZIP_MAX_MB} MB "
+                                 f"({len(content) / 1024 / 1024:.1f} MB)")
+    try:
+        zf = zipfile.ZipFile(BytesIO(content))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "El archivo no es un ZIP válido")
+    if zf.testzip() is not None:
+        raise HTTPException(400, "ZIP corrupto (CRC inválido)")
+
+    miembros: list[zipfile.ZipInfo] = []
+    bases: list[str] = []
+    rechazados: list[str] = []
+    for m in zf.infolist():
+        nombre = m.filename.replace("\\", "/")
+        base = nombre.rsplit("/", 1)[-1]
+        if not base or nombre.startswith("/") or ".." in nombre.split("/"):
+            rechazados.append(f"{m.filename} (ruta peligrosa)")
+            continue
+        if Path(base).suffix.lower() not in _LEGACY_EXT_OK:
+            rechazados.append(f"{m.filename} (extensión no permitida)")
+            continue
+        if m.file_size > 64 * 1024 * 1024:
+            rechazados.append(f"{m.filename} (archivo > 64 MB)")
+            continue
+        miembros.append(m)
+        bases.append(base)
+    if len(miembros) > 2000:
+        raise HTTPException(400, f"Demasiados archivos en el ZIP ({len(miembros)} > 2000)")
+    if not miembros:
+        raise HTTPException(400, "El ZIP no contiene archivos legacy válidos "
+                                 "(DBF/CDX/FPT/BDF/TMP)")
+    if not any(b in _LEGACY_KEY_FILES for b in bases):
+        raise HTTPException(400, "El ZIP no contiene las tablas clave "
+                                 f"({', '.join(_LEGACY_KEY_FILES)})")
+    total_descomprimido = sum(m.file_size for m in miembros)
+    if total_descomprimido > 2 * 1024 * 1024 * 1024:
+        raise HTTPException(400, "Contenido descomprimido > 2 GB")
+
+    # Extraer a un directorio temporal y hacer swap A NIVEL DE CONTENIDO
+    # (d puede ser un bind mount: no se puede renombrar el punto de montaje).
+    d.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    tmp = d.parent / f".legacy_deploy_{ts}"
+    prev = d.parent / f"{d.name}_prev_{ts}"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir(parents=True)
+    extraidos = 0
+    try:
+        for m, base in zip(miembros, bases):
+            destino = tmp / base
+            with zf.open(m) as src, destino.open("wb") as out:
+                shutil.copyfileobj(src, out)
+            extraidos += 1
+        zf.close()
+        d.mkdir(parents=True, exist_ok=True)
+        # 1) contenido actual → backup prev_<ts> (copia user-space: atraviesa
+        #    mounts y no depende de copy_file_range)
+        prev.mkdir(exist_ok=True)
+        for p in list(d.iterdir()):
+            if p.is_file():
+                _move_file(p, prev / p.name)
+        # 2) contenido nuevo → d (con restauración total si algo falla)
+        try:
+            for p in list(tmp.iterdir()):
+                _move_file(p, d / p.name)
+        except Exception:
+            for p in list(d.iterdir()):
+                if p.is_file():
+                    p.unlink(missing_ok=True)
+            for p in list(prev.iterdir()):
+                if p.is_file():
+                    _move_file(p, d / p.name)
+            raise
+        shutil.rmtree(tmp, ignore_errors=True)
+        # conservar solo el último backup
+        for p in sorted(d.parent.glob(f"{d.name}_prev_*"))[:-1]:
+            shutil.rmtree(p, ignore_errors=True)
+    except Exception as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise HTTPException(500, f"Fallo durante el despliegue: {str(e)[:120]}")
+
+    resumen = _legacy_dir_summary(d)
+    resumen["extraidos"] = extraidos
+    resumen["rechazados"] = rechazados
+    resumen["backup_previo"] = prev.name
+    resumen["bytes_zip"] = len(content)
+    try:
+        async with transaction() as conn:
+            await conn.execute(text(
+                "INSERT INTO legacy_import_audit (batch_id, kind, entity_key, payload) "
+                "VALUES (:b, 'data_deploy', :u, CAST(:p AS jsonb))"),
+                {"b": f"DEPLOY-{ts}", "u": user.get("name"),
+                 "p": json.dumps({"archivos": extraidos, "rechazados": len(rechazados),
+                                  "bytes_zip": len(content), "ruta": str(d)})})
+    except Exception:
+        pass  # la auditoría no debe romper el despliegue
+    return resumen

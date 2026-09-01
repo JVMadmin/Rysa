@@ -114,7 +114,7 @@ ROLE_PERMISSIONS = {
         "reportes.ver", "reportes.global",
         "importar", "exportar", "config", "credito.autorizar",
         "inventario.autorizar_negativo", "finanzas.ver", "catalogo.ver",
-        "caja.retiro_forzado", "cxc.abono",
+        "caja.retiro_forzado", "cxc.abono", "cxc.interes",
         "proveedor.ver", "proveedor.crear", "proveedor.editar",
         "compra.ver", "compra.crear", "compra.cancelar",
         "abono.ver", "abono.comprobante", "cuentas.ver",
@@ -150,6 +150,7 @@ ROLE_PERMISSIONS = {
         "cliente.crear", "cliente.editar", "cliente.baja",
         "reportes.ver", "reportes.global", "exportar", "importar",
         "cxc.ver", "caja.entrada", "credito.autorizar",
+        "cxc.interes",
         "compra.ver", "compra.crear", "compra.cancelar", "abono.ver",
         "abono.comprobante", "proveedor.ver", "cuentas.ver",
         "pedido.gestionar", "cxp.pagar",
@@ -192,6 +193,10 @@ MODULES = {
     "cxc": {
         "label": "Cuentas por Cobrar",
         "perms": {"cxc.ver", "caja.entrada", "credito.autorizar", "cxc.abono"},
+    },
+    "cxc_interes": {
+        "label": "CxC: aplicar interés moratorio",
+        "perms": {"cxc.interes"},
     },
     "reportes": {
         "label": "Reportes",

@@ -376,8 +376,9 @@ class ProductImporter:
             "existencia_total": round(sum(float(d.get("existencia") or 0)
                                           for d in self.docs), 2),
             "estados_legacy": estados,
+            # ecuación sobre el universo DEDUPLICADO (docs + rechazados =
+            # creados + existentes; los duplicados resueltos no se re-cuentan)
             "ecuacion_ok": (len(self.docs) + len(self.rejected)
-                            + len(self.dup_active_won)
                             == counts.get("creados", 0)
                             + counts.get("existentes_ya_en_products", 0)
                             + counts.get("rechazados", 0)),
