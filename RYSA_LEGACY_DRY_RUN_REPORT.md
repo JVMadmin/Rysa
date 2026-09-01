@@ -1,11 +1,11 @@
 # RYSA LEGACY DRY-RUN REPORT (FASE 4)
 
-Generado: 2026-08-29T23:54:23.360843+00:00 · Duración: 3.0 s · Idempotencia (2 pasadas idénticas): **OK**
+Generado: 2026-08-31T23:24:36.118687+00:00 · Duración: 3.9 s · Idempotencia (2 pasadas idénticas): **OK**
 
 ## 1. Tickets
 
 - Total staged: 57,258
-- Would import: **57,258** · skip (ya existen en sales): 0
+- Would import: **0** · skip (ya existen en sales): 57,258
 - Cancelados: 3,000 (con saldo 0 → ya en REVIEW; sin saldo 3,000)
 - Monto total histórico: $63,356,380.83
 - Identidad (SERIE,FOLIO): 57,258 filas / 57,258 únicas → SIN duplicados
@@ -14,7 +14,7 @@ Generado: 2026-08-29T23:54:23.360843+00:00 · Duración: 3.0 s · Idempotencia (
 ## 2. Detalles
 
 - Total: 134,429 · would import: 134,429
-- Sin producto RYSA (PRODUCT_REVIEW_REQUIRED): **134,429** · matched: 0
+- Sin producto RYSA (PRODUCT_REVIEW_REQUIRED): **95** · matched: 134,334
 - Monto calculado (CANTIDAD×PRECIO): $58,788,278.44
 - Identidad (doc,partida): 134,429 / 134,429 únicas
 
@@ -38,7 +38,7 @@ Generado: 2026-08-29T23:54:23.360843+00:00 · Duración: 3.0 s · Idempotencia (
 
 - Clientes: `{'UNMATCHED': 20, 'DELETED_LEGACY': 1, 'MATCHED': 619}`
 - UNMATCHED (20): `['00000', '00361', '00389', '15090', '25045', '45065', '6', '65085', '74210', '75007', '75010', '75011', '75013', '75015', '75022', '75030', '75095', '8', '86482', '97504']`
-- Productos: `{'PRODUCT_REVIEW_REQUIRED': 2036}` → NO se crearán productos en este dry-run (regla 1); los detalles conservan su información legacy.
+- Productos: `{'PRODUCT_REVIEW_REQUIRED': 2, 'MATCHED': 2034}` → NO se crearán productos en este dry-run (regla 1); los detalles conservan su información legacy.
 
 ## 5. Estado de cuenta virtual (verificación de estructura)
 
@@ -68,12 +68,12 @@ Generado: 2026-08-29T23:54:23.360843+00:00 · Duración: 3.0 s · Idempotencia (
 
 ## 7. Reconciliación STAGING vs DRY-RUN
 
-- Tickets: 57,258 = would_import 57,258 + skip 0 → OK
+- Tickets: 57,258 = would_import 0 + skip 57,258 → OK
 - CxC: 3,575 = would_import 232 + ready_zero 3,006 + review 269 + negative 5 + excluded 63 = 3,575 → OK
 
 ## 8. Producción verificada intacta
 
-- clients=686 · sales=0 · abonos=0 · products=0 · caja_movimientos=0 · inventory_movements=0
+- clients=686 · sales=57258 · abonos=0 · products=2270 · caja_movimientos=20 · inventory_movements=45
 
 ## 9. Estrategia transaccional del futuro import
 
@@ -109,4 +109,4 @@ COMMIT   -- o ROLLBACK ante cualquier error; nunca dejar parcial
 
 ## 12. Veredicto
 
-**DRY-RUN VÁLIDO — LISTO PARA FASE 5 (diseño de importación + frontend)** · Producción sin modificar. Import NO ejecutado.
+**DRY-RUN CON PROBLEMAS** · Producción sin modificar. Import NO ejecutado.

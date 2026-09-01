@@ -44,6 +44,11 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5174,http://127.0.0.1:5174}
     volumes:
       - uploads:/app/uploads
+      # Migración legacy: código + datos DBF montados del host (no van en la
+      # imagen del backend); reports CSV quedan persistentes en el host.
+      - ./tools:/app/tools:ro
+      - ./legacy_data:/app/legacy_data:ro
+      - ./legacy_reports:/app/legacy_reports
     depends_on:
       postgres:
         condition: service_healthy

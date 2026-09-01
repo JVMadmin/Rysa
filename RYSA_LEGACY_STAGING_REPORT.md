@@ -1,6 +1,6 @@
 # RYSA LEGACY STAGING REPORT (FASE 3)
 
-Batch: `B20260830134818` · Generado: 2026-08-30T13:48:18.823217+00:00 · Duración: 261.1 s · Fuente: `/repo/legacy_data`
+Batch: `B20260831232056` · Generado: 2026-08-31T23:20:56.802252+00:00 · Duración: 146.2 s · Fuente: `/app/legacy_data`
 
 ## 1. Resumen del batch
 
@@ -8,10 +8,10 @@ Batch: `B20260830134818` · Generado: 2026-08-30T13:48:18.823217+00:00 · Duraci
 - Detalles staged: **134,438** (legacy 134,438 → OK)
 - CxC snapshot: **3,576** de 3,576 → READY 3,239 · REVIEW 269 · NEGATIVE 5 · EXCLUDED 63 (OK)
 - Clientes mapeados: 640 → `{'UNMATCHED': 20, 'MATCHED': 619, 'DELETED_LEGACY': 1}`
-- Productos mapeados: 2,036 → `{'PRODUCT_REVIEW_REQUIRED': 2036}`
+- Productos mapeados: 2,036 → `{'MATCHED': 2034, 'PRODUCT_REVIEW_REQUIRED': 2}`
 - **Balances por cliente (V2):** MATCH 611 · DIFFERENCE 79 · REVIEW 0 · maestro $2,547,638.50 · docs $1,660,452.77 · ledger $3,147,481.00 · brechas: docs $887,185.73 / ledger $-599,842.50
 
-- Excluidos (serie F): 171 registros (108 movimientos + documentos) · Cola de revisión: 2,305
+- Excluidos (serie F): 171 registros (108 movimientos + documentos) · Cola de revisión: 271
 
 ## 2. Decisiones oficiales aplicadas
 
@@ -38,22 +38,22 @@ legacy_migration_batch · legacy_customer_mapping · legacy_product_mapping · l
 
 ## 6. Reportes generados
 
-- `/repo/legacy_reports/staging/customer_mapping.csv`
-- `/repo/legacy_reports/staging/product_mapping.csv`
-- `/repo/legacy_reports/staging/tickets_staging.csv`
-- `/repo/legacy_reports/staging/ticket_details_staging.csv`
-- `/repo/legacy_reports/staging/cxc_staging.csv`
-- `/repo/legacy_reports/staging/review_queue.csv`
-- `/repo/legacy_reports/staging/excluded_documents.csv`
-- `/repo/legacy_reports/customers/client_balance.csv`
-- `/repo/legacy_reports/reconciliation/client_balance_reconciliation.csv`
-- `/repo/legacy_reports/snapshots/snapshot_index.csv`
-- `/repo/legacy_reports/cxc/cxc_document_status.csv`
-- `/repo/legacy_reports/products/product_mapping_full.csv`
-- `/repo/legacy_reports/sales/tickets_index.csv`
-- `/repo/legacy_reports/errors/review_queue_full.csv`
-- `/repo/legacy_reports/snapshots/changes_vs_previous.csv`
-- `/repo/legacy_reports/staging/migration_summary.csv`
+- `/app/legacy_reports/staging/customer_mapping.csv`
+- `/app/legacy_reports/staging/product_mapping.csv`
+- `/app/legacy_reports/staging/tickets_staging.csv`
+- `/app/legacy_reports/staging/ticket_details_staging.csv`
+- `/app/legacy_reports/staging/cxc_staging.csv`
+- `/app/legacy_reports/staging/review_queue.csv`
+- `/app/legacy_reports/staging/excluded_documents.csv`
+- `/app/legacy_reports/customers/client_balance.csv`
+- `/app/legacy_reports/reconciliation/client_balance_reconciliation.csv`
+- `/app/legacy_reports/snapshots/snapshot_index.csv`
+- `/app/legacy_reports/cxc/cxc_document_status.csv`
+- `/app/legacy_reports/products/product_mapping_full.csv`
+- `/app/legacy_reports/sales/tickets_index.csv`
+- `/app/legacy_reports/errors/review_queue_full.csv`
+- `/app/legacy_reports/snapshots/changes_vs_previous.csv`
+- `/app/legacy_reports/staging/migration_summary.csv`
 
 ## 7. Estado
 

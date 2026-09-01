@@ -149,6 +149,31 @@ def _cmd_dry_run(_args) -> int:
     return 0
 
 
+def _cmd_import_products(_args) -> int:
+    """FASE 5: catálogo de productos ARTICULO.dbf → products (única fase que
+    escribe en producción; decisiones P1-P5 en products.py)."""
+    import asyncio
+    from .products import run as run_products
+    print("Ejecutando IMPORT-PRODUCTS (escribe en `products`; idempotente)...",
+          flush=True)
+    result = asyncio.run(
+        run_products(progress=lambda m: print(f"  · {m}", flush=True)))
+    if result.get("status") != "OK":
+        print(f"ERROR: {result}")
+        return 2
+    c = result["counts"]
+    print(f"Batch: {result['batch_id']}")
+    print(f"ARTICULO válidos: {c['articulo_validos']:,} "
+          f"(activos {c['activos']:,} · baja lógica {c['borrados_legacy']:,})")
+    print(f"Creados en products: {c['creados']:,} · ya existentes "
+          f"(no sobrescritos): {c['existentes_ya_en_products']:,} · "
+          f"rechazados: {c['rechazados']:,}")
+    print(f"Ecuación: {'OK' if result['validations']['ecuacion_ok'] else 'FALLA'}")
+    for f in result["outputs"].values():
+        print(f"Salida: {f}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m tools.legacy_migration",
@@ -161,6 +186,8 @@ def main(argv=None) -> int:
     sub.add_parser("analyze", help="FASE 2: validación matemática del Legacy")
     sub.add_parser("stage", help="FASE 3: staging en tablas legacy_* (idempotente)")
     sub.add_parser("dry-run", help="FASE 4: previsualiza la importación desde staging")
+    sub.add_parser("import-products",
+                   help="FASE 5: importa catálogo ARTICULO.dbf a products")
     args = ap.parse_args(argv)
     if args.cmd == "inventory":
         return _cmd_inventory(args)
@@ -172,6 +199,8 @@ def main(argv=None) -> int:
         return _cmd_stage(args)
     if args.cmd == "dry-run":
         return _cmd_dry_run(args)
+    if args.cmd == "import-products":
+        return _cmd_import_products(args)
     return 1
 
 
