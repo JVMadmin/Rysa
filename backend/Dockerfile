@@ -21,6 +21,9 @@ RUN pip install --upgrade pip && \
 # Código fuente del backend (excluye .env, venv, uploads, etc. via .dockerignore)
 COPY . .
 
+# Script de diagnóstico (también accesible desde /app/scripts/).
+RUN chmod +x /app/scripts/check_installation.py
+
 EXPOSE 8000
 
 # Entry point real: Alembic aplica el esquema y uvicorn sirve la API.

@@ -30,81 +30,18 @@ from .dbf_reader import iter_records
 TOL = 0.01
 CHUNK = 5000
 
+# Las tablas legacy_* (incluidas las de staging) las crea Alembic en la
+# migración 0012_legacy_staging. Aquí solo dejamos los ALTER idempotentes
+# (V7+): si la migración no las incluye o se aplican cambios antes de
+# correr alembic upgrade head, estos ALTER se ejecutan sin romper nada.
 DDL = [
-    """CREATE TABLE IF NOT EXISTS legacy_migration_batch (
-         batch_id TEXT PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-         source_path TEXT, source_hash TEXT, status TEXT,
-         records_discovered BIGINT, records_staged BIGINT, records_ready BIGINT,
-         records_review BIGINT, records_excluded BIGINT, validations JSONB)""",
-    """CREATE TABLE IF NOT EXISTS legacy_customer_mapping (
-         legacy_customer_key TEXT PRIMARY KEY, rysa_customer_id TEXT,
-         status TEXT, match_type TEXT, legacy_nombre TEXT,
-         legacy_deleted BOOLEAN DEFAULT false, last_batch_id TEXT,
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS legacy_product_mapping (
-         legacy_product_key TEXT PRIMARY KEY, rysa_product_id TEXT,
-         mapping_status TEXT, legacy_status TEXT, last_batch_id TEXT,
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS legacy_tickets (
-         legacy_key TEXT PRIMARY KEY, legacy_serie TEXT, legacy_folio TEXT,
-         legacy_cliente TEXT, legacy_fecha TEXT, legacy_total NUMERIC,
-         legacy_condicion TEXT, legacy_vendedor TEXT, legacy_cancelado BOOLEAN,
-         legacy_saldo_original NUMERIC, legacy_status TEXT, customer_status TEXT,
-         source TEXT DEFAULT 'LEGACY', is_historical BOOLEAN DEFAULT true,
-         legacy_table TEXT DEFAULT 'NOTAVTA', doc JSONB,
-         migration_status TEXT, last_batch_id TEXT,
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS legacy_ticket_details (
-         legacy_key TEXT PRIMARY KEY, doc_key TEXT, partida TEXT,
-         legacy_codigo TEXT, legacy_cantidad NUMERIC, legacy_precio NUMERIC,
-         legacy_importe_calculado NUMERIC, rysa_product_id TEXT,
-         mapping_status TEXT, source TEXT DEFAULT 'LEGACY',
-         legacy_table TEXT DEFAULT 'NVTAPAR', doc JSONB, last_batch_id TEXT,
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS legacy_cxc_snapshot (
-         legacy_key TEXT PRIMARY KEY, legacy_serie TEXT, legacy_folio TEXT,
-         legacy_cliente TEXT, legacy_condicion TEXT, legacy_saldo NUMERIC,
-         calculated_saldo NUMERIC, difference NUMERIC, movement_count INT,
-         deleted_movement_count INT, c_total NUMERIC, a_total NUMERIC,
-         cancelado BOOLEAN, source TEXT DEFAULT 'LEGACY',
-         legacy_table TEXT DEFAULT 'CXCDOCS', status TEXT, review_reason TEXT,
-         last_batch_id TEXT, updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS legacy_cxc_movements (
-         legacy_key TEXT PRIMARY KEY, doc_key TEXT, serie TEXT, folio TEXT,
-         foliomovto TEXT, movto TEXT, cliente TEXT, monto NUMERIC,
-         aplica TEXT, concepto TEXT, condicion TEXT, deleted BOOLEAN,
-         legacy_table TEXT DEFAULT 'CUENXCOB', last_batch_id TEXT,
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS legacy_excluded_documents (
-         legacy_key TEXT PRIMARY KEY, entity TEXT, serie TEXT, folio TEXT,
-         reason TEXT DEFAULT 'FACTURA_SERIE_F', scope_status TEXT
-         DEFAULT 'EXCLUDED_SCOPE', payload JSONB, last_batch_id TEXT,
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS legacy_review_queue (
-         legacy_key TEXT, entity TEXT, reason TEXT, detail JSONB,
-         status TEXT DEFAULT 'PENDING', created_at TIMESTAMPTZ
-         NOT NULL DEFAULT now(), last_batch_id TEXT,
-         PRIMARY KEY (entity, legacy_key, reason))""",
-    # ---------------- V2: snapshots versionados + saldo maestro ----------------
-    """CREATE TABLE IF NOT EXISTS legacy_snapshots (
-         snapshot_id TEXT PRIMARY KEY, batch_id TEXT,
-         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-         source_path TEXT, source_hash TEXT, files_count INT, notes TEXT)""",
-    """CREATE TABLE IF NOT EXISTS legacy_client_balance (
-         snapshot_id TEXT, legacy_customer_key TEXT, legacy_nombre TEXT,
-         master_saldo NUMERIC, docs_saldo NUMERIC, ledger_saldo NUMERIC,
-         diff_docs NUMERIC, diff_ledger NUMERIC, estado TEXT,
-         rysa_customer_id TEXT, last_batch_id TEXT,
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-         PRIMARY KEY (snapshot_id, legacy_customer_key))""",
-    # ---------------- V7: detección de cambios entre snapshots ----------------
-    """ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS document_hash TEXT""",
-    """ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS change_status TEXT""",
-    """ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT""",
-    """ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS document_hash TEXT""",
-    """ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS change_status TEXT""",
-    """ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT""",
-    """ALTER TABLE legacy_customer_mapping ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT""",
+    "ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS document_hash TEXT",
+    "ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS change_status TEXT",
+    "ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT",
+    "ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS document_hash TEXT",
+    "ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS change_status TEXT",
+    "ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT",
+    "ALTER TABLE legacy_customer_mapping ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT",
 ]
 
 _INDEXES = [

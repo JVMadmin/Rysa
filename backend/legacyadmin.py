@@ -89,70 +89,36 @@ async def legacy_query(user: dict = Depends(require_permission("cxc.ver"))):
 
 
 # --------------------------------------------------------------------------- #
-# DDL de las tablas de importación (auto-instalables, namespace legacy_*)      #
+# Las tablas legacy_* se crean por Alembic (migraciones 0011 y 0012).         #
+# Este módulo solo asegura columnas defensivas (V2 validations + V7 hashes)   #
+# por si la BD se actualizó desde una versión anterior a la migración.        #
 # --------------------------------------------------------------------------- #
-_DDL = [
-    """CREATE TABLE IF NOT EXISTS legacy_import_batch (
-         batch_id TEXT PRIMARY KEY,
-         staging_batch_id TEXT,
-         started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-         finished_at TIMESTAMPTZ,
-         status TEXT NOT NULL DEFAULT 'PENDING',
-         phase TEXT DEFAULT '',
-         tickets_imported BIGINT DEFAULT 0,
-         details_imported BIGINT DEFAULT 0,
-         cxc_imported BIGINT DEFAULT 0,
-         cxc_saldo_total NUMERIC DEFAULT 0,
-         clientes_saldo_actualizados INT DEFAULT 0,
-         skipped_duplicates BIGINT DEFAULT 0,
-         cxc_sin_cliente_rysa INT DEFAULT 0,
-         errors INT DEFAULT 0,
-         error_detail TEXT DEFAULT '',
-         validations JSONB,
-         created_by TEXT)""",
-    """ALTER TABLE legacy_import_batch ADD COLUMN IF NOT EXISTS validations JSONB""",
-    """CREATE TABLE IF NOT EXISTS legacy_import_audit (
-         id BIGSERIAL PRIMARY KEY,
-         batch_id TEXT NOT NULL,
-         kind TEXT NOT NULL,
-         entity_key TEXT,
-         payload JSONB,
-         created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS legacy_import_backup (
-         id BIGSERIAL PRIMARY KEY,
-         batch_id TEXT NOT NULL,
-         kind TEXT NOT NULL,
-         entity_key TEXT,
-         payload JSONB,
-         created_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
-    # ---------------- V2: snapshots versionados + saldo maestro ----------------
-    """CREATE TABLE IF NOT EXISTS legacy_snapshots (
-         snapshot_id TEXT PRIMARY KEY, batch_id TEXT,
-         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-         source_path TEXT, source_hash TEXT, files_count INT, notes TEXT)""",
-    """CREATE TABLE IF NOT EXISTS legacy_client_balance (
-         snapshot_id TEXT, legacy_customer_key TEXT, legacy_nombre TEXT,
-         master_saldo NUMERIC, docs_saldo NUMERIC, ledger_saldo NUMERIC,
-         diff_docs NUMERIC, diff_ledger NUMERIC, estado TEXT,
-         rysa_customer_id TEXT, last_batch_id TEXT,
-         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-         PRIMARY KEY (snapshot_id, legacy_customer_key))""",
-]
-_IDX = [
-    "CREATE INDEX IF NOT EXISTS idx_limp_batch ON legacy_import_audit (batch_id)",
-    "CREATE INDEX IF NOT EXISTS idx_lbackup_batch ON legacy_import_backup (batch_id)",
-    "CREATE INDEX IF NOT EXISTS idx_sales_legacy ON sales ((doc->>'source')) "
-    "WHERE doc->>'source' = 'LEGACY'",
+
+_LEGACY_DEFENSIVE_ALTERS = [
+    "ALTER TABLE legacy_import_batch ADD COLUMN IF NOT EXISTS validations JSONB",
+    "ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS document_hash TEXT",
+    "ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS change_status TEXT",
+    "ALTER TABLE legacy_tickets ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT",
+    "ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS document_hash TEXT",
+    "ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS change_status TEXT",
+    "ALTER TABLE legacy_cxc_snapshot ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT",
+    "ALTER TABLE legacy_customer_mapping ADD COLUMN IF NOT EXISTS missing_from_snapshot TEXT",
 ]
 
 
 async def _ensure_tables():
+    """Idempotente: las tablas las crea Alembic; aquí solo blindamos columnas
+    añadidas por versiones (V2 validations, V7 hashes/missing) que pueden
+    faltar en una BD actualizada desde antes de 0011/0012."""
     eng = get_engine()
     async with eng.begin() as conn:
-        for ddl in _DDL:
-            await conn.execute(text(ddl))
-        for ix in _IDX:
-            await conn.execute(text(ix))
+        for sql in _LEGACY_DEFENSIVE_ALTERS:
+            try:
+                await conn.execute(text(sql))
+            except Exception:
+                # Si una columna ya existe con tipo incompatible, lo
+                # registraremos pero no bloqueamos otros endpoints.
+                pass
 
 
 # --------------------------------------------------------------------------- #

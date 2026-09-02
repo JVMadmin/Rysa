@@ -60,6 +60,30 @@ logger = logging.getLogger("rysa")
 app = FastAPI(title="Grupo RYSA ERP")
 api = APIRouter(prefix="/api")
 
+
+@app.get("/health")
+async def healthcheck():
+    """Endpoint de salud para healthchecks Docker / balanceadores.
+    Verifica que la app responde. NO consulta la BD (es rápido y no falla
+    cuando el postgres está reiniciando). El check profundo de la BD se
+    hace en /api/dev/diagnostico."""
+    return {"ok": True, "service": "rysa-erp", "env": _APP_ENV}
+
+
+@api.get("/health/db")
+async def healthcheck_db():
+    """Check de BD: SELECT 1. Devuelve 503 si falla."""
+    try:
+        from pgstore.database import get_engine
+        from sqlalchemy import text
+        eng = get_engine()
+        async with eng.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"ok": True, "db": "up"}
+    except Exception as e:
+        return JSONResponse({"ok": False, "db": "down", "error": str(e)[:200]},
+                            status_code=503)
+
 # Roles que se consideran administración del sistema (admin, propietario, desarrollador)
 ADMIN_SYSTEM_ROLES = {"admin", "admin_propietario", "admin_desarrollador"}
 
