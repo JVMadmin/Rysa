@@ -188,7 +188,31 @@ export default function Ventas() {
   const reimprimir = async (s) => {
     try {
       const { data } = await api.post(`/sales/${s.id}/ticket-pdf`);
-      window.open(fileUrl(data.url), "_blank");
+      // Iframe oculto: carga el PDF y dispara el diálogo de impresión
+      // automáticamente (1 copia por defecto; el usuario puede cambiarla
+      // desde el diálogo del navegador). Evita que tenga que abrir el
+      // PDF en otra pestaña y pulsar Ctrl+P.
+      const url = fileUrl(data.url);
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.src = url;
+      iframe.title = `ticket-${s.folio}`;
+      iframe.onload = () => {
+        try { iframe.contentWindow && iframe.contentWindow.focus(); } catch {}
+        // Dar un tick para que el visor del PDF termine de cargar
+        setTimeout(() => {
+          try { iframe.contentWindow && iframe.contentWindow.print(); }
+          catch (e) { window.open(url, "_blank"); }
+        }, 400);
+      };
+      document.body.appendChild(iframe);
+      // Limpieza tras 60s (suficiente para que termine la impresión)
+      setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 60000);
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
