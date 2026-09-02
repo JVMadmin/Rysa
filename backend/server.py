@@ -3465,10 +3465,25 @@ async def cxc_detail(client_id: str, user: dict = Depends(require_permission("cx
     for s in sales:
         dv, vence = _dias_vencido(s["fecha"], cli.get("dias_credito", 0), hoy)
         saldo = round(float(s.get("saldo", 0)), 2)
+        es_legacy = (s.get("source") == "LEGACY")
+        # Estado visual del CxC (independiente de `pagada`):
+        #   LEGACY_PAGADO: tickets legacy con saldo 0 — NO significa que el ERP
+        #     los cobró; significa que en el sistema legacy origen ya estaban
+        #     liquidados. El usuario no puede seleccionarlos para interés
+        #     (base = 0), pero tampoco deben aparecer como "Pagado" del ERP
+        #     porque la cobranza no necesariamente se reflejó en abonos aquí.
+        #   ACTIVO: saldo > 0, vencido.
+        #   VIGENTE: saldo > 0, dentro de plazo.
+        #   PAGADO: no-legacy con saldo 0 (cobrado en el ERP).
+        if saldo <= 0.001:
+            estado_cxc = "LEGACY_PAGADO" if es_legacy else "PAGADO"
+        else:
+            estado_cxc = "ACTIVO" if dv > 0 else "VIGENTE"
         ventas.append({"id": s["id"], "folio": s["folio"], "fecha": s["fecha"], "total": s["total"],
                        "saldo": saldo, "vence": vence, "dias_vencido": max(dv, 0),
                        "interes_acumulado": round(float(s.get("interes_acumulado", 0) or 0), 2),
                        "condicion": s.get("condicion"), "source": s.get("source"),
+                       "estado_cxc": estado_cxc,
                        "pagada": saldo <= 0.001})
     abonos = await db.abonos.find({"cliente_id": client_id}, {"_id": 0}).sort("fecha", -1).to_list(5000)
     cargos = await db.cxc_cargos.find({"cliente_id": client_id}, {"_id": 0}).sort("fecha", -1).to_list(200)

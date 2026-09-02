@@ -450,9 +450,10 @@ export default function CuentasPorCobrar() {
                           <td className="p-2 text-right text-amber-700">{v.interes_acumulado > 0 ? money(v.interes_acumulado) : "—"}</td>
                           <td className="p-2 text-slate-500">{v.vence}</td>
                           <td className="p-2 text-center">
-                            {v.pagada ? <Badge className="bg-green-100 text-green-700">Pagada</Badge>
-                              : v.dias_vencido > 0 ? <Badge className="bg-red-100 text-red-700">Vencida {v.dias_vencido}d</Badge>
-                                : <Badge className="bg-blue-100 text-blue-700">Vigente</Badge>}
+                            {v.estado_cxc === "LEGACY_PAGADO" ? <Badge className="bg-slate-200 text-slate-700" title="Liquidado en el sistema legacy origen — el ERP no necesariamente tiene el comprobante de cobro">Legacy pagado</Badge>
+                              : v.estado_cxc === "PAGADO" ? <Badge className="bg-green-100 text-green-700">Pagada</Badge>
+                              : v.estado_cxc === "ACTIVO" ? <Badge className="bg-red-100 text-red-700">Vencida {v.dias_vencido}d</Badge>
+                              : <Badge className="bg-blue-100 text-blue-700">Vigente</Badge>}
                           </td>
                         </tr>
                       ))}
