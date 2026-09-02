@@ -63,6 +63,27 @@ def check_env() -> None:
     add("Environment", not missing,
         "faltan: " + ", ".join(missing) if missing else "")
 
+    # Validar que no son placeholders
+    placeholders = []
+    js = os.environ.get("JWT_SECRET", "")
+    if js.startswith("<") or "CHANGE_ME" in js or len(js) < 32:
+        placeholders.append("JWT_SECRET (placeholder o <32 chars)")
+    ap = os.environ.get("ADMIN_PASSWORD", "")
+    if ap.startswith("<") or "CHANGE_ME" in ap or len(ap) < 12:
+        placeholders.append("ADMIN_PASSWORD (placeholder o <12 chars)")
+    pp = os.environ.get("POSTGRES_PASSWORD", "")
+    if pp.startswith("<") or "CHANGE_ME" in pp:
+        placeholders.append("POSTGRES_PASSWORD (placeholder)")
+    if os.environ.get("ENVIRONMENT") == "production":
+        if not os.environ.get("ADMIN_EMAIL"):
+            placeholders.append("ADMIN_EMAIL (requerido en producción)")
+        if not os.environ.get("ADMIN_PASSWORD") or len(os.environ.get("ADMIN_PASSWORD", "")) < 12:
+            placeholders.append("ADMIN_PASSWORD (>=12 chars requerido en producción)")
+    if placeholders:
+        add("Secrets no son placeholders", False, "; ".join(placeholders))
+    else:
+        add("Secrets no son placeholders", True, "OK")
+
 
 def _engine():
     from pgstore.database import get_engine

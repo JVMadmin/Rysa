@@ -7437,42 +7437,11 @@ async def startup():
     except Exception as e:
         logger.warning("Sync de categorías falló: %s", str(e)[:120])
 
-    # Seed admin SOLO en desarrollo y SOLO con credenciales de variables de
-    # entorno (jamás hardcodeadas). Sin ADMIN_EMAIL/ADMIN_PASSWORD o con una
-    # contraseña < 12 caracteres simplemente se omite el seed.
-    env = os.environ.get("ENVIRONMENT", "development").lower()
-    admin_email = os.environ.get("ADMIN_EMAIL", "").strip().lower()
-    admin_pw = os.environ.get("ADMIN_PASSWORD", "")
+    # El bootstrap del primer administrador lo ejecuta el entrypoint del
+    # contenedor vía `python -m scripts.bootstrap_admin` antes de iniciar
+    # uvicorn (ver Dockerfile / docker-compose). Mantener aquí vacío
+    # evita crear dos rutas de bootstrap.
 
-    if env == "production":
-        # En producción el seed del administrador NO se ejecuta automáticamente:
-        # el primer usuario admin debe crearse manualmente.
-        if not await db.users.find_one({"role": "admin"}):
-            logger.warning(
-                "Seed de admin desactivado en producción. Crea el usuario administrador "
-                "manualmente antes de abrir el sistema."
-            )
-    else:
-        if not admin_email or not admin_pw:
-            logger.warning(
-                "Seed de admin omitido: define ADMIN_EMAIL y ADMIN_PASSWORD "
-                "(≥ 12 caracteres, nunca hardcodeados) para desarrollo."
-            )
-        elif not _password_ok(admin_pw):
-            logger.warning("Seed de admin omitido: ADMIN_PASSWORD debe tener al menos 12 caracteres.")
-        else:
-            existing = await db.users.find_one({"email": admin_email})
-            if not existing:
-                await db.users.insert_one({
-                    "id": uid(), "email": admin_email, "name": os.environ.get("ADMIN_NAME", "Admin"),
-                    "role": "admin", "password_hash": hash_password(admin_pw),
-                    "active": True, "token_version": 0, "created_at": iso_now()})
-                logger.info("Admin seed creado: %s", admin_email)
-            elif not verify_password(admin_pw, existing["password_hash"]):
-                await db.users.update_one({"email": admin_email},
-                                          {"$set": {"password_hash": hash_password(admin_pw)}})
-                logger.info("Admin password actualizado (solo desarrollo).")
-        
     # Cliente Público General por defecto
     if not await db.clients.find_one({"codigo": "PUBLICO"}):
         await db.clients.insert_one({

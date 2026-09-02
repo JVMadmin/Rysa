@@ -21,10 +21,13 @@ RUN pip install --upgrade pip && \
 # Código fuente del backend (excluye .env, venv, uploads, etc. via .dockerignore)
 COPY . .
 
-# Script de diagnóstico (también accesible desde /app/scripts/).
-RUN chmod +x /app/scripts/check_installation.py
+# Scripts: diagnóstico + bootstrap del primer admin
+RUN chmod +x /app/scripts/check_installation.py /app/scripts/bootstrap_admin.py
 
 EXPOSE 8000
 
-# Entry point real: Alembic aplica el esquema y uvicorn sirve la API.
-CMD ["sh", "-c", "alembic upgrade head && uvicorn server:app --host 0.0.0.0 --port 8000"]
+# Entry point real:
+#   1) Alembic aplica el esquema (incluye las 12 migraciones y las 13 tablas legacy_*)
+#   2) bootstrap_admin crea/actualiza el admin con ADMIN_EMAIL/ADMIN_PASSWORD
+#   3) uvicorn sirve la API
+CMD ["sh", "-c", "alembic upgrade head && python -m scripts.bootstrap_admin && uvicorn server:app --host 0.0.0.0 --port 8000"]

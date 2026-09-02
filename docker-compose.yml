@@ -1,6 +1,8 @@
-# Grupo RYSA ERP - Docker Compose (DEV local)
-# Punto de entrada único: Nginx (HTTP). Nada más se publica al host.
-# Copia .env.docker.example -> .env.docker y ajusta los valores antes de levantar.
+# Grupo RYSA ERP - Docker Compose
+# Punto de entrada: rysa_nginx (HTTP en ${NGINX_HTTP_PORT:-8080} del contenedor).
+# El reverse proxy público (HTTPS, certificados, redirección) corre en el
+# HOST del VPS como nginx nativo o equivalente — ver scripts/setup_nginx_host.sh
+# y DEPLOY_VPS.md sección 5.
 
 services:
   postgres:
@@ -21,7 +23,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    # Sin puertos publicados a proposito: solo accesible dentro de la red interna.
+    # Sin puertos publicados: solo accesible dentro de la red interna.
 
   backend:
     build:
@@ -33,9 +35,11 @@ services:
       - ./.env.docker
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      # Backend se conecta a PostgreSQL por el nombre de servicio Docker.
       DATABASE_URL: ${BACKEND_DATABASE_URL:-postgresql+asyncpg://rysa:rysa_dev_only_change_me@postgres:5432/rysa_dev}
       UPLOAD_DIR: /app/uploads
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_NAME: ${ADMIN_NAME:-Admin}
     volumes:
       - uploads:/app/uploads
       # Migración Legacy: código de las fases + datos DBF desplegables por
@@ -48,7 +52,6 @@ services:
         condition: service_healthy
     networks:
       - rysa_net
-    # Sin puertos publicados: solo Nginx lo expone.
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys;r=urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3);sys.exit(0 if r.status==200 else 1)\""]
       interval: 10s
@@ -57,7 +60,7 @@ services:
       start_period: 30s
     command: [
       "sh", "-c",
-      "alembic upgrade head && uvicorn server:app --host 0.0.0.0 --port 8000"
+      "alembic upgrade head && python -m scripts.bootstrap_admin && uvicorn server:app --host 0.0.0.0 --port 8000"
     ]
 
   frontend:
@@ -65,7 +68,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # Ruta relativa: el frontend habla con su mismo origen (/api -> Nginx -> backend)
+        # Ruta relativa: el SPA consume el mismo origen (proxy del host -> rysa_nginx -> backend).
         REACT_APP_BACKEND_URL: ""
     container_name: rysa_frontend
     restart: unless-stopped
@@ -85,6 +88,8 @@ services:
     container_name: rysa_nginx
     restart: unless-stopped
     ports:
+      # Puerto interno del contenedor: el nginx del host hace proxy_pass
+      # a este puerto del host. No publicar a internet.
       - "${NGINX_HTTP_PORT:-8080}:80"
     depends_on:
       backend:
