@@ -1,0 +1,72 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [evolucion-comercial, main]
+  push:
+    branches: [evolucion-comercial, main]
+
+jobs:
+  tests-backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: rysa
+          POSTGRES_PASSWORD: test_pw
+          POSTGRES_DB: rysa_dev
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rysa -d rysa_dev"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://rysa:test_pw@localhost:5432/rysa_dev
+      JWT_SECRET: ci_test_secret_must_be_at_least_32_characters_long_xx
+      ADMIN_EMAIL: ci@rysa-dev.local
+      ADMIN_PASSWORD: ciTestPassword123!
+      ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - name: Install + lint
+        working-directory: backend
+        run: |
+          pip install -q -r requirements.txt
+          python -m py_compile server.py deps.py legacyadmin.py
+          python -m py_compile scripts/check_installation.py scripts/bootstrap_admin.py
+      - name: Migrate
+        working-directory: backend
+        run: alembic upgrade head
+      - name: Unit tests
+        working-directory: backend
+        run: |
+          pytest tests/test_bootstrap_admin.py -v --tb=short -p no:xdist
+      - name: Security gate
+        working-directory: backend
+        run: |
+          pip install -q bandit
+          bandit -r server.py deps.py legacyadmin.py -f json -o /tmp/bandit.json || true
+          # Falla si hay P0/P1
+          python -c "
+          import json
+          r = json.load(open('/tmp/bandit.json'))
+          sev = {i['issue_severity']: i['issue_confidence'] for i in r.get('results',[])}
+          bad = [i for i in r.get('results',[]) if i['issue_severity'] in ('HIGH','MEDIUM') and i['issue_confidence'] in ('HIGH',)]
+          if bad:
+              print('SECURITY GATE FAIL')
+              for b in bad[:10]: print(f\"  {b['test_id']} {b['filename']}:{b['line_number']} {b['issue_text']}\")
+              raise SystemExit(1)
+          print('SECURITY GATE PASS')
+          "
+
+  build-images:
+    needs: tests-backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend
+        run: docker build -t rysa-backend:ci -f backend/Dockerfile backend
+      - name: Build frontend
+        run: docker build -t rysa-frontend:ci -f frontend/Dockerfile frontend
