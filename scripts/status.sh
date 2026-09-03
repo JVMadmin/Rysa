@@ -42,7 +42,6 @@ if [[ -d "$RYSA_REPO/.git" ]]; then
 else
   fail "no es un repositorio git ($RYSA_REPO)"
 fi
-
 # === Containers ===================================================
 hdr "Contenedores Docker"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -68,14 +67,18 @@ docker images --format "  {{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}
 
 # === PostgreSQL ===================================================
 hdr "PostgreSQL"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=_db_name.sh
+. "$SCRIPT_DIR/_db_name.sh"
+DB_NAME="$(rysa_db_name || echo "rysa_dev")"
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -q rysa_postgres; then
-  if docker exec rysa_postgres pg_isready -U rysa -d rysa_dev >/dev/null 2>&1; then
-    ok "ready (db: rysa_dev)"
+  if docker exec rysa_postgres pg_isready -U rysa -d "$DB_NAME" >/dev/null 2>&1; then
+    ok "ready (db: $DB_NAME)"
     for tbl in users clients products sales; do
-      N=$(docker exec -T rysa_postgres psql -U rysa -d rysa_dev -t -A -c "SELECT count(*) FROM $tbl" 2>/dev/null | head -1)
+      N=$(docker exec -T rysa_postgres psql -U rysa -d "$DB_NAME" -t -A -c "SELECT count(*) FROM $tbl" 2>/dev/null | head -1)
       [[ -n "$N" ]] && ok "$tbl: $N"
     done
-    LEGACY_T=$(docker exec -T rysa_postgres psql -U rysa -d rysa_dev -t -A -c "SELECT count(*) FROM sales WHERE doc->>'source'='LEGACY'" 2>/dev/null | head -1)
+    LEGACY_T=$(docker exec -T rysa_postgres psql -U rysa -d "$DB_NAME" -t -A -c "SELECT count(*) FROM sales WHERE doc->>'source'='LEGACY'" 2>/dev/null | head -1)
     [[ -n "$LEGACY_T" ]] && ok "ventas LEGACY: $LEGACY_T"
   else
     fail "no responde"

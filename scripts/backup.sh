@@ -17,6 +17,13 @@ LOG="${RYSA_HOME}/logs/backup.log"
 RET_DAYS="${BACKUP_RETAIN_DAYS:-30}"
 RET_REL="${BACKUP_RETAIN_RELEASES:-10}"
 
+# Resolver BD objetivo desde .env.docker o env (soporta DATABASE_URL y
+# BACKEND_DATABASE_URL legacy). Evita hardcodear rysa_dev.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=_db_name.sh
+. "$SCRIPT_DIR/_db_name.sh"
+DB_NAME="$(rysa_db_name || echo "rysa_dev")"
+
 log() { printf "[backup %s] %s\n" "$(date +%H:%M:%S)" "$*"; echo "[$(date -Iseconds)] $*" >> "$LOG"; }
 mkdir -p "$(dirname "$LOG")" "$DB_DIR" "$REL_DIR"
 
@@ -28,9 +35,9 @@ fi
 
 # === 1) Dump de la BD ===========================================
 STAMP=$(date +%Y%m%d_%H%M%S)
-DB_FILE="$DB_DIR/rysa_dev_${STAMP}.dump"
-log "DB -> $DB_FILE"
-if docker exec rysa_postgres pg_dump -U rysa -d rysa_dev -Fc > "$DB_FILE" 2>>"$LOG"; then
+DB_FILE="$DB_DIR/${DB_NAME}_${STAMP}.dump"
+log "DB -> $DB_FILE (db=$DB_NAME)"
+if docker exec rysa_postgres pg_dump -U rysa -d "$DB_NAME" -Fc > "$DB_FILE" 2>>"$LOG"; then
   SIZE=$(du -h "$DB_FILE" | cut -f1)
   log "DB OK ($SIZE)"
 else
@@ -63,7 +70,7 @@ tar -czf "$REL_FILE" \
 log "Release OK ($(du -h "$REL_FILE" | cut -f1))"
 
 # === 3) Rotación ==================================================
-DELETED=$(find "$DB_DIR" -name "*.dump" -mtime +"$RET_DAYS" -delete -print 2>/dev/null | wc -l)
+DELETED=$(find "$DB_DIR" -name "${DB_NAME}_*.dump" -mtime +"$RET_DAYS" -delete -print 2>/dev/null | wc -l)
 [[ "$DELETED" -gt 0 ]] && log "Rotación DB: $DELETED archivos >${RET_DAYS}d eliminados"
 
 DELETED_REL=$(find "$REL_DIR" -name "*.tar.gz" | sort | head -n -"$RET_REL" 2>/dev/null | wc -l)
@@ -71,7 +78,7 @@ find "$REL_DIR" -name "*.tar.gz" | sort | head -n -"$RET_REL" 2>/dev/null | xarg
 [[ "$DELETED_REL" -gt 0 ]] && log "Rotación releases: $DELETED_REL snapshots >$RET_REL eliminados"
 
 # === 4) Resumen ====================================================
-N_DB=$(find "$DB_DIR" -name "*.dump" | wc -l)
+N_DB=$(find "$DB_DIR" -name "${DB_NAME}_*.dump" | wc -l)
 N_REL=$(find "$REL_DIR" -name "*.tar.gz" | wc -l)
-log "Total: ${N_DB} DB dumps, ${N_REL} releases (retención ${RET_DAYS}d / ${RET_REL} releases)"
+log "Total: ${N_DB} DB dumps (${DB_NAME}), ${N_REL} releases (retención ${RET_DAYS}d / ${RET_REL} releases)"
 log "Próximo backup: configurar cron (ver DEPLOY_VPS.md)"

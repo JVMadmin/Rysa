@@ -21,6 +21,13 @@
 
 set -uo pipefail
 
+# Resolver la BD objetivo desde .env.docker o env (soporta DATABASE_URL y
+# BACKEND_DATABASE_URL legacy). Ningún valor hardcoded.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=_db_name.sh
+. "$SCRIPT_DIR/_db_name.sh"
+DB_NAME="$(rysa_db_name || echo "rysa_dev")"
+
 DOMAIN="${DOMAIN:-}"
 PUBLIC_URL="${PUBLIC_URL:-${DOMAIN:+https://$DOMAIN}}"
 INTERNAL_URL="${INTERNAL_URL:-http://localhost:8080}"
@@ -49,16 +56,16 @@ else
 fi
 
 # ===== PostgreSQL ========================================
-hdr "PostgreSQL"
+hdr "PostgreSQL (BD: $DB_NAME)"
 if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q rysa_postgres; then
-  if docker exec rysa_postgres pg_isready -U rysa -d rysa_dev >/dev/null 2>&1; then
-    pass "rysa_postgres: ready"
-    N_USERS=$(docker exec -T rysa_postgres psql -U rysa -d rysa_dev -t -A -c "SELECT count(*) FROM users" 2>/dev/null | head -1)
+  if docker exec rysa_postgres pg_isready -U rysa -d "$DB_NAME" >/dev/null 2>&1; then
+    pass "rysa_postgres: ready (db: $DB_NAME)"
+    N_USERS=$(docker exec -T rysa_postgres psql -U rysa -d "$DB_NAME" -t -A -c "SELECT count(*) FROM users" 2>/dev/null | head -1)
     [[ -n "$N_USERS" ]] && pass "BD: ${N_USERS} usuarios" || warn "BD: query SELECT count(*) users falló"
-    N_SALES=$(docker exec -T rysa_postgres psql -U rysa -d rysa_dev -t -A -c "SELECT count(*) FROM sales" 2>/dev/null | head -1)
+    N_SALES=$(docker exec -T rysa_postgres psql -U rysa -d "$DB_NAME" -t -A -c "SELECT count(*) FROM sales" 2>/dev/null | head -1)
     [[ -n "$N_SALES" ]] && pass "BD: ${N_SALES} ventas"
   else
-    fail "rysa_postgres no responde pg_isready"
+    fail "rysa_postgres no responde pg_isready (db: $DB_NAME)"
   fi
 else
   fail "contenedor rysa_postgres no está corriendo"

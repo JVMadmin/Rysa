@@ -15,7 +15,12 @@ RYSA_HOME="${RYSA_HOME:-/opt/rysa}"
 RYSA_REPO="${RYSA_HOME}/repo"
 REL_DIR="${RYSA_HOME}/backups/releases"
 DB_DIR="${RYSA_HOME}/backups/db"
-BACKUP_BEFORE_ROLLBACK="${RYSA_HOME}/backups/db/pre_rollback_$(date +%Y%m%d_%H%M%S).dump"
+# BD objetivo desde .env.docker (soporta DATABASE_URL o BACKEND_DATABASE_URL).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=_db_name.sh
+. "$SCRIPT_DIR/_db_name.sh"
+TARGET_DB="$(rysa_db_name || echo "rysa_dev")"
+BACKUP_BEFORE_ROLLBACK="${RYSA_HOME}/backups/db/pre_rollback_$(date +%Y%m%d_%H%M%S)_${TARGET_DB}.dump"
 
 if [[ $EUID -ne 0 ]]; then
   echo "ERROR: ejecuta como root" >&2; exit 1
@@ -55,8 +60,8 @@ read -p "Escribe 'ROLLBACK' para confirmar: " CONFIRM
 [[ "$CONFIRM" == "ROLLBACK" ]] || { echo "Cancelado."; exit 0; }
 
 # 1) Backup de la BD actual (por si algo sale mal)
-echo "Backup de la BD actual -> $BACKUP_BEFORE_ROLLBACK"
-docker exec rysa_postgres pg_dump -U rysa -d rysa_dev -Fc > "$BACKUP_BEFORE_ROLLBACK" 2>/dev/null || true
+echo "Backup de la BD actual ($TARGET_DB) -> $BACKUP_BEFORE_ROLLBACK"
+docker exec rysa_postgres pg_dump -U rysa -d "$TARGET_DB" -Fc > "$BACKUP_BEFORE_ROLLBACK" 2>/dev/null || true
 
 # 2) Extraer código de la release
 echo "Extrayendo código de la release..."
@@ -73,15 +78,15 @@ chown -R 1000:1000 "$RYSA_REPO" 2>/dev/null || true
 echo "Código restaurado en $RYSA_REPO"
 
 # 3) Buscar dump de BD más cercano al commit
-CANDIDATE=$(ls -t "$DB_DIR"/rysa_dev_*.dump 2>/dev/null | head -1)
+CANDIDATE=$(ls -t "$DB_DIR"/${TARGET_DB}_*.dump 2>/dev/null | head -1)
 if [[ -z "$CANDIDATE" ]]; then
-  echo "WARNING: no hay dumps de BD en $DB_DIR"
+  echo "WARNING: no hay dumps de BD para $TARGET_DB en $DB_DIR"
   echo "El rollback de código está hecho. La BD se mantiene como estaba."
 else
-  echo "Dump de BD más reciente: $CANDIDATE"
+  echo "Dump de BD más reciente ($TARGET_DB): $CANDIDATE"
   read -p "¿Restaurar la BD a este dump? (s/N): " RESTORE
   if [[ "$RESTORE" == "s" || "$RESTORE" == "S" ]]; then
-    "$RYSA_HOME/repo/scripts/restore.sh" "$CANDIDATE" rysa_dev
+    "$RYSA_HOME/repo/scripts/restore.sh" "$CANDIDATE" "$TARGET_DB"
   fi
 fi
 

@@ -24,9 +24,17 @@ if [[ $# -lt 1 ]]; then
 fi
 
 DUMP="$1"
-TARGET_DB="${2:-rysa_dev}"
+TARGET_DB="${2:-}"
 [[ -f "$DUMP" ]] || { echo "ERROR: $DUMP no existe" >&2; exit 1; }
 [[ "$DUMP" == /* ]] || DUMP="$DB_DIR/$DUMP"
+
+# Si no se pasó target_db, derivarlo del nombre del dump o de .env.docker
+if [[ -z "$TARGET_DB" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+  # shellcheck source=_db_name.sh
+  . "$SCRIPT_DIR/_db_name.sh"
+  TARGET_DB="$(rysa_db_name || echo "rysa_dev")"
+fi
 
 # Confirmar
 echo "ATENCIÓN: vas a restaurar:"

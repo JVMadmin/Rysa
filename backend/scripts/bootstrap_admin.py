@@ -2,9 +2,9 @@
 
 Reglas (CRÍTICAS):
   * ADMIN_EMAIL/ADMIN_PASSWORD SOLO se usan para crear el primer admin.
-  * Si el admin ya existe (por email), NO se modifica nada:
-    - no se cambia password
-    - no se cambia rol
+  * Si el admin ya existe (por email en doc->>'email'), NO se modifica nada:
+    - no se cambia password_hash
+    - no se cambia role
     - no se cambia token_version
     - no se altera active
   * Reiniciar el backend múltiples veces nunca debe sobrescribir
@@ -14,14 +14,25 @@ Reglas (CRÍTICAS):
     email nuevo si no existe).
   * Salvaguarda: si la BD se queda SIN admins y ADMIN_EMAIL/ADMIN_PASSWORD
     están definidos, se crea uno de emergencia (log explícito).
+  * En producción: si el email no existe pero ya hay otros admins, no se
+    crea automáticamente (probable error de configuración).
+
+Arquitectónico:
+  * La tabla `users` tiene columnas `(_id TEXT PK, id TEXT, doc JSONB, created_at)`.
+  * Todos los campos del usuario (email, name, role, password_hash, active,
+    token_version) viven dentro de `doc` (JSONB).
+  * Se usa el adapter pgstore de la misma manera que el resto del backend
+    (db.users.find_one / insert_one). NO se escribe SQL crudo.
 
 Uso: el entrypoint del backend lo ejecuta antes de uvicorn
-(`alembic upgrade head && python -m scripts.bootstrap_admin && uvicorn ...`).
+(alembic upgrade head && python -m scripts.bootstrap_admin && uvicorn ...).
 """
 from __future__ import annotations
 import os
 import sys
 import logging
+import uuid as _uuid
+import datetime as _dt
 
 logging.basicConfig(level=logging.INFO, format="[bootstrap] %(message)s")
 log = logging.getLogger("bootstrap_admin")
@@ -36,6 +47,19 @@ def _ok(pw: str) -> bool:
     return len(pw) >= 12
 
 
+def _now() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+
+def _hash_password(plaintext: str) -> str:
+    """Hash bcrypt compatible con deps.verify_password.
+
+    No asumo que bcrypt esté instalado: import lazy para que el script
+    falle con un mensaje claro si falta la dependencia."""
+    import bcrypt
+    return bcrypt.hashpw(plaintext.encode("utf-8"), bcrypt.gensalt(12)).decode("utf-8")
+
+
 async def main() -> int:
     if not EMAIL or not PASSWORD:
         log.info("ADMIN_EMAIL/ADMIN_PASSWORD no definidos, omitiendo bootstrap")
@@ -44,57 +68,61 @@ async def main() -> int:
         log.warning("ADMIN_PASSWORD debe tener al menos 12 caracteres, omitiendo")
         return 0
 
-    from pgstore.database import get_engine
-    from sqlalchemy import text
-    import bcrypt
+    # Importación lazy: pgstore lee DATABASE_URL al instanciar la primera
+    # conexión; debe estar definido antes de este import.
+    import pgstore  # noqa: WPS433
 
-    eng = get_engine()
-    pw_hash = bcrypt.hashpw(PASSWORD.encode("utf-8"), bcrypt.gensalt(12)).decode("utf-8")
-    async with eng.begin() as conn:
-        # Comprobar si el email ya existe
-        row = (await conn.execute(
-            text("SELECT id, role, active FROM users WHERE email = :e"),
-            {"e": EMAIL})).first()
+    db = pgstore.PGDatabase()
 
-        if row is not None:
-            # El admin ya existe. NO TOCAR NADA.
-            # En particular: no resetear password (el usuario pudo haberla
-            # cambiado desde la UI), no promover rol, no alterar token_version
-            # (eso invalidaría sus sesiones).
-            log.info(f"Admin ya existe ({row[0]}, role={row[1]}, active={row[2]}): "
-                     "no se modifica. Para resetear credenciales, usa la UI "
-                     "o cambia el password directamente en la BD.")
-            return 0
+    # 1) ¿Ya existe el admin por email?
+    existing = await db.users.find_one({"email": EMAIL})
+    if existing is not None:
+        # Admin existe: NO TOCAR NADA. Ni password, ni rol, ni active,
+        # ni token_version (eso invalidaría todas sus sesiones).
+        log.info(
+            "Admin ya existe (id=%s, role=%s, active=%s): no se modifica. "
+            "Para resetear credenciales, usa la UI o cambia el password "
+            "directamente en la BD.",
+            existing.get("id"),
+            existing.get("role"),
+            existing.get("active", True),
+        )
+        return 0
 
-        # No existe el email: comprobar si es el primer arranque
-        # (es decir, no hay NINGÚN admin en la BD).
-        n_admins = (await conn.execute(
-            text("SELECT count(*) FROM users WHERE role LIKE 'admin%'"))).scalar() or 0
-        if n_admins > 0 and ENV == "production":
-            # En producción, no crear admins nuevos automáticamente: si el
-            # email configurado no existe pero ya hay otros admins, es
-            # probablemente un error de configuración. Log y salir.
-            log.warning(
-                f"ADMIN_EMAIL={EMAIL} no existe en la BD pero ya hay "
-                f"{n_admins} admin(s). No se crea uno nuevo automáticamente. "
-                "Si necesitas este usuario, créalo desde la UI."
-            )
-            return 0
+    # 2) Comprobar si hay otros admins ya en el sistema.
+    n_admins = await db.users.count_documents({"role": {"$regex": "^admin"}})
+    if n_admins > 0 and ENV == "production":
+        # Producción: si el email configurado no existe pero ya hay otros
+        # admins, no se crea automáticamente (probable error de configuración).
+        log.warning(
+            "ADMIN_EMAIL=%s no existe en la BD pero ya hay %d admin(s). "
+            "No se crea uno nuevo automáticamente. Si necesitas este "
+            "usuario, créalo desde la UI.",
+            EMAIL, n_admins,
+        )
+        return 0
 
-        # Crear el primer admin (o admin de emergencia si la BD quedó vacía).
-        import uuid as _uuid
-        uid = _uuid.uuid4().hex
-        await conn.execute(text(
-            "INSERT INTO users (id, email, name, role, password_hash, active, token_version, doc) "
-            "VALUES (CAST(:id AS text), :e, :n, 'admin_propietario', CAST(:ph AS text), true, 0, "
-            "CAST('{\"source\":\"bootstrap\"}' AS jsonb)) "
-            "ON CONFLICT (email) DO NOTHING"),
-            {"id": uid, "e": EMAIL, "n": NAME, "ph": pw_hash})
-        log.info(f"Admin creado: {EMAIL} (id={uid[:8]}...)")
+    # 3) Crear el primer admin (o admin de emergencia).
+    pw_hash = _hash_password(PASSWORD)
+    admin_id = _uuid.uuid4().hex
+    doc = {
+        "id": admin_id,
+        "email": EMAIL,
+        "name": NAME,
+        "role": "admin_propietario",
+        "active": True,
+        "password_hash": pw_hash,
+        "token_version": 0,
+        "source": "bootstrap",
+        "created_at": _now(),
+    }
+    await db.users.insert_one(doc)
+    log.info("Admin creado: %s (id=%s, role=%s, source=bootstrap)",
+             EMAIL, admin_id, doc["role"])
 
-    async with eng.connect() as conn:
-        n = (await conn.execute(text("SELECT count(*) FROM users WHERE role LIKE 'admin%'"))).scalar()
-    log.info(f"Total admins: {n}")
+    # 4) Resumen
+    n_total = await db.users.count_documents({"role": {"$regex": "^admin"}})
+    log.info("Total admins: %d", n_total)
     return 0
 
 

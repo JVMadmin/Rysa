@@ -78,14 +78,29 @@ log "Espacio libre: ${AVAIL_GB} GB"
 if [[ "${ENVIRONMENT:-development}" == "production" ]]; then
   require_env ADMIN_EMAIL
   require_env ADMIN_PASSWORD
+  require_env DATABASE_URL
   [[ "${ADMIN_PASSWORD}" == "<"*">"* || ${#ADMIN_PASSWORD} -lt 12 ]] && { err "ADMIN_PASSWORD placeholder o <12"; exit 1; }
   [[ "${JWT_SECRET}" == "<"*">"* || ${#JWT_SECRET} -lt 32 ]] && { err "JWT_SECRET placeholder o <32"; exit 1; }
   [[ "${POSTGRES_PASSWORD}" == "<"*">"* ]] && { err "POSTGRES_PASSWORD placeholder"; exit 1; }
-  # En producción, no usar rysa_dev en la URL del backend (prohibido).
-  if [[ "${BACKEND_DATABASE_URL:-}" == *"rysa_dev"* ]]; then
-    err "BACKEND_DATABASE_URL apunta a rysa_dev en producción. Cámbialo a rysa_prod."
+  # En producción, no usar rysa_dev en la BD canónica (DATABASE_URL).
+  if [[ "${DATABASE_URL:-}" == *"rysa_dev"* ]]; then
+    err "================================================================"
+    err "ERROR: Production environment cannot use database rysa_dev."
+    err "       Expected production database: rysa_prod."
+    err "       Fix: edita .env.docker y cambia DATABASE_URL a .../rysa_prod"
+    err "================================================================"
     exit 1
   fi
+  # Validar que la BD objetivo sea la correcta
+  PROD_DB="$(echo "${DATABASE_URL}" | sed -E 's|.*/||' | cut -d'?' -f1)"
+  if [[ "$PROD_DB" != "rysa_prod" ]]; then
+    err "================================================================"
+    err "ERROR: Production database is '$PROD_DB' but must be 'rysa_prod'."
+    err "       Fix: edita .env.docker y cambia DATABASE_URL a .../rysa_prod"
+    err "================================================================"
+    exit 1
+  fi
+  ok "DATABASE_URL apunta a rysa_prod (producción)"
 fi
 
 # ============ 2) Verificar git limpio y rama esperada ==========

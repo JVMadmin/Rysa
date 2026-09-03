@@ -79,6 +79,12 @@ def check_env() -> None:
             placeholders.append("ADMIN_EMAIL (requerido en producción)")
         if not os.environ.get("ADMIN_PASSWORD") or len(os.environ.get("ADMIN_PASSWORD", "")) < 12:
             placeholders.append("ADMIN_PASSWORD (>=12 chars requerido en producción)")
+        # En producción, la BD debe ser rysa_prod (no rysa_dev).
+        dburl = os.environ.get("DATABASE_URL", "")
+        if "/rysa_dev" in dburl:
+            placeholders.append("DATABASE_URL apunta a rysa_dev (producción debe usar rysa_prod)")
+        if "/rysa_prod" not in dburl:
+            placeholders.append("DATABASE_URL no apunta a rysa_prod (URL actual: " + dburl.split("@")[-1] if "@" in dburl else dburl + ")")
     if placeholders:
         add("Secrets no son placeholders", False, "; ".join(placeholders))
     else:
