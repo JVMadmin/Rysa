@@ -5,15 +5,11 @@ on:
     workflows: [ci]
     types: [completed]
     branches: [evolucion-comercial, main]
-  push:
-    branches: [evolucion-comercial, main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
+  workflow_dispatch:
 
 jobs:
   deploy:
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'push' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger deploy on VPS

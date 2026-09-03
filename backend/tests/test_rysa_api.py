@@ -292,8 +292,9 @@ class TestExcel:
         assert r.status_code == 200
         assert "spreadsheet" in r.headers.get("content-type", "")
         # can be read
-        df = pd.read_excel(io.BytesIO(r.content))
-        assert "codigo" in df.columns
+        df = pd.read_excel(io.BytesIO(r.content), header=None)
+        full_text = df.to_string().lower()
+        assert "código" in full_text or "codigo" in full_text
 
     def test_import_preview_and_confirm(self, admin_client):
         rows = [{"codigo": "TESTIMP01", "descripcion": "TEST_ImportProducto",

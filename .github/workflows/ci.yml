@@ -42,7 +42,7 @@ jobs:
       - name: Unit tests
         working-directory: backend
         run: |
-          pytest tests/test_bootstrap_admin.py -v --tb=short -p no:xdist
+          pytest tests/test_bootstrap_admin.py -v --tb=short -n 0
       - name: Security gate
         working-directory: backend
         run: |

@@ -34,6 +34,11 @@ import logging
 import uuid as _uuid
 import datetime as _dt
 
+from pathlib import Path
+_ROOT = str(Path(__file__).resolve().parent.parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 logging.basicConfig(level=logging.INFO, format="[bootstrap] %(message)s")
 log = logging.getLogger("bootstrap_admin")
 
@@ -41,6 +46,9 @@ EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 NAME = os.environ.get("ADMIN_NAME", "Admin").strip() or "Admin"
 ENV = os.environ.get("ENVIRONMENT", "development").lower()
+
+# Módulo pgstore para acceso a BD (mockeable en tests unitarios)
+pgstore = None
 
 
 def _ok(pw: str) -> bool:
@@ -61,6 +69,7 @@ def _hash_password(plaintext: str) -> str:
 
 
 async def main() -> int:
+    global pgstore
     if not EMAIL or not PASSWORD:
         log.info("ADMIN_EMAIL/ADMIN_PASSWORD no definidos, omitiendo bootstrap")
         return 0
@@ -68,9 +77,10 @@ async def main() -> int:
         log.warning("ADMIN_PASSWORD debe tener al menos 12 caracteres, omitiendo")
         return 0
 
-    # Importación lazy: pgstore lee DATABASE_URL al instanciar la primera
-    # conexión; debe estar definido antes de este import.
-    import pgstore  # noqa: WPS433
+    # Importación lazy si no fue inyectado por pruebas
+    if pgstore is None:
+        import pgstore as _real_pgstore  # noqa: WPS433
+        pgstore = _real_pgstore
 
     db = pgstore.PGDatabase()
 

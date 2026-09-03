@@ -15,7 +15,12 @@ from __future__ import annotations
 import os
 import sys
 import importlib
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+BASE = Path(__file__).resolve().parent.parent
+if str(BASE) not in sys.path:
+    sys.path.insert(0, str(BASE))
 
 import pytest
 
@@ -96,6 +101,8 @@ def fresh_module(monkeypatch):
             monkeypatch.setenv(k, v)
         if "scripts.bootstrap_admin" in sys.modules:
             del sys.modules["scripts.bootstrap_admin"]
+        if "scripts" in sys.modules:
+            del sys.modules["scripts"]
         return importlib.import_module("scripts.bootstrap_admin")
     return _load
 

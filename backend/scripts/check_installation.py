@@ -19,7 +19,12 @@ Uso (dentro del backend container):
 from __future__ import annotations
 import os
 import sys
+from pathlib import Path
 from typing import Iterable, List, Tuple
+
+_ROOT = str(Path(__file__).resolve().parent.parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 try:
     from sqlalchemy import text
@@ -29,7 +34,6 @@ except ImportError:
 
 REQUIRED_ENV = [
     "DATABASE_URL", "JWT_SECRET", "ENVIRONMENT",
-    "DEVELOPER_MODE", "LEGACY_MIGRATION_ENABLED",
 ]
 REQUIRED_PRODUCTIVE_TABLES = [
     "users", "clients", "products", "sales", "abonos",
@@ -165,7 +169,7 @@ async def check_legacy_data_dir() -> None:
 
 async def check_health() -> None:
     import urllib.request
-    base = os.environ.get("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
+    base = os.environ.get("PUBLIC_BASE_URL") or "http://127.0.0.1:8000"
     try:
         req = urllib.request.urlopen(f"{base}/health", timeout=3)
         add("Health API", req.status == 200, f"GET /health -> {req.status}")

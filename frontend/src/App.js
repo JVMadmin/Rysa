@@ -4,10 +4,12 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
 import { Toaster } from "@/components/ui/sonner";
 import { ShieldX } from "lucide-react";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import ErpLayout from "@/components/layout/ErpLayout";
 import Landing from "@/pages/Landing";
 import Login from "@/pages/Login";
+import PagoComprobante from "@/pages/PagoComprobante";
 import Dashboard from "@/pages/Dashboard";
 import Productos from "@/pages/Productos";
 import Categorias from "@/pages/Categorias";
@@ -62,6 +64,7 @@ function RequirePerm({ perm, children }) {
 
 function App() {
   return (
+    <ErrorBoundary>
     <AuthProvider>
       <CartProvider>
         <BrowserRouter>
@@ -69,6 +72,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
+          <Route path="/pago/:token" element={<PagoComprobante />} />
           <Route path="/verificar/:saleId" element={<TicketVerificar />} />
           <Route element={<ProtectedRoute><ErpLayout /></ProtectedRoute>}>
             <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
@@ -118,6 +122,7 @@ function App() {
       </BrowserRouter>
       </CartProvider>
     </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
