@@ -8,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { api, formatApiError, money } from "@/lib/api";
 import { toast } from "sonner";
-import { Loader2, Plus, X, Barcode } from "lucide-react";
+import { Loader2, Plus, X, Barcode, Boxes } from "lucide-react";
 import { ImageUpload } from "@/components/ImageUpload";
+import PresentacionesModal from "@/components/PresentacionesModal";
 
 // Tipo por campo (C/M texto, N numero, D fecha, L booleano)
 const T = {
@@ -35,6 +36,7 @@ const SECTIONS = [
   { id: "barras", label: "Códigos de barras", customBarras: true },
   { id: "clasif", label: "Clasificación", fields: ["clasifica", "categoria", "categocve", "deptocve", "linea"] },
   { id: "unid", label: "Unidades", fields: ["unimedida", "unimedcve", "empaque", "unimedempq"] },
+  { id: "pres", label: "Presentaciones (Cajas)", customPres: true },
   { id: "inv", label: "Inventario", fields: ["existencia", "ubicacion", "stockmin", "stockmax", "xentregar", "xrecibir", "porpedir"] },
   { id: "costos", label: "Costos", fields: ["ultfcosto", "ultcosto", "costo", "costodlls"] },
   { id: "precios", label: "Precios", custom: true },
@@ -86,9 +88,27 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
   const [f, setF] = useState(blank());
   const [saving, setSaving] = useState(false);
   const [barcodeInput, setBarcodeInput] = useState("");
+  const [presModalOpen, setPresModalOpen] = useState(false);
+  const [presentations, setPresentations] = useState([]);
   const isEdit = !!product;
 
-  useEffect(() => { if (open) setF(product ? toForm(product) : blank()); }, [open, product]);
+  const loadPres = async () => {
+    if (product?.id) {
+      try {
+        const res = await api.get(`/products/${product.id}/presentations`);
+        setPresentations(res.data || []);
+      } catch {}
+    } else {
+      setPresentations([]);
+    }
+  };
+
+  useEffect(() => {
+    if (open) {
+      setF(product ? toForm(product) : blank());
+      loadPres();
+    }
+  }, [open, product]);
 
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
 
@@ -234,6 +254,97 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
                     ))}
                   </div>
                 </div>
+              ) : s.customPres ? (
+                <div className="space-y-4 max-w-2xl" data-testid="prod-pres-section">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-slate-800 font-semibold text-sm">
+                      <Boxes className="w-5 h-5 text-[#C1401E]" />
+                      <span>Presentaciones y Empaques (Cajas, Paquetes, Displays)</span>
+                    </div>
+                    {isEdit && (
+                      <Button
+                        type="button"
+                        onClick={() => setPresModalOpen(true)}
+                        className="bg-[#C1401E] hover:bg-[#A03316] text-white text-xs h-8"
+                        data-testid="prod-pres-open-btn"
+                      >
+                        <Plus className="w-3.5 h-3.5 mr-1" /> Administrar Cajas
+                      </Button>
+                    )}
+                  </div>
+
+                  {!isEdit ? (
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-xs text-slate-600">
+                      <p className="font-semibold text-slate-800 mb-1">Primero registra los datos básicos del producto</p>
+                      <p>
+                        Una vez guardado el producto, podrás agregar empaques comerciales secundarios
+                        como cajas de 12, paquetes, bultos o rejas con su propio código de barras y precio de venta.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-xs text-slate-500">
+                        Unidad Base física en almacén: <strong className="font-mono text-slate-700">{f.unimedida || "PZA"}</strong> (Factor 1.0).
+                        Al vender o comprar una presentación, el sistema multiplica por el factor y descuenta automáticamente las unidades base del almacén.
+                      </p>
+                      <div className="border border-slate-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-50 text-slate-500 uppercase border-b border-slate-200">
+                            <tr>
+                              <th className="p-2.5 text-left">Presentación</th>
+                              <th className="p-2.5 text-center">Tipo</th>
+                              <th className="p-2.5 text-right">Factor (Unid. Base)</th>
+                              <th className="p-2.5 text-left">Código de Barras</th>
+                              <th className="p-2.5 text-right">Precio Venta</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {presentations.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="p-4 text-center text-slate-400">
+                                  Solo unidad base configurada ({f.unimedida || "PZA"}). Haz clic en &ldquo;Administrar Cajas&rdquo; para agregar presentaciones.
+                                </td>
+                              </tr>
+                            ) : (
+                              presentations.map((pr) => {
+                                const isBase = !!pr.es_base || pr.factor === 1.0;
+                                return (
+                                  <tr key={pr.id || pr.nombre} className={isBase ? "bg-slate-50/40" : ""}>
+                                    <td className="p-2.5 font-bold text-slate-800">{pr.nombre}</td>
+                                    <td className="p-2.5 text-center">
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${isBase ? "bg-emerald-100 text-emerald-800" : "bg-blue-100 text-blue-800"}`}>
+                                        {isBase ? "Unidad Base" : "Empaque Comercial"}
+                                      </span>
+                                    </td>
+                                    <td className="p-2.5 text-right font-mono font-semibold text-slate-700">
+                                      x{pr.factor} {f.unimedida || "PZA"}
+                                    </td>
+                                    <td className="p-2.5 font-mono text-slate-500">
+                                      {pr.codigo_barras || <span className="text-slate-300 italic">—</span>}
+                                    </td>
+                                    <td className="p-2.5 text-right font-semibold text-slate-800">
+                                      {pr.precio != null ? money(pr.precio) : <span className="text-slate-400">—</span>}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setPresModalOpen(true)}
+                          className="text-xs text-[#C1401E] border-[#C1401E]/30 hover:bg-orange-50"
+                        >
+                          <Boxes className="w-3.5 h-3.5 mr-1" /> Configurar, agregar o editar presentaciones
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : s.customMedia ? (
                 <div className="space-y-4 max-w-lg" data-testid="prod-media-section">
                   <div>
@@ -259,6 +370,18 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}
           </Button>
         </DialogFooter>
+
+        {isEdit && (
+          <PresentacionesModal
+            open={presModalOpen}
+            onClose={() => setPresModalOpen(false)}
+            product={product}
+            onUpdated={() => {
+              loadPres();
+              if (onSaved) onSaved();
+            }}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

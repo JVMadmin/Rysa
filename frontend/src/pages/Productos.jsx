@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import ProductForm from "@/components/ProductForm";
+import PresentacionesModal from "@/components/PresentacionesModal";
 import { TableScroller } from "@/components/TableScroller";
 import { toast } from "sonner";
 import { Plus, Search, Upload, Pencil, History, Loader2, Boxes, FileDown, FileSpreadsheet, FileText, ArrowDownUp, ArrowUp, ArrowDown, SlidersHorizontal, Tags } from "lucide-react";
@@ -52,6 +53,7 @@ export default function Productos() {
   const [categorias, setCategorias] = useState([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [presProd, setPresProd] = useState(null);
   const [movProd, setMovProd] = useState(null);
   const [movs, setMovs] = useState([]);
   const [movForm, setMovForm] = useState({ tipo: "entrada", cantidad: "", costo: "", documento: "", motivo: "", observaciones: "" });
@@ -392,7 +394,21 @@ export default function Productos() {
                   <td className="p-3 text-slate-500">{p.clasificacion || "—"}</td>
                   <td className="p-3 text-right">{money(p.costo)}</td>
                   <td className="p-3 text-right font-semibold">{p.existencia}</td>
-                  <td className="p-3">{p.unidad_medida}</td>
+                  <td className="p-3">
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="font-mono text-xs">{p.unidad_medida || "PZA"}</span>
+                      {p.presentaciones && p.presentaciones.length > 1 && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] cursor-pointer hover:bg-orange-50 text-[#C1401E] border-orange-200 font-normal px-1.5 py-0"
+                          onClick={() => setPresProd(p)}
+                          title="Ver y configurar presentaciones (cajas/empaques)"
+                        >
+                          +{p.presentaciones.length - 1} pres.
+                        </Badge>
+                      )}
+                    </div>
+                  </td>
                   <td className="p-3 text-right">{money(p.precios?.[0]?.precio_con_iva)}</td>
                   <td className="p-3 text-right" data-testid={`prod-utilidad-${p.codigo}`}>
                     {(() => { const psi = p.precios?.[0]?.precio_sin_iva ?? 0; const u = psi - (p.costo || 0); const m = psi ? (u / psi * 100) : 0; return (<span className={u > 0 ? "text-emerald-700 font-semibold" : "text-red-600"}>{money(u)} <span className="text-xs text-slate-400">({m.toFixed(0)}%)</span></span>); })()}
@@ -411,6 +427,16 @@ export default function Productos() {
                   </td>
                   <td className="p-3">
                     <div className="flex gap-1 justify-end">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => setPresProd(p)}
+                        title="Presentaciones y Empaques (Cajas, Paquetes)"
+                        data-testid={`pres-${p.codigo}`}
+                        className="text-slate-600 hover:text-[#C1401E] hover:bg-orange-50"
+                      >
+                        <Boxes className="w-4 h-4" />
+                      </Button>
                       <Button size="icon" variant="ghost" onClick={() => openMovs(p)} title="Movimientos" data-testid={`mov-${p.codigo}`}><History className="w-4 h-4" /></Button>
                       {can("producto.editar") && <Button size="icon" variant="ghost" onClick={() => { setEditing(p); setFormOpen(true); }} data-testid={`edit-${p.codigo}`}><Pencil className="w-4 h-4" /></Button>}
                       {can("producto.baja") && (
@@ -644,6 +670,14 @@ export default function Productos() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de configuración de presentaciones y empaques */}
+      <PresentacionesModal
+        open={!!presProd}
+        onClose={() => setPresProd(null)}
+        product={presProd}
+        onUpdated={load}
+      />
     </div>
   );
 }
