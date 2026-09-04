@@ -131,14 +131,18 @@ async def crear_venta_pg(*, user, sale, items, pagos, total, es_cotizacion,
                     controlar = controles.get("controlar_inventario", True)
                     permitir_neg = controles.get("permitir_inventario_negativo", False)
                     exist_antes = float(prod.get("existencia", 0) or 0)
-                    cant = float(it["cantidad"])
-                    if controlar and not permitir_neg and not override_inv and exist_antes < cant:
+                    cant_comercial = float(it["cantidad"])
+                    factor = float(it.get("factor") or 1.0)
+                    cant_base = round(cant_comercial * factor, 3)
+                    if controlar and not permitir_neg and not override_inv and exist_antes < cant_base:
                         raise VentaError(409,
                                          f"Existencia insuficiente de {prod.get('codigo')} "
-                                         f"(disp: {exist_antes})")
-                    plan.append({"id": it["product_id"], "cant": cant,
+                                         f"(disp: {exist_antes} {prod.get('unidad_medida','PZA')}, req: {cant_base})")
+                    plan.append({"id": it["product_id"], "cant": cant_base,
+                                 "cant_comercial": cant_comercial, "factor": factor,
+                                 "presentacion": it.get("presentacion") or prod.get("unidad_medida", "PZA"),
                                  "anterior": exist_antes,
-                                 "resultante": round(exist_antes - cant, 3),
+                                 "resultante": round(exist_antes - cant_base, 3),
                                  "descripcion": prod.get("descripcion", ""),
                                  "codigo": prod.get("codigo", ""),
                                  "costo": float(prod.get("costo") or 0)})
@@ -241,9 +245,13 @@ async def _insert_movimiento(conn, inv, it, folio, user_id, user_name):
            "codigo": inv.get("codigo", it.get("codigo")),
            "descripcion": inv.get("descripcion", it.get("descripcion")),
            "tipo": "venta", "documento": folio,
-           "entrada": 0, "salida": it["cantidad"],
+           "entrada": 0, "salida": inv.get("cant", it["cantidad"]),
            "existencia_anterior": inv["anterior"],
            "existencia_resultante": inv["resultante"],
+           "presentacion": inv.get("presentacion") or it.get("presentacion") or "PZA",
+           "factor": inv.get("factor", 1.0),
+           "cantidad_comercial": inv.get("cant_comercial", it["cantidad"]),
+           "cantidad_base": inv.get("cant", it["cantidad"]),
            "costo": inv["costo"], "motivo": "", "observaciones": "",
            "usuario_id": user_id, "usuario_nombre": user_name,
            "referencia": f"Venta {folio}", "fecha": now_iso(),
@@ -291,24 +299,30 @@ async def cancela_venta_pg(*, user, sale_id: str, motivo: str):
             if prow is None:
                 continue
             prod = dict(prow[1])
-            cant = float(it["cantidad"] or 0)
+            factor = float(it.get("factor") or 1.0)
+            cant_comercial = float(it.get("cantidad") or 0)
+            cant_base = round(float(it.get("cantidad_base") or (cant_comercial * factor)), 3)
             actual = round(float(prod.get("existencia", 0) or 0), 3)
-            nuevo = round(actual + cant, 3)
+            nuevo = round(actual + cant_base, 3)
             await conn.execute(
                 text(f'UPDATE {_quote("products")} SET "existencia" = :ne, '
                      'doc = jsonb_set(jsonb_set(jsonb_set(doc, \'{existencia}\', CAST(:nej AS jsonb), true), '
                      '\'{updated_at}\', CAST(:upd AS jsonb), true), '
                      '\'{vendidas}\', CAST(CAST(COALESCE((doc->>\'vendidas\')::numeric,0) - CAST(:vnd AS numeric) AS text) AS jsonb), true) '
                      f'WHERE "id" = CAST(:i AS text)'),
-                {"ne": nuevo, "nej": json.dumps(nuevo), "vnd": cant,
+                {"ne": nuevo, "nej": json.dumps(nuevo), "vnd": cant_base,
                  "upd": json.dumps(now_iso()), "i": pid})
             mov = {"id": uid(), "product_id": pid,
                    "codigo": prod.get("codigo", it.get("codigo")),
                    "descripcion": prod.get("descripcion", it.get("descripcion")),
                    "tipo": "devolucion", "documento": folio,
-                   "entrada": cant, "salida": 0,
+                   "entrada": cant_base, "salida": 0,
                    "existencia_anterior": actual,
                    "existencia_resultante": nuevo,
+                   "presentacion": it.get("presentacion") or prod.get("unidad_medida", "PZA"),
+                   "factor": factor,
+                   "cantidad_comercial": cant_comercial,
+                   "cantidad_base": cant_base,
                    "costo": float(prod.get("costo") or it.get("costo") or 0),
                    "motivo": motivo, "observaciones": f"Cancelación {folio}",
                    "usuario_id": user_id, "usuario_nombre": user_name,

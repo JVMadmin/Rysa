@@ -75,9 +75,13 @@ export default function CuentasPorCobrar() {
   const [interesBusy, setInteresBusy] = useState(false);
   const puedeInteres = can("cxc.interes");
 
+  // Separación estricta: Cartera Activa (saldo > 0) vs Historial Liquidado ($0)
+  const [modoCartera, setModoCartera] = useState("activo"); // "activo" | "historial"
+  const [filtroDetalleSaldo, setFiltroDetalleSaldo] = useState(true); // En detalle modal: solo saldo > 0 por defecto
+
   const load = async () => {
     setLoading(true);
-    const params = {};
+    const params = { modo: modoCartera };
     if (q) params.q = q;
     if (soloVencidos) params.solo_vencidos = true;
     if (estado && estado !== "todos") params.estado = estado;
@@ -85,7 +89,7 @@ export default function CuentasPorCobrar() {
     const { data } = await api.get("/cxc", { params });
     setData(data); setLoading(false);
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [soloVencidos, estado, facturada]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [modoCartera, soloVencidos, estado, facturada]);
   // Resumen del histórico Legacy (agregado, sin datos técnicos)
   useEffect(() => { api.get("/legacy/public-summary").then((r) => setLegacyRes(r.data)).catch(() => setLegacyRes(null)); }, []);
 
@@ -276,6 +280,34 @@ export default function CuentasPorCobrar() {
         </div>
       </div>
 
+      {/* Selector de modo Cartera Activa vs Historial Liquidado */}
+      <div className="flex border-b border-slate-200 gap-1 bg-slate-100/60 p-1 rounded-xl">
+        <button
+          type="button"
+          onClick={() => setModoCartera("activo")}
+          className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 ${
+            modoCartera === "activo"
+              ? "bg-white text-slate-900 shadow-sm border border-slate-200/80"
+              : "text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          <Wallet className="w-4 h-4 text-emerald-600" />
+          Cartera Activa (Solo adeudos pendientes saldo &gt; $0.00)
+        </button>
+        <button
+          type="button"
+          onClick={() => setModoCartera("historial")}
+          className={`flex-1 py-2 px-4 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 ${
+            modoCartera === "historial"
+              ? "bg-white text-slate-900 shadow-sm border border-slate-200/80"
+              : "text-slate-500 hover:text-slate-800"
+          }`}
+        >
+          <Clock className="w-4 h-4 text-blue-600" />
+          Historial Comercial Liquidado (Saldos $0.00)
+        </button>
+      </div>
+
       <div className="flex flex-wrap gap-2 card-soft p-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -404,8 +436,29 @@ export default function CuentasPorCobrar() {
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs uppercase tracking-wider text-slate-400">
-                    Historial de documentos ({detalle.ventas.length}) · {detalle.ventas.filter((v) => v.saldo > 0).length} con saldo
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFiltroDetalleSaldo(true)}
+                      className={`px-2.5 py-1 text-xs rounded-md font-bold transition ${
+                        filtroDetalleSaldo
+                          ? "bg-red-50 text-red-700 border border-red-200 shadow-sm"
+                          : "text-slate-500 hover:bg-slate-100"
+                      }`}
+                    >
+                      Documentos con saldo ({detalle.ventas.filter((v) => v.saldo > 0).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFiltroDetalleSaldo(false)}
+                      className={`px-2.5 py-1 text-xs rounded-md font-bold transition ${
+                        !filtroDetalleSaldo
+                          ? "bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm"
+                          : "text-slate-500 hover:bg-slate-100"
+                      }`}
+                    >
+                      Historial completo ({detalle.ventas.length})
+                    </button>
                   </div>
                   {puedeInteres && detalle.ventas.length > 0 && (
                     <div className="flex gap-1">
@@ -431,8 +484,8 @@ export default function CuentasPorCobrar() {
                       <th className="p-2">Folio</th><th className="p-2">Fecha</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Saldo</th><th className="p-2 text-right">Interés</th><th className="p-2">Vence</th><th className="p-2 text-center">Estado</th>
                     </tr></thead>
                     <tbody>
-                      {detalle.ventas.length === 0 && <tr><td colSpan={puedeInteres ? 8 : 7} className="p-4 text-center text-slate-400">Sin documentos.</td></tr>}
-                      {detalle.ventas.map((v) => (
+                      {detalle.ventas.filter((v) => filtroDetalleSaldo ? v.saldo > 0.001 : true).length === 0 && <tr><td colSpan={puedeInteres ? 8 : 7} className="p-4 text-center text-slate-400">Sin documentos con saldo pendiente.</td></tr>}
+                      {detalle.ventas.filter((v) => filtroDetalleSaldo ? v.saldo > 0.001 : true).map((v) => (
                         <tr key={v.id} className={`border-t border-slate-100 ${selVentas.includes(v.id) ? "bg-amber-50/60" : ""} ${v.pagada ? "opacity-60" : ""}`}>
                           {puedeInteres && (
                             <td className="p-2">

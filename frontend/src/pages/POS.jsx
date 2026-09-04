@@ -534,7 +534,28 @@ export default function POS({ windowId, windowLabel }) {
     setCart((c) => {
       const ex = c.find((i) => i.product_id === p.id);
       if (ex) return c.map((i) => (i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i));
-      return [...c, { product_id: p.id, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || "PZA", precio: priceOf(p), iva_tasa: p.iva_tasa || 8, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
+      const basePres = (p.presentaciones || []).find((pr) => pr.es_base) || (p.presentaciones || [])[0] || { nombre: p.unidad_medida || "PZA", factor: 1.0, precio: priceOf(p) };
+      return [
+        ...c,
+        {
+          product_id: p.id,
+          codigo: p.codigo || "",
+          descripcion: p.descripcion || "",
+          cantidad: 1,
+          unidad: basePres.nombre || p.unidad_medida || "PZA",
+          presentacion: basePres.nombre || p.unidad_medida || "PZA",
+          factor: Number(basePres.factor || 1.0),
+          presentaciones: p.presentaciones || [basePres],
+          precio: Number(basePres.precio ?? priceOf(p)),
+          iva_tasa: p.iva_tasa || 8,
+          costo: Number(p.costo ?? 0),
+          descuento: 0,
+          comentario: "",
+          precios: p.precios || [],
+          precio_minimo: p.precio_minimo ?? 0,
+          existencia: Number(p.existencia ?? 0),
+        },
+      ];
     });
     setSelected(p.id);
     setQ(""); qRef.current = ""; setResults([]);
@@ -637,7 +658,24 @@ export default function POS({ windowId, windowLabel }) {
   const setQty = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Number(v) || 0 } : i)));
   const setLineDisc = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, descuento: Number(v) || 0 } : i)));
   const setLineComentario = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, comentario: v } : i)));
-  const setUnidad = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, unidad: v } : i)));
+  const setUnidad = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, unidad: v, presentacion: v } : i)));
+  const setPresentacion = (id, presNombre) => {
+    setCart((c) =>
+      c.map((i) => {
+        if (i.product_id !== id) return i;
+        const pres = (i.presentaciones || []).find((p) => p.nombre === presNombre);
+        if (!pres) return { ...i, presentacion: presNombre, unidad: presNombre };
+        const nuevoPrecio = Number(pres.precio ?? i.precio);
+        return {
+          ...i,
+          presentacion: pres.nombre,
+          unidad: pres.nombre,
+          factor: Number(pres.factor || 1.0),
+          precio: nuevoPrecio,
+        };
+      })
+    );
+  };
   const remove = (id) => setCart((c) => c.filter((i) => i.product_id !== id));
 
   const totals = useMemo(() => {
@@ -790,7 +828,7 @@ export default function POS({ windowId, windowLabel }) {
     try {
       const payload = {
         cliente_id: clienteId || null,
-        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", precio: Number(i.precio) || 0, iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
+        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", presentacion: i.presentacion || i.unidad || "PZA", factor: Number(i.factor || 1.0), precio: Number(i.precio) || 0, iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
         descuento_global: totals.descGlobalTotal,
         condicion,
         pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0), ...(p.metodo === "tarjeta" && p.card_type ? { card_type: p.card_type } : {}) })) : [],
@@ -1083,11 +1121,28 @@ export default function POS({ windowId, windowLabel }) {
                           </div>
                         </td>
                         <td className="px-1.5 py-1" onClick={(e) => e.stopPropagation()}>
-                          <Input value={i.unidad} onChange={(e) => setUnidad(i.product_id, e.target.value)}
-                            list="pos-unidades" className="w-16 h-6 p-0 text-center text-xs" data-testid={`cart-unidad-${i.codigo}`} />
-                          <datalist id="pos-unidades">
-                            {UNIDADES_OPC.map((u) => <option key={u} value={u} />)}
-                          </datalist>
+                          {i.presentaciones && i.presentaciones.length > 1 ? (
+                            <select
+                              value={i.presentacion || i.unidad}
+                              onChange={(e) => setPresentacion(i.product_id, e.target.value)}
+                              className="w-20 h-6 px-1 text-center text-[11px] font-bold bg-indigo-50 border border-indigo-300 rounded text-indigo-900 cursor-pointer shadow-sm"
+                              data-testid={`cart-pres-${i.codigo}`}
+                            >
+                              {i.presentaciones.map((pr) => (
+                                <option key={pr.id || pr.nombre} value={pr.nombre}>
+                                  {pr.nombre} (x{pr.factor})
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <>
+                              <Input value={i.unidad} onChange={(e) => setUnidad(i.product_id, e.target.value)}
+                                list="pos-unidades" className="w-16 h-6 p-0 text-center text-xs" data-testid={`cart-unidad-${i.codigo}`} />
+                              <datalist id="pos-unidades">
+                                {UNIDADES_OPC.map((u) => <option key={u} value={u} />)}
+                              </datalist>
+                            </>
+                          )}
                         </td>
                         <td className="px-1.5 py-1 text-[11px] text-slate-700 min-w-[130px]">
                           <div className="truncate max-w-[180px]">{i.descripcion}</div>

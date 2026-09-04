@@ -1462,3 +1462,50 @@ async def legacy_data_deploy(file: UploadFile = File(...),
     except Exception:
         pass  # la auditoría no debe romper el despliegue
     return resumen
+
+
+@router.get("/legacy/replace/preview")
+async def legacy_replace_preview(user: dict = Depends(require_permission("dev.mantenimiento"))):
+    """Genera la vista previa cuantitativa del reemplazo total."""
+    from reemplazo_total import generar_preview_reemplazo
+    async with transaction() as conn:
+        return await generar_preview_reemplazo(conn)
+
+
+@router.post("/legacy/replace/apply")
+async def legacy_replace_apply(user: dict = Depends(require_permission("dev.mantenimiento"))):
+    """Ejecuta el reemplazo total atómico de datos operativos con snapshot de rollback."""
+    from reemplazo_total import ejecutar_reemplazo_total
+    async with transaction() as conn:
+        return await ejecutar_reemplazo_total(conn, user)
+
+
+@router.post("/legacy/replace/rollback")
+async def legacy_replace_rollback(payload: dict, user: dict = Depends(require_permission("dev.mantenimiento"))):
+    """Revierte un reemplazo total usando su snapshot."""
+    from reemplazo_total import revertir_reemplazo
+    batch_id = payload.get("batch_id")
+    if not batch_id:
+        raise HTTPException(400, "batch_id es requerido")
+    async with transaction() as conn:
+        return await revertir_reemplazo(conn, batch_id, user)
+
+
+@router.get("/legacy/replace/batches")
+async def legacy_replace_batches(user: dict = Depends(require_permission("dev.mantenimiento"))):
+    """Lista los lotes de reemplazo total ejecutados."""
+    async with transaction() as conn:
+        rows = (await conn.execute(
+            text("SELECT batch_id, tipo, estado, usuario_nombre, estadisticas, created_at, applied_at "
+                 "FROM import_batches ORDER BY created_at DESC LIMIT 20")
+        )).fetchall()
+        return [
+            {
+                "batch_id": r.batch_id, "tipo": r.tipo, "estado": r.estado,
+                "usuario": r.usuario_nombre, "estadisticas": r.estadisticas,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "applied_at": r.applied_at.isoformat() if r.applied_at else None,
+            }
+            for r in rows
+        ]
+

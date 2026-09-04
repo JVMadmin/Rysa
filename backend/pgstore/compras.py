@@ -103,16 +103,19 @@ async def registrar_compra_pg(*, user, doc, user_id=None, user_name=None):
             if row is None:
                 raise CompraError(400, f"Producto {it.get('codigo')} no existe")
             prod = dict(row[1])
-            cant = float(it.get("cantidad", 0) or 0)
-            costo = float(it.get("costo", 0) or 0)
+            cant_comercial = float(it.get("cantidad", 0) or 0)
+            factor = float(it.get("factor") or 1.0)
+            cant_base = round(cant_comercial * factor, 3)
+            costo_comercial = float(it.get("costo", 0) or 0)
+            costo_base = round(costo_comercial / factor, 4) if factor > 0 else costo_comercial
             anterior = round(float(prod.get("existencia", 0) or 0), 3)
-            resultante = round(anterior + cant, 3)
+            resultante = round(anterior + cant_base, 3)
             costo_anterior = float(prod.get("costo", 0) or 0)
 
             # 1) Incrementar existencia + actualizar costo / última compra.
             upd = {
                 "ne": resultante, "nej": json.dumps(resultante),
-                "costo": costo, "costo_j": json.dumps(costo),
+                "costo": costo_base, "costo_j": json.dumps(costo_base),
                 "upd": json.dumps(now_iso()),
                 "i": pid,
             }
@@ -126,15 +129,20 @@ async def registrar_compra_pg(*, user, doc, user_id=None, user_name=None):
                      'WHERE "id" = CAST(:i AS text)'),
                 {**upd, "upd2": json.dumps(now_iso())})
 
-            # 2) Kardex (entrada por compra).
+            # 2) Kardex (entrada por compra en unidades base con trazabilidad comercial).
             mov = {"id": uid(), "product_id": pid,
                    "codigo": it.get("codigo", prod.get("codigo")),
                    "descripcion": it.get("descripcion", prod.get("descripcion")),
                    "tipo": "compra", "documento": folio,
-                   "entrada": cant, "salida": 0,
+                   "entrada": cant_base, "salida": 0,
                    "existencia_anterior": anterior,
                    "existencia_resultante": resultante,
-                   "costo": costo, "motivo": "", "observaciones": f"Compra {folio}",
+                   "presentacion": it.get("presentacion") or prod.get("unidad_medida", "PZA"),
+                   "factor": factor,
+                   "cantidad_comercial": cant_comercial,
+                   "cantidad_base": cant_base,
+                   "costo": costo_base, "costo_comercial": costo_comercial,
+                   "motivo": "", "observaciones": f"Compra {folio}",
                    "usuario_id": user_id, "usuario_nombre": user_name,
                    "referencia": f"Compra {folio}", "compra_id": compra_id,
                    "fecha": now_iso(),

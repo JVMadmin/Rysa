@@ -29,6 +29,7 @@ import CuentasPorPagar from "@/pages/CuentasPorPagar";
 import Usuarios from "@/pages/Usuarios";
 import Auditoria from "@/pages/Auditoria";
 import Configuracion from "@/pages/Configuracion";
+import MachotesEditor from "@/pages/MachotesEditor";
 import DevTools from "@/pages/DevTools";
 import EnConstruccion from "@/pages/EnConstruccion";
 import Finanzas from "@/pages/Finanzas";
@@ -114,6 +115,7 @@ function App() {
             <Route path="/app/cuentas-bancarias" element={<EnConstruccion titulo="Cuentas bancarias" />} />
             <Route path="/app/usuarios" element={<RequirePerm perm="usuarios.ver"><Usuarios /></RequirePerm>} />
             <Route path="/app/configuracion" element={<Configuracion />} />
+            <Route path="/app/machotes" element={<RequirePerm perm="config"><MachotesEditor /></RequirePerm>} />
             <Route path="/app/auditoria" element={<RequirePerm perm="auditoria.ver"><Auditoria /></RequirePerm>} />
             <Route path="/app/devtools" element={<RequirePerm perm="dev.errores"><DevTools /></RequirePerm>} />
           </Route>

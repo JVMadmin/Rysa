@@ -45,6 +45,8 @@ from deps import (
 import pgstore.pos as _pgpos
 import pgstore.cxc as _pgcxc
 import pgstore.compras as _pgcompras
+from pgstore.database import transaction
+from sqlalchemy import text
 import storage
 import exports
 import ocr_invoice as _ocr_invoice
@@ -1294,6 +1296,26 @@ async def list_products(response: Response, estado: Optional[str] = None, q: Opt
         total = await db.products.count_documents(query)
         docs = await db.products.find(query, {"_id": 0}).sort("descripcion", 1).skip(skip).limit(limit).to_list(limit)
     response.headers["X-Total-Count"] = str(total)
+    
+    pids = [d["id"] for d in docs]
+    if pids:
+        async with transaction() as conn:
+            pres_rows = (await conn.execute(
+                text("SELECT product_id, id, nombre, factor, codigo_barras, precio, costo, es_base, es_predeterminada "
+                     "FROM product_presentations WHERE product_id = ANY(:pids) AND activo = TRUE ORDER BY factor ASC"),
+                {"pids": pids}
+            )).fetchall()
+            pres_by_prod = {}
+            for pr in pres_rows:
+                pres_by_prod.setdefault(pr.product_id, []).append({
+                    "id": pr.id, "nombre": pr.nombre, "factor": float(pr.factor),
+                    "codigo_barras": pr.codigo_barras,
+                    "precio": float(pr.precio) if pr.precio is not None else None,
+                    "costo": float(pr.costo) if pr.costo is not None else None,
+                    "es_base": pr.es_base, "es_predeterminada": pr.es_predeterminada
+                })
+            for d in docs:
+                d["presentaciones"] = pres_by_prod.get(d["id"], [])
     return docs
 
 # --- Catálogo POS: más vendidos y favoritos por usuario ---
@@ -1338,7 +1360,111 @@ async def get_product(product_id: str, user: dict = Depends(get_current_user)):
     p = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not p:
         raise HTTPException(404, "Producto no encontrado")
+    async with transaction() as conn:
+        pres = (await conn.execute(
+            text("SELECT id, nombre, factor, codigo_barras, precio, costo, es_base, es_predeterminada, activo "
+                 "FROM product_presentations WHERE product_id = :pid AND activo = TRUE ORDER BY factor ASC"),
+            {"pid": product_id}
+        )).fetchall()
+        p["presentaciones"] = [
+            {
+                "id": r.id, "nombre": r.nombre, "factor": float(r.factor),
+                "codigo_barras": r.codigo_barras,
+                "precio": float(r.precio) if r.precio is not None else float(p.get("precio_con_iva", 0)),
+                "costo": float(r.costo) if r.costo is not None else float(p.get("costo", 0)),
+                "es_base": r.es_base, "es_predeterminada": r.es_predeterminada,
+                "activo": r.activo
+            }
+            for r in pres
+        ]
     return p
+
+@api.get("/products/{product_id}/presentations")
+async def get_product_presentations(product_id: str, user: dict = Depends(get_current_user)):
+    async with transaction() as conn:
+        pres = (await conn.execute(
+            text("SELECT id, product_id, nombre, factor, codigo_barras, sku, precio, costo, es_base, es_predeterminada, activo "
+                 "FROM product_presentations WHERE product_id = :pid ORDER BY factor ASC"),
+            {"pid": product_id}
+        )).fetchall()
+        return [
+            {
+                "id": r.id, "product_id": r.product_id, "nombre": r.nombre,
+                "factor": float(r.factor), "codigo_barras": r.codigo_barras, "sku": r.sku,
+                "precio": float(r.precio) if r.precio is not None else None,
+                "costo": float(r.costo) if r.costo is not None else None,
+                "es_base": r.es_base, "es_predeterminada": r.es_predeterminada, "activo": r.activo
+            }
+            for r in pres
+        ]
+
+@api.post("/products/{product_id}/presentations")
+async def create_product_presentation(product_id: str, data: dict, user: dict = Depends(require_permission("producto.editar"))):
+    nombre = (data.get("nombre") or "").strip().upper()
+    factor = float(data.get("factor") or 1.0)
+    if not nombre or factor <= 0:
+        raise HTTPException(400, "Nombre y factor (> 0) son requeridos")
+    pres_id = f"pres_{uid()}"
+    precio = float(data["precio"]) if data.get("precio") is not None else None
+    costo = float(data["costo"]) if data.get("costo") is not None else None
+    barcode = (data.get("codigo_barras") or "").strip() or None
+
+    async with transaction() as conn:
+        prod = (await conn.execute(text("SELECT id FROM products WHERE id = :pid"), {"pid": product_id})).first()
+        if not prod:
+            raise HTTPException(404, "Producto no encontrado")
+        await conn.execute(
+            text("""
+                INSERT INTO product_presentations (id, product_id, nombre, factor, codigo_barras, precio, costo, es_base, es_predeterminada, activo, created_at, updated_at)
+                VALUES (:id, :pid, :nombre, :factor, :barcode, :precio, :costo, :es_base, :es_pred, TRUE, now(), now())
+                ON CONFLICT (product_id, nombre) DO UPDATE SET
+                    factor = EXCLUDED.factor, codigo_barras = EXCLUDED.codigo_barras,
+                    precio = EXCLUDED.precio, costo = EXCLUDED.costo, activo = TRUE, updated_at = now()
+            """),
+            {
+                "id": pres_id, "pid": product_id, "nombre": nombre, "factor": factor,
+                "barcode": barcode, "precio": precio, "costo": costo,
+                "es_base": bool(data.get("es_base", False)),
+                "es_pred": bool(data.get("es_predeterminada", False))
+            }
+        )
+    return {"ok": True, "id": pres_id, "nombre": nombre, "factor": factor}
+
+@api.put("/products/{product_id}/presentations/{pres_id}")
+async def update_product_presentation(product_id: str, pres_id: str, data: dict, user: dict = Depends(require_permission("producto.editar"))):
+    nombre = (data.get("nombre") or "").strip().upper()
+    factor = float(data.get("factor") or 1.0)
+    barcode = (data.get("codigo_barras") or "").strip() or None
+    precio = float(data["precio"]) if data.get("precio") is not None else None
+    costo = float(data["costo"]) if data.get("costo") is not None else None
+    activo = bool(data.get("activo", True))
+
+    async with transaction() as conn:
+        await conn.execute(
+            text("""
+                UPDATE product_presentations
+                SET nombre = :nombre, factor = :factor, codigo_barras = :barcode,
+                    precio = :precio, costo = :costo, activo = :activo, updated_at = now()
+                WHERE id = :id AND product_id = :pid
+            """),
+            {
+                "id": pres_id, "pid": product_id, "nombre": nombre, "factor": factor,
+                "barcode": barcode, "precio": precio, "costo": costo, "activo": activo
+            }
+        )
+    return {"ok": True}
+
+@api.delete("/products/{product_id}/presentations/{pres_id}")
+async def delete_product_presentation(product_id: str, pres_id: str, user: dict = Depends(require_permission("producto.editar"))):
+    async with transaction() as conn:
+        pres = (await conn.execute(text("SELECT es_base FROM product_presentations WHERE id = :id"), {"id": pres_id})).first()
+        if pres and pres.es_base:
+            raise HTTPException(400, "No se puede eliminar la unidad base del producto")
+        await conn.execute(
+            text("UPDATE product_presentations SET activo = FALSE, updated_at = now() WHERE id = :id AND product_id = :pid"),
+            {"id": pres_id, "pid": product_id}
+        )
+    return {"ok": True}
 
 @api.post("/products")
 async def create_product(data: ProductInput, user: dict = Depends(require_permission("producto.crear"))):
@@ -3350,12 +3476,16 @@ def _bucket(dv):
 @api.get("/cxc")
 async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = False,
                    estado: Optional[str] = None, vendedor_id: Optional[str] = None,
-                   facturada: Optional[str] = None,
+                   facturada: Optional[str] = None, modo: Optional[str] = "activo",
                    user: dict = Depends(require_permission("cxc.ver"))):
     hoy = now_utc().date()
-    clientes = await db.clients.find({"saldo": {"$gt": 0}}, {"_id": 0}).to_list(20000)
+    # Si modo es activo (default), solo clientes con saldo > 0. Si historial, todos los clientes con compras crédito.
+    filtro_cli = {"saldo": {"$gt": 0}} if modo == "activo" else {}
+    clientes = await db.clients.find(filtro_cli, {"_id": 0}).to_list(20000)
     cmap = {c["id"]: c for c in clientes}
-    sf = {"condicion": "credito", "estado": "confirmada", "saldo": {"$gt": 0}}
+    sf = {"condicion": "credito", "estado": "confirmada"}
+    if modo == "activo":
+        sf["saldo"] = {"$gt": 0}
     if vendedor_id:
         sf["vendedor_id"] = vendedor_id
     sales = await db.sales.find(sf, {"_id": 0, "cliente_id": 1, "fecha": 1, "saldo": 1,
@@ -3372,7 +3502,7 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
             a = {k: 0.0 for k in AGING_KEYS}
             a.update({"vencido": 0.0, "max_dias": 0, "n": 0, "monto_original": 0.0, "con_abonos": 0, "sin_abonos": 0, "facturadas": 0, "no_facturadas": 0, "folios": []})
             agg[cid] = a
-        a[_bucket(dv)] += s["saldo"]
+        a[_bucket(dv)] += s.get("saldo", 0)
         a["monto_original"] += float(s.get("total", 0))
         a["n"] += 1
         a["folios"].append(s.get("folio", ""))
@@ -3385,21 +3515,22 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
         else:
             a["no_facturadas"] += 1
         if dv > 0:
-            a["vencido"] += s["saldo"]
+            a["vencido"] += s.get("saldo", 0)
             a["max_dias"] = max(a["max_dias"], dv)
     rows = []
     ql = (q or "").lower().strip()
     for cid, cli in cmap.items():
+        cli_saldo = round(float(cli.get("saldo", 0) or 0), 2)
         a = agg.get(cid)
         if not a:
-            # Cliente con saldo pero sin ventas a crédito individuales
-            # (p. ej. saldo inicial importado). Se exhibe como vigente.
+            if modo == "activo" and cli_saldo <= 0.001:
+                continue
             a = {k: 0.0 for k in AGING_KEYS}
-            a["corriente"] = round(float(cli.get("saldo", 0) or 0), 2)
-            a.update({"vencido": 0.0, "max_dias": 0, "n": 0,
-                      "monto_original": round(float(cli.get("saldo", 0) or 0), 2),
+            a.update({"vencido": cli_saldo, "max_dias": 90, "n": 0,
+                      "monto_original": cli_saldo,
                       "con_abonos": 0, "sin_abonos": 0,
                       "facturadas": 0, "no_facturadas": 0, "folios": []})
+            a["b90"] = cli_saldo
         pendiente_total = sum(a[k] for k in AGING_KEYS)
         abonado_parcial = a["monto_original"] > pendiente_total
         if a["vencido"] > 0:
@@ -3410,12 +3541,17 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
             st = "parcialmente_pagada"
         else:
             st = "pendiente"
+        
+        cli_saldo = round(float(cli.get("saldo", 0)), 2)
+        if modo == "activo" and cli_saldo <= 0.001:
+            continue  # En CxC activo NUNCA aparecen clientes con saldo $0
+
         item = {
             "cliente_id": cid, "codigo": cli.get("codigo"), "nombre": cli.get("nombre"),
             "telefono": cli.get("telefono"), "celular": cli.get("celular"),
             "limite_credito": round(float(cli.get("limite_credito", 0)), 2),
             "dias_credito": cli.get("dias_credito", 0),
-            "saldo": round(float(cli.get("saldo", 0)), 2),
+            "saldo": cli_saldo,
             "monto_original": round(a["monto_original"], 2),
             "vencido": round(a["vencido"], 2),
             "max_dias": a["max_dias"],
@@ -3451,14 +3587,12 @@ async def cxc_list(q: Optional[str] = None, solo_vencidos: Optional[bool] = Fals
     return {"totales": tot, "clientes": rows}
 
 @api.get("/cxc/{client_id}")
-async def cxc_detail(client_id: str, user: dict = Depends(require_permission("cxc.ver"))):
+async def cxc_detail(client_id: str, modo: Optional[str] = "activo",
+                     user: dict = Depends(require_permission("cxc.ver"))):
     cli = await db.clients.find_one({"id": client_id}, {"_id": 0})
     if not cli:
         raise HTTPException(404, "Cliente no encontrado")
     hoy = now_utc().date()
-    # Historial COMPLETO de documentos confirmados del cliente (crédito y
-    # contado, legacy o nuevos, pagados o con saldo) — mismo criterio que el
-    # PDF de adeudo. El saldo de cada doc viene por venta.
     sales = await db.sales.find({"cliente_id": client_id, "estado": "confirmada"},
                                 {"_id": 0}).sort("fecha", 1).to_list(20000)
     ventas = []
@@ -3466,15 +3600,6 @@ async def cxc_detail(client_id: str, user: dict = Depends(require_permission("cx
         dv, vence = _dias_vencido(s["fecha"], cli.get("dias_credito", 0), hoy)
         saldo = round(float(s.get("saldo", 0)), 2)
         es_legacy = (s.get("source") == "LEGACY")
-        # Estado visual del CxC (independiente de `pagada`):
-        #   LEGACY_PAGADO: tickets legacy con saldo 0 — NO significa que el ERP
-        #     los cobró; significa que en el sistema legacy origen ya estaban
-        #     liquidados. El usuario no puede seleccionarlos para interés
-        #     (base = 0), pero tampoco deben aparecer como "Pagado" del ERP
-        #     porque la cobranza no necesariamente se reflejó en abonos aquí.
-        #   ACTIVO: saldo > 0, vencido.
-        #   VIGENTE: saldo > 0, dentro de plazo.
-        #   PAGADO: no-legacy con saldo 0 (cobrado en el ERP).
         if saldo <= 0.001:
             estado_cxc = "LEGACY_PAGADO" if es_legacy else "PAGADO"
         else:
@@ -3487,14 +3612,30 @@ async def cxc_detail(client_id: str, user: dict = Depends(require_permission("cx
                        "pagada": saldo <= 0.001})
     abonos = await db.abonos.find({"cliente_id": client_id}, {"_id": 0}).sort("fecha", -1).to_list(5000)
     cargos = await db.cxc_cargos.find({"cliente_id": client_id}, {"_id": 0}).sort("fecha", -1).to_list(200)
+
+    ventas_activas = [v for v in ventas if v["saldo"] > 0.001]
+    ventas_historial = [v for v in ventas if v["saldo"] <= 0.001]
+    ventas_ret = ventas_activas if modo == "activo" else ventas
+
     return {
         "cliente": {"id": cli["id"], "codigo": cli.get("codigo"), "nombre": cli.get("nombre"),
                     "telefono": cli.get("telefono"), "celular": cli.get("celular"),
                     "limite_credito": round(float(cli.get("limite_credito", 0)), 2),
                     "dias_credito": cli.get("dias_credito", 0),
                     "saldo": round(float(cli.get("saldo", 0)), 2)},
-        "ventas": ventas, "abonos": abonos, "cargos": cargos,
+        "ventas": ventas_ret,
+        "ventas_activas": ventas_activas,
+        "ventas_historial": ventas_historial,
+        "abonos": abonos, "cargos": cargos,
     }
+
+@api.post("/cxc/recalcular")
+async def cxc_recalcular(user: dict = Depends(require_permission("cxc.ver"))):
+    """Recalcula los saldos de clientes y ventas basándose en sus ventas y abonos reales."""
+    async with transaction() as conn:
+        res = await _pgcxc.recalcular_saldos_cxc(conn)
+    await log_audit(user, "cxc_recalcular", "cxc", "", f"Recalculados {res['clientes_recalculados']} clientes, cartera: ${res['cartera_total']:,.2f}")
+    return res
 
 @api.get("/cxc/{client_id}/adeudo-pdf")
 async def cxc_adeudo_pdf(client_id: str, user: dict = Depends(require_permission("cxc.ver"))):
@@ -7381,6 +7522,214 @@ async def reporte_centro(desde: Optional[str] = None, hasta: Optional[str] = Non
         "hora_pico": max(por_hora.items(), key=lambda x: x[1])[0] if por_hora else None,
         "dia_pico": max(dias, key=lambda dd: por_dia[dd]["tickets"]) if num_ventas else None,
     }
+
+
+# =========================================================================
+# MACHOTES Y CONSTRUCTOR VISUAL DE DOCUMENTOS (WYSIWYG)
+# =========================================================================
+@api.get("/templates")
+async def list_document_templates(user: dict = Depends(get_current_user)):
+    async with transaction() as conn:
+        rows = (await conn.execute(
+            text("""
+                SELECT t.id, t.tipo, t.nombre, t.descripcion, t.activo, t.version_actual,
+                       v.formato_fisico, v.configuracion, v.estado, v.created_at as version_created_at
+                FROM document_templates t
+                LEFT JOIN document_template_versions v
+                    ON v.template_id = t.id AND v.version = t.version_actual
+                ORDER BY t.tipo, t.nombre
+            """)
+        )).fetchall()
+        return [
+            {
+                "id": r.id, "tipo": r.tipo, "nombre": r.nombre, "descripcion": r.descripcion,
+                "activo": r.activo, "version_actual": r.version_actual,
+                "formato_fisico": r.formato_fisico, "configuracion": r.configuracion,
+                "estado": r.estado, "version_created_at": r.version_created_at.isoformat() if r.version_created_at else None
+            }
+            for r in rows
+        ]
+
+
+@api.get("/templates/{template_id}")
+async def get_document_template(template_id: str, user: dict = Depends(get_current_user)):
+    async with transaction() as conn:
+        row = (await conn.execute(
+            text("""
+                SELECT t.id, t.tipo, t.nombre, t.descripcion, t.activo, t.version_actual,
+                       v.formato_fisico, v.configuracion, v.estado
+                FROM document_templates t
+                LEFT JOIN document_template_versions v
+                    ON v.template_id = t.id AND v.version = t.version_actual
+                WHERE t.id = :id
+            """),
+            {"id": template_id}
+        )).first()
+        if not row:
+            raise HTTPException(404, "Plantilla no encontrada")
+
+        vers = (await conn.execute(
+            text("SELECT version, formato_fisico, estado, creado_por, created_at "
+                 "FROM document_template_versions WHERE template_id = :id ORDER BY version DESC"),
+            {"id": template_id}
+        )).fetchall()
+
+        return {
+            "id": row.id, "tipo": row.tipo, "nombre": row.nombre, "descripcion": row.descripcion,
+            "activo": row.activo, "version_actual": row.version_actual,
+            "formato_fisico": row.formato_fisico, "configuracion": row.configuracion,
+            "estado": row.estado,
+            "versiones": [
+                {
+                    "version": v.version, "formato_fisico": v.formato_fisico,
+                    "estado": v.estado, "creado_por": v.creado_por,
+                    "created_at": v.created_at.isoformat() if v.created_at else None
+                }
+                for v in vers
+            ]
+        }
+
+
+@api.post("/templates")
+async def create_document_template(data: dict, user: dict = Depends(require_permission("config"))):
+    tipo = (data.get("tipo") or "ticket").strip()
+    nombre = (data.get("nombre") or "").strip()
+    if not nombre:
+        raise HTTPException(400, "El nombre de la plantilla es requerido")
+    tid = f"tpl_{uid()}"
+    cfg = data.get("configuracion") or {"formato_fisico": data.get("formato_fisico", "80mm"), "elementos": []}
+    fmt = data.get("formato_fisico") or cfg.get("formato_fisico", "80mm")
+
+    async with transaction() as conn:
+        await conn.execute(
+            text("""
+                INSERT INTO document_templates (id, tipo, nombre, descripcion, activo, version_actual, created_at, updated_at)
+                VALUES (:id, :tipo, :nombre, :desc, TRUE, 1, now(), now())
+            """),
+            {"id": tid, "tipo": tipo, "nombre": nombre, "desc": data.get("descripcion", "")}
+        )
+        vid = f"ver_{tid}_1"
+        await conn.execute(
+            text("""
+                INSERT INTO document_template_versions (id, template_id, version, formato_fisico, configuracion, estado, creado_por, created_at)
+                VALUES (:vid, :tid, 1, :fmt, CAST(:cfg AS jsonb), 'ACTIVO', :user, now())
+            """),
+            {"vid": vid, "tid": tid, "fmt": fmt, "cfg": json.dumps(cfg, ensure_ascii=False), "user": user.get("name")}
+        )
+    return {"ok": True, "id": tid, "nombre": nombre}
+
+
+@api.put("/templates/{template_id}")
+async def update_document_template(template_id: str, data: dict, user: dict = Depends(require_permission("config"))):
+    cfg = data.get("configuracion")
+    if not cfg:
+        raise HTTPException(400, "Configuración es requerida")
+    fmt = data.get("formato_fisico") or cfg.get("formato_fisico", "80mm")
+
+    async with transaction() as conn:
+        trow = (await conn.execute(
+            text("SELECT version_actual, nombre FROM document_templates WHERE id = :id"),
+            {"id": template_id}
+        )).first()
+        if not trow:
+            raise HTTPException(404, "Plantilla no encontrada")
+
+        nueva_version = trow.version_actual + 1
+        vid = f"ver_{template_id}_{nueva_version}"
+
+        # Insertar nueva versión
+        await conn.execute(
+            text("""
+                INSERT INTO document_template_versions (id, template_id, version, formato_fisico, configuracion, estado, creado_por, created_at)
+                VALUES (:vid, :tid, :v, :fmt, CAST(:cfg AS jsonb), 'ACTIVO', :user, now())
+            """),
+            {"vid": vid, "tid": template_id, "v": nueva_version, "fmt": fmt,
+             "cfg": json.dumps(cfg, ensure_ascii=False), "user": user.get("name")}
+        )
+
+        # Actualizar versión actual en plantilla
+        await conn.execute(
+            text("""
+                UPDATE document_templates
+                SET version_actual = :v, updated_at = now(),
+                    nombre = COALESCE(NULLIF(:nom, ''), nombre),
+                    descripcion = COALESCE(:desc, descripcion)
+                WHERE id = :tid
+            """),
+            {"v": nueva_version, "nom": data.get("nombre"), "desc": data.get("descripcion"), "tid": template_id}
+        )
+
+    return {"ok": True, "version": nueva_version}
+
+
+@api.post("/templates/{template_id}/simulate")
+async def simulate_document_template(template_id: str, data: dict = Body(default={}), user: dict = Depends(get_current_user)):
+    from machotes import MachoteCompiler, generar_datos_sinteticos, cargar_datos_reales
+
+    cfg = data.get("configuracion")
+    async with transaction() as conn:
+        if not cfg:
+            row = (await conn.execute(
+                text("""
+                    SELECT v.configuracion
+                    FROM document_templates t
+                    JOIN document_template_versions v ON v.template_id = t.id AND v.version = t.version_actual
+                    WHERE t.id = :id
+                """),
+                {"id": template_id}
+            )).first()
+            if not row:
+                raise HTTPException(404, "Plantilla no encontrada")
+            cfg = dict(row[0])
+
+        doc_id = data.get("documento_id")
+        if doc_id:
+            context = await cargar_datos_reales(conn, doc_id)
+        else:
+            context = generar_datos_sinteticos(tipo_documento=cfg.get("formato_fisico", "ticket"),
+                                              num_items=int(data.get("num_items", 4)))
+
+    return {
+        "ok": True,
+        "context": context,
+        "configuracion": cfg,
+    }
+
+
+@api.post("/templates/{template_id}/pdf")
+async def render_document_template_pdf(template_id: str, data: dict = Body(default={}), user: dict = Depends(get_current_user)):
+    from machotes import MachoteCompiler, generar_datos_sinteticos, cargar_datos_reales
+
+    cfg = data.get("configuracion")
+    async with transaction() as conn:
+        if not cfg:
+            row = (await conn.execute(
+                text("""
+                    SELECT v.configuracion
+                    FROM document_templates t
+                    JOIN document_template_versions v ON v.template_id = t.id AND v.version = t.version_actual
+                    WHERE t.id = :id
+                """),
+                {"id": template_id}
+            )).first()
+            if not row:
+                raise HTTPException(404, "Plantilla no encontrada")
+            cfg = dict(row[0])
+
+        doc_id = data.get("documento_id")
+        if doc_id:
+            context = await cargar_datos_reales(conn, doc_id)
+        else:
+            context = generar_datos_sinteticos(tipo_documento=cfg.get("formato_fisico", "ticket"),
+                                              num_items=int(data.get("num_items", 4)))
+
+    compiler = MachoteCompiler(cfg)
+    pdf_bytes = compiler.render_pdf(context)
+
+    from fastapi.responses import Response
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename=machote-{template_id}.pdf"})
+
 
 # =========================================================================
 # STARTUP

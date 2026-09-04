@@ -496,3 +496,183 @@ async def cancelar_cargo_pg(*, cargo_id: str, motivo: str, user: dict) -> dict:
 
     return {"ok": True, "folio": cargo.get("folio"),
             "interes_revertido": total, "saldo_actual": nuevo_saldo}
+
+
+async def recalcular_saldos_cxc(conn, client_ids: list[str] | None = None) -> dict:
+    """Recalcula los saldos de ventas y clientes de forma exacta e idempotente.
+
+    Garantías operativas (Auditoría Forense CxC & Reemplazo Total ZIP):
+    1. Para ventas LEGACY (source == 'LEGACY'):
+       - El saldo base deudor proviene de `legacy_cxc_snapshot` (documentos vivos con saldo en FoxPro).
+       - Ventas históricas que ya fueron saldadas en FoxPro (legacy_saldo <= 0.01 o no registradas con adeudo)
+         tienen saldo = 0.00 inmutable para no inflar compras históricas pagadas como deuda activa.
+       - Si una venta legacy tiene adeudo en legacy_cxc_snapshot, se asegura condición='credito' para su
+         gestión y abono en CxC.
+       - Se restan los abonos registrados en el nuevo ERP (tabla `abonos`) aplicados a dicha venta y se suman
+         intereses acumulados.
+    2. Para ventas NATIVAS (source != 'LEGACY'):
+       - El saldo base es total de la venta a crédito.
+       - Se descuentan abonos aplicados en el ERP y se suman intereses acumulados.
+    3. Para el saldo del cliente (clients.saldo):
+       - Es la deuda viva real del cliente:
+         saldo_ventas = suma de sales.saldo para ventas confirmadas de este cliente con saldo > 0.
+         saldo_maestro = saldo del maestro legacy (CLIENTES.dbf / legacy_client_balance) menos abonos totales del cliente en el ERP.
+         saldo_cliente = max(saldo_ventas, max(0.0, saldo_maestro)).
+       - Si el cliente no tiene adeudo en ventas ni en maestro, saldo = $0.00 (nunca revive clientes liquidados).
+    """
+    # 1. Preload legacy snapshot map (docs with legacy_saldo > 0.01)
+    snap_rows = (await conn.execute(text(
+        "SELECT legacy_key, legacy_saldo FROM legacy_cxc_snapshot WHERE legacy_saldo > 0.01"
+    ))).fetchall()
+    legacy_cxc_map = {r[0]: float(r[1]) for r in snap_rows}
+
+    # 2. Preload latest legacy client master balances
+    lcb_rows = (await conn.execute(text('''
+        SELECT DISTINCT ON (legacy_customer_key) legacy_customer_key, master_saldo 
+        FROM legacy_client_balance 
+        ORDER BY legacy_customer_key, updated_at DESC
+    '''))).fetchall()
+    legacy_client_map = {r[0]: float(r[1]) for r in lcb_rows if float(r[1] or 0) > 0.01}
+
+    # 3. Fetch target clients
+    if client_ids:
+        clis = (await conn.execute(
+            text('SELECT "id", "doc", "saldo" FROM clients WHERE "id" = ANY(:cids)'),
+            {"cids": client_ids}
+        )).fetchall()
+    else:
+        clis = (await conn.execute(text('SELECT "id", "doc", "saldo" FROM clients'))).fetchall()
+
+    target_cids = [r[0] for r in clis]
+    if not target_cids:
+        return {"clientes_recalculados": 0, "ventas_recalculadas": 0, "cartera_total": 0.0}
+
+    # 4. Fetch sales in batch for target clients (confirmed sales that are credit, in legacy snapshot, or currently have saldo > 0)
+    sales_query = """
+        SELECT id, doc->>'cliente_id' as cid, doc->>'source' as src, doc->>'condicion' as cond,
+               total, saldo, doc->>'interes_acumulado' as interes, doc
+        FROM sales
+        WHERE doc->>'cliente_id' = ANY(:cids) AND doc->>'estado' = 'confirmada'
+          AND (doc->>'condicion' = 'credito' OR id = ANY(:snap_keys) OR saldo > 0)
+    """
+    srows = (await conn.execute(
+        text(sales_query),
+        {"cids": target_cids, "snap_keys": list(legacy_cxc_map.keys())}
+    )).fetchall()
+
+    # Group sales by cid
+    sales_by_client = {}
+    for r in srows:
+        sales_by_client.setdefault(r.cid, []).append(r)
+
+    # 5. Fetch active abonos in batch for target clients
+    abono_rows = (await conn.execute(
+        text("SELECT doc FROM abonos WHERE doc->>'cliente_id' = ANY(:cids) "
+             "AND (doc->>'cancelado' IS NULL OR doc->>'cancelado' = 'false')"),
+        {"cids": target_cids}
+    )).fetchall()
+
+    abonos_by_client = {}
+    for r in abono_rows:
+        doc = dict(r[0])
+        cid = doc.get("cliente_id")
+        if cid:
+            abonos_by_client.setdefault(cid, []).append(doc)
+
+    recalculados_clientes = 0
+    recalculadas_ventas = 0
+    total_cartera = 0.0
+
+    sales_updates = []
+    client_updates = []
+
+    for cid, cdoc, current_saldo in clis:
+        codigo = (cdoc or {}).get("codigo", "")
+        client_sales = sales_by_client.get(cid, [])
+        client_abonos = abonos_by_client.get(cid, [])
+
+        pagos_por_venta = {}
+        total_abonos_cliente = 0.0
+        for ab in client_abonos:
+            m = float(ab.get("monto", 0.0) or 0.0)
+            total_abonos_cliente += m
+            for ap in ab.get("aplicaciones", []):
+                sid = ap.get("sale_id")
+                if sid:
+                    pagos_por_venta[sid] = pagos_por_venta.get(sid, 0.0) + float(ap.get("monto", 0.0) or 0.0)
+
+        saldo_sales = 0.0
+        for s in client_sales:
+            sid = s.id
+            sdoc = dict(s.doc)
+            is_legacy = s.src == "LEGACY"
+            cond = s.cond or "contado"
+            pagado = pagos_por_venta.get(sid, 0.0)
+            interes = float(s.interes or 0.0)
+
+            if is_legacy:
+                base = legacy_cxc_map.get(sid, 0.0)
+                if base <= 0.0:
+                    nuevo_saldo = 0.0
+                else:
+                    nuevo_saldo = round(max(0.0, base - pagado + interes), 2)
+                    if sdoc.get("condicion") != "credito":
+                        sdoc["condicion"] = "credito"
+            else:
+                if cond != "credito":
+                    nuevo_saldo = 0.0
+                else:
+                    stot = float(s.total or sdoc.get("total", 0) or 0.0)
+                    nuevo_saldo = round(max(0.0, stot - pagado + interes), 2)
+
+            curr_s_saldo = float(s.saldo or 0.0)
+            needs_update = (abs(nuevo_saldo - curr_s_saldo) > 0.001) or (is_legacy and base > 0.0 and s.cond != "credito")
+            if needs_update:
+                sdoc["saldo"] = nuevo_saldo
+                sales_updates.append({"sid": sid, "ns": nuevo_saldo, "d": json.dumps(sdoc, ensure_ascii=False, default=str)})
+                recalculadas_ventas += 1
+
+            if nuevo_saldo > 0.001:
+                saldo_sales = round(saldo_sales + nuevo_saldo, 2)
+
+        # Determinar saldo del cliente
+        master_base = float(legacy_client_map.get(codigo, 0.0) or (cdoc or {}).get("legacy_master_saldo", 0.0) or 0.0)
+        if saldo_sales > 0.001:
+            saldo_cliente = max(saldo_sales, round(max(0.0, master_base - total_abonos_cliente), 2))
+        elif master_base > 0.001:
+            saldo_cliente = round(max(0.0, master_base - total_abonos_cliente), 2)
+        else:
+            saldo_cliente = 0.0
+
+        curr_c_saldo = float(current_saldo or (cdoc or {}).get("saldo", 0.0) or 0.0)
+        if abs(saldo_cliente - curr_c_saldo) > 0.001:
+            new_cdoc = dict(cdoc) if cdoc else {}
+            new_cdoc["saldo"] = saldo_cliente
+            client_updates.append({"cid": cid, "sc": saldo_cliente, "d": json.dumps(new_cdoc, ensure_ascii=False, default=str)})
+            recalculados_clientes += 1
+
+        total_cartera = round(total_cartera + saldo_cliente, 2)
+
+    # Batch updates for sales (chunks of 500)
+    for i in range(0, len(sales_updates), 500):
+        chunk = sales_updates[i:i + 500]
+        for item in chunk:
+            await conn.execute(
+                text('UPDATE sales SET "saldo" = :ns, doc = CAST(:d AS jsonb) WHERE "id" = CAST(:sid AS text)'),
+                item
+            )
+
+    # Batch updates for clients (chunks of 500)
+    for i in range(0, len(client_updates), 500):
+        chunk = client_updates[i:i + 500]
+        for item in chunk:
+            await conn.execute(
+                text('UPDATE clients SET "saldo" = :sc, doc = CAST(:d AS jsonb) WHERE "id" = CAST(:cid AS text)'),
+                item
+            )
+
+    return {
+        "clientes_recalculados": recalculados_clientes,
+        "ventas_recalculadas": recalculadas_ventas,
+        "cartera_total": total_cartera
+    }

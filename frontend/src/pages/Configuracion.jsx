@@ -414,7 +414,25 @@ export default function Configuracion() {
           </div>
         </TabsContent>
 
-        <TabsContent value="ticket" className="pt-4">
+        <TabsContent value="ticket" className="pt-4 space-y-4">
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-indigo-950 flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-indigo-600" />
+                Constructor Visual de Machotes RYSA (WYSIWYG)
+              </h3>
+              <p className="text-xs text-indigo-700 mt-0.5">
+                Diseña visualmente tickets (58mm, 80mm) y cartas de venta con lienzo en vivo, simulación y variables dinámicas.
+              </p>
+            </div>
+            <a
+              href="/app/machotes"
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap"
+            >
+              Abrir Constructor Visual →
+            </a>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="card-soft p-5 space-y-4">
               <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#C1401E]" /> Diseño de ticket</div>
