@@ -91,28 +91,79 @@ export default function MapaCampo({
           style={{ height: "100%", width: "100%", cursor: modoCaptura ? "crosshair" : "" }}>
           <TileLayer url={MAP_THEME} attribution={MAP_ATTRIBUTION} />
           <ClickCatcher activo={modoCaptura} onPick={onCapturaPunto} />
-          {/* Encuadre de flota en cada refresh de datos */}
-          <Encajar pts={todosPts} trigger={autoFitKey} />
-          {/* Vuelo a selección (cliente desde listado o marcador) */}
+          {/* Encuadre de flota solo si no hay vendedor seleccionado */}
+          <Encajar pts={selVendedorId ? [] : todosPts} trigger={autoFitKey} />
+          {/* Vuelo y seguimiento en vivo al vendedor seleccionado */}
           {selCli && <Volar pos={selCli.pos} zoom={16} trigger={`${selCli.id}|${enfocarTrigger}`} />}
-          {selVen && <Volar pos={selVen.pos} zoom={15} trigger={selVen.id} />}
+          {selVen && <Volar pos={selVen.pos} zoom={16} trigger={`${selVen.id}|${selVen.pos[0]}|${selVen.pos[1]}`} />}
 
-          {/* Track GPS del día (Mi Ruta / vendedor seleccionado) */}
+          {/* Track GPS del día con indicador tipo temperatura cronológica */}
           {rutaGps.length > 1 && (
             <>
-              <Polyline positions={rutaGps.map((p) => [Number(p.latitud), Number(p.longitud)])}
-                        pathOptions={{ color: "#2563eb", weight: 3, opacity: 0.75, dashArray: "6 6" }} />
-              {rutaGps.map((p, i) => (
-                <CircleMarker key={p.id || i} center={[Number(p.latitud), Number(p.longitud)]}
-                  radius={4} pathOptions={{ color: "#fff", weight: 1.5, fillColor: i === 0 ? "#16a34a" : "#2563eb", fillOpacity: 0.95 }}>
-                  <Popup>
-                    <div className="text-xs">
-                      <b>{i === 0 ? "Inicio de ruta" : `Punto ${i + 1}`}</b> · {(p.fecha || "").slice(11, 16)}<br />
-                      Precisión: {p.precision ?? "—"} m{p.velocidad_kmh != null ? <> · Vel: {p.velocidad_kmh} km/h</> : null}
-                    </div>
-                  </Popup>
-                </CircleMarker>
-              ))}
+              {/* Segmentos coloreados por temperatura cronológica */}
+              {rutaGps.slice(0, -1).map((p, i) => {
+                const nextP = rutaGps[i + 1];
+                const ratio = rutaGps.length > 1 ? i / (rutaGps.length - 1) : 0;
+                // Gradiente térmico: Cyan frío (mañana) -> Azul -> Amarillo (mediodía) -> Naranja -> Rojo cálido (tarde/noche)
+                let color = "#06b6d4";
+                if (ratio > 0.75) color = "#dc2626"; // Rojo cálido
+                else if (ratio > 0.5) color = "#f97316"; // Naranja
+                else if (ratio > 0.25) color = "#eab308"; // Amarillo
+                else if (ratio > 0.1) color = "#2563eb"; // Azul
+                
+                return (
+                  <Polyline
+                    key={`seg-${p.id || i}`}
+                    positions={[
+                      [Number(p.latitud), Number(p.longitud)],
+                      [Number(nextP.latitud), Number(nextP.longitud)],
+                    ]}
+                    pathOptions={{ color, weight: 5, opacity: 0.85 }}
+                  />
+                );
+              })}
+
+              {/* Puntos clave de paso con hora exacta */}
+              {rutaGps.map((p, i) => {
+                const ratio = rutaGps.length > 1 ? i / (rutaGps.length - 1) : 0;
+                let dotColor = "#06b6d4";
+                if (ratio > 0.75) dotColor = "#dc2626";
+                else if (ratio > 0.5) dotColor = "#f97316";
+                else if (ratio > 0.25) dotColor = "#eab308";
+                else if (ratio > 0.1) dotColor = "#2563eb";
+
+                const isStart = i === 0;
+                const isEnd = i === rutaGps.length - 1;
+                const timeStr = (p.fecha || "").slice(11, 19) || "--:--";
+
+                return (
+                  <CircleMarker
+                    key={p.id || i}
+                    center={[Number(p.latitud), Number(p.longitud)]}
+                    radius={isStart || isEnd ? 6.5 : 4}
+                    pathOptions={{
+                      color: "#ffffff",
+                      weight: isStart || isEnd ? 2 : 1,
+                      fillColor: isStart ? "#16a34a" : isEnd ? "#dc2626" : dotColor,
+                      fillOpacity: 0.95,
+                    }}
+                  >
+                    <Popup>
+                      <div className="text-xs space-y-1">
+                        <div className="font-bold text-slate-800 flex items-center justify-between gap-2">
+                          <span>{isStart ? "🏁 Inicio de ruta" : isEnd ? "📍 Posición más reciente" : `Paso #${i + 1}`}</span>
+                          <span className="font-mono text-[#C1401E]">{timeStr}</span>
+                        </div>
+                        <div className="text-slate-500">
+                          Hora: <b>{timeStr}</b><br />
+                          Precisión: {p.precision != null ? `±${p.precision} m` : "—"}<br />
+                          {p.velocidad_kmh != null ? `Velocidad: ${p.velocidad_kmh} km/h` : ""}
+                        </div>
+                      </div>
+                    </Popup>
+                  </CircleMarker>
+                );
+              })}
             </>
           )}
 

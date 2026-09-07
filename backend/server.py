@@ -8014,6 +8014,10 @@ app.include_router(_devmod.router)
 # (ver legacyadmin.py). NO importa nada por sí solo.
 app.include_router(_legacymod.router)
 
+# Módulo AUTO-CARGA DE IMÁGENES DE CATÁLOGO (IA / Rollback)
+import catalog_images  # noqa: E402
+app.include_router(catalog_images.router)
+
 # Configuración dinámica de CORS
 env = os.environ.get("ENVIRONMENT", "development").lower()
 cors_origins_env = os.environ.get("CORS_ORIGINS", "")

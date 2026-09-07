@@ -566,6 +566,18 @@ export default function ClientesCarteraScreen() {
           </View>
 
           <View style={styles.actionRowBtns}>
+            <TouchableOpacity
+              style={styles.quickVenderBtn}
+              onPress={() => {
+                setSelectedClient(null);
+                router.push({ pathname: '/pedidos', params: { cliente_id: item.id } } as any);
+              }}
+              activeOpacity={0.8}
+            >
+              <MaterialIcons name="add-shopping-cart" size={13} color="#FFFFFF" />
+              <Text style={styles.quickVenderText}>Vender</Text>
+            </TouchableOpacity>
+
             {assigned && hasSaldo && (
               <TouchableOpacity
                 style={styles.quickAbonoBtn}
@@ -1506,6 +1518,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  quickVenderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D32F2F',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 3,
+  },
+  quickVenderText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
   quickAbonoBtn: {
     flexDirection: 'row',

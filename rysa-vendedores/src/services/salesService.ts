@@ -188,6 +188,7 @@ export async function createVisit(payload: {
   comentarios?: string;
   latitud?: number;
   longitud?: number;
+  foto_evidencia?: string;
 }): Promise<any> {
   return await apiFetch<any>('/visits', {
     method: 'POST',
@@ -197,7 +198,7 @@ export async function createVisit(payload: {
 
 export async function checkInVisit(
   visitId: string,
-  payload: { comentarios?: string; resultado?: string; latitud?: number; longitud?: number }
+  payload: { comentarios?: string; resultado?: string; latitud?: number; longitud?: number; foto_evidencia?: string }
 ): Promise<any> {
   return await apiFetch<any>(`/visits/${visitId}/checkin`, {
     method: 'POST',

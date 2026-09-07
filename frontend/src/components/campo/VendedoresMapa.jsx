@@ -2,10 +2,12 @@ import { useEffect } from "react";
 import { useMap, Marker, Popup } from "react-leaflet";
 import L from "leaflet";
 import { Badge } from "@/components/ui/badge";
-import { money } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { money, fileUrl } from "@/lib/api";
 import {
   ESTADO_DOT, ESTADO_LABEL, iconVendedor,
 } from "@/lib/ubicaciones";
+import { ClipboardList, ShoppingBag, Route as RouteIcon, User } from "lucide-react";
 
 /** Vuela (centra + zoom) hacia `pos` cada vez que cambia `trigger`. */
 export function VolarA({ pos, zoom = 15, trigger }) {
@@ -45,7 +47,17 @@ export function CapaVendedores({ vendedores = [], seleccionado = "", onSelect })
                 eventHandlers={{ click: () => onSelect && onSelect(v.id) }}>
           <Popup>
             <div className="text-xs" style={{ minWidth: 180 }}>
-              <b>{v.name}</b> · {ESTADO_LABEL[v.estado] || v.estado}<br />
+              <div className="flex items-center gap-2 mb-1.5">
+                {v.foto_url ? (
+                  <img src={fileUrl(v.foto_url)} alt={v.name} className="w-6 h-6 rounded-full object-cover border border-slate-200" />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-orange-100 text-[#C1401E] flex items-center justify-center font-bold text-[10px]">
+                    {(v.name || "V").slice(0, 1).toUpperCase()}
+                  </div>
+                )}
+                <b>{v.name}</b>
+              </div>
+              · {ESTADO_LABEL[v.estado] || v.estado}<br />
               Ventas hoy: {money(v.ventas_hoy?.monto)} · Cobros: {money(v.cobros_hoy)}<br />
               CxC vencido: {money(v.cxc?.vencido)}<br />
               <span className="text-slate-400">Últ. GPS: {fmtUbic(v.ultima_ubicacion?.fecha)}</span>
@@ -59,22 +71,39 @@ export function CapaVendedores({ vendedores = [], seleccionado = "", onSelect })
 
 /**
  * Panel informativo del vendedor seleccionado (compartido Mapas/Rutas).
- * Muestra su información básica; si no tiene GPS activo lo indica claramente.
+ * Muestra su información básica, foto, métricas del día y botones de acción rápida.
  */
-export function TarjetaInfoVendedor({ v, sinGps = false }) {
+export function TarjetaInfoVendedor({
+  v, sinGps = false,
+  onVerVisitas, onVerVentas,
+  mostrarRuta = false, onToggleRuta,
+}) {
   if (!v) return null;
   const ub = v.ultima_ubicacion || {};
   return (
-    <div className="card-soft p-4 flex flex-wrap items-start gap-x-6 gap-y-3" data-testid="info-vendedor">
-      <div className="min-w-[160px]">
-        <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full shrink-0" style={{ background: ESTADO_DOT[v.estado] || "#94a3b8" }} />
-          <span className="font-semibold text-slate-900">{v.name}</span>
-          <Badge variant="outline" className="text-[10px] uppercase">
-            {ESTADO_LABEL[v.estado] || v.estado}
-          </Badge>
+    <div className="card-soft p-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3" data-testid="info-vendedor">
+      <div className="flex items-center gap-3 min-w-[200px]">
+        {v.foto_url ? (
+          <img
+            src={fileUrl(v.foto_url)}
+            alt={v.name}
+            className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm shrink-0"
+          />
+        ) : (
+          <div className="w-12 h-12 rounded-full bg-[#C1401E]/10 text-[#C1401E] flex items-center justify-center font-black text-base shrink-0">
+            {(v.name || "V").slice(0, 1).toUpperCase()}
+          </div>
+        )}
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: ESTADO_DOT[v.estado] || "#94a3b8" }} />
+            <span className="font-bold text-slate-900">{v.name}</span>
+            <Badge variant="outline" className="text-[10px] uppercase font-semibold">
+              {ESTADO_LABEL[v.estado] || v.estado}
+            </Badge>
+          </div>
+          <div className="text-xs text-slate-400 mt-0.5">{v.email}</div>
         </div>
-        <div className="text-xs text-slate-400 mt-0.5">{v.email}</div>
       </div>
 
       {sinGps ? (
@@ -82,7 +111,7 @@ export function TarjetaInfoVendedor({ v, sinGps = false }) {
           Sin ubicación GPS disponible — el vendedor no ha compartido posición o es inválida.
         </div>
       ) : (
-        <>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div>
             <div className="text-[10px] uppercase tracking-wider text-slate-400">Última ubicación</div>
             <div className="text-sm font-medium">{fmtUbic(ub.fecha) || "—"}</div>
@@ -110,8 +139,45 @@ export function TarjetaInfoVendedor({ v, sinGps = false }) {
             <div className="text-[10px] uppercase tracking-wider text-slate-400">Visitas hoy</div>
             <div className="text-sm font-semibold text-slate-700">{v.visitas?.hoy ?? 0}</div>
           </div>
-        </>
+        </div>
       )}
+
+      {/* Botones de acción rápida solicitados en referencia visual */}
+      <div className="flex flex-wrap items-center gap-2 border-t md:border-t-0 md:border-l border-slate-100 pt-2 md:pt-0 md:pl-4">
+        {onVerVisitas && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onVerVisitas(v)}
+            className="text-xs h-8 border-orange-200 text-orange-950 hover:bg-orange-50"
+            title="Ver visitas realizadas hoy"
+          >
+            <ClipboardList className="w-3.5 h-3.5 mr-1 text-[#C1401E]" /> Visitas
+          </Button>
+        )}
+        {onVerVentas && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onVerVentas(v)}
+            className="text-xs h-8 border-emerald-200 text-emerald-950 hover:bg-emerald-50"
+            title="Ver ventas y pedidos de hoy"
+          >
+            <ShoppingBag className="w-3.5 h-3.5 mr-1 text-emerald-600" /> Ventas/Pedidos
+          </Button>
+        )}
+        {onToggleRuta && !sinGps && (
+          <Button
+            size="sm"
+            variant={mostrarRuta ? "default" : "outline"}
+            onClick={onToggleRuta}
+            className={`text-xs h-8 ${mostrarRuta ? "bg-[#C1401E] hover:bg-[#A03316] text-white" : "border-slate-200 text-slate-700"}`}
+            title="Trazar histórico de recorrido con temperatura"
+          >
+            <RouteIcon className="w-3.5 h-3.5 mr-1" /> {mostrarRuta ? "Ocultar ruta" : "Ruta térmica"}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

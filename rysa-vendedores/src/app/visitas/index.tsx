@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   Modal,
   SafeAreaView,
   ScrollView,
@@ -19,6 +20,8 @@ import * as Linking from 'expo-linking';
 import { useAuth } from '@/auth/AuthContext';
 import { ConnectivityBar } from '@/components/ConnectivityBar';
 import { RouteMap, MapClientPoint } from '@/components/RouteMap';
+import { trackingService } from '@/services/trackingService';
+import { pickImageOrPhoto, PickedFile } from '@/lib/filePicker';
 import {
   getVisits,
   checkInVisit,
@@ -75,12 +78,14 @@ export default function VisitasScreen() {
   const [tipoVisita, setTipoVisita] = useState('visita');
   const [resultadoVisita, setResultadoVisita] = useState('visita_exitosa');
   const [notasVisita, setNotasVisita] = useState('');
+  const [fotoInSitu, setFotoInSitu] = useState<PickedFile | null>(null);
   const [submittingNewVisit, setSubmittingNewVisit] = useState(false);
 
   // Modal Check-In de Visita Programada
   const [selectedVisitForCheckin, setSelectedVisitForCheckin] = useState<Visit | null>(null);
   const [comentariosCheckin, setComentariosCheckin] = useState('');
   const [resultadoCheckin, setResultadoCheckin] = useState('visita_exitosa');
+  const [fotoCheckin, setFotoCheckin] = useState<PickedFile | null>(null);
   const [submittingCheckin, setSubmittingCheckin] = useState(false);
 
   // Ruta y Trazado OSRM
@@ -316,34 +321,73 @@ export default function VisitasScreen() {
     }
   }, [captureGpsPosition]);
 
-  // Toggle de Tracking Continuo (cada 15s como en la web app)
-  const toggleContinuousTracking = () => {
-    if (continuousTracking) {
-      if (trackingIntervalRef.current) {
-        clearInterval(trackingIntervalRef.current);
-        trackingIntervalRef.current = null;
+  // Suscripción al servicio global de tracking (persiste entre pantallas y en segundo plano)
+  useEffect(() => {
+    trackingService.init();
+    const unsub = trackingService.addListener((isActive, lastLoc) => {
+      setContinuousTracking(isActive);
+      if (lastLoc) {
+        setCurrentGps((prev) => ({
+          ...prev,
+          latitud: lastLoc.latitud,
+          longitud: lastLoc.longitud,
+          precision: lastLoc.precision,
+          ultimaSincronizacion: new Date(lastLoc.timestamp).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }),
+        }));
       }
-      setContinuousTracking(false);
+    });
+    return () => unsub();
+  }, []);
+
+  // Toggle de Tracking Continuo (usando trackingService global con watchPositionAsync)
+  const toggleContinuousTracking = async () => {
+    if (continuousTracking) {
+      await trackingService.stopTracking();
       Alert.alert('Ruta en Pausa', 'Se detuvo la transmisión continua de ubicación.');
     } else {
-      setContinuousTracking(true);
-      handleTransmitLocation(true);
-      trackingIntervalRef.current = setInterval(() => {
-        handleTransmitLocation(true);
-      }, 15000);
-      Alert.alert('Ruta Activa', 'Se activó el rastreo continuo (cada 15 segundos). Tu supervisor verá tu avance en tiempo real.');
+      const ok = await trackingService.startTracking();
+      if (ok) {
+        Alert.alert(
+          'Ruta Activa',
+          'Se activó el rastreo en vivo y continuo. Tu supervisor verá tu avance en tiempo real en el ERP aunque navegues a otras pantallas.'
+        );
+      } else {
+        Alert.alert('Permiso Requerido', 'No se pudo activar el GPS. Verifica los permisos de ubicación en los ajustes de tu dispositivo.');
+      }
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if (trackingIntervalRef.current) {
-        clearInterval(trackingIntervalRef.current);
-      }
-    };
-  }, []);
+  // Trazar Ruta Completa Asistida en Google Maps
+  const handleOpenFullRouteGoogleMaps = () => {
+    const sourceClients = suggestedRoute.length > 0
+      ? suggestedRoute
+      : clients.filter((c) => c.latitud && c.longitud);
 
-  // Crear visita in-situ (con soporte offline transparente)
+    const validStops = sourceClients
+      .filter((s) => s.latitud && s.longitud && Math.abs(s.latitud) > 1)
+      .slice(0, 10);
+
+    if (validStops.length === 0) {
+      Alert.alert('Sin Puntos GPS', 'No hay visitas o clientes con coordenadas GPS registradas para trazar.');
+      return;
+    }
+
+    const origin = `${currentGps.latitud},${currentGps.longitud}`;
+    const destination = `${validStops[validStops.length - 1].latitud},${validStops[validStops.length - 1].longitud}`;
+    const waypointsList = validStops.slice(0, validStops.length - 1);
+    const waypoints = waypointsList.map((s) => `${s.latitud},${s.longitud}`).join('|');
+
+    let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}`;
+    if (waypoints) {
+      url += `&waypoints=${waypoints}`;
+    }
+
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'No se pudo abrir la aplicación de Google Maps.');
+    });
+  };
+
+  // Crear visita in-situ (con soporte offline transparente y evidencia fotográfica)
   const handleCreateInSituVisit = async () => {
     if (!selectedClientForVisit) {
       Alert.alert('Atención', 'Selecciona el cliente que estás visitando.');
@@ -362,6 +406,7 @@ export default function VisitasScreen() {
         comentarios: `[${resultadoVisita.toUpperCase()}] ${notasVisita}`.trim(),
         latitud: coords.latitud,
         longitud: coords.longitud,
+        foto_evidencia: fotoInSitu?.uri || undefined,
       };
 
       try {
@@ -376,6 +421,7 @@ export default function VisitasScreen() {
                 setNewVisitModalVisible(false);
                 setSelectedClientForVisit(null);
                 setNotasVisita('');
+                setFotoInSitu(null);
                 loadData();
               },
             },
@@ -411,6 +457,7 @@ export default function VisitasScreen() {
                 setNewVisitModalVisible(false);
                 setSelectedClientForVisit(null);
                 setNotasVisita('');
+                setFotoInSitu(null);
               },
             },
           ]
@@ -423,7 +470,7 @@ export default function VisitasScreen() {
     }
   };
 
-  // Check-In visita programada (con soporte offline transparente)
+  // Check-In visita programada (con soporte offline transparente y evidencia fotográfica)
   const handleConfirmCheckin = async () => {
     if (!selectedVisitForCheckin) return;
     setSubmittingCheckin(true);
@@ -436,6 +483,7 @@ export default function VisitasScreen() {
         resultado: resultadoCheckin,
         latitud: coords.latitud,
         longitud: coords.longitud,
+        foto_evidencia: fotoCheckin?.uri || undefined,
       };
 
       try {
@@ -445,6 +493,7 @@ export default function VisitasScreen() {
             text: 'Aceptar',
             onPress: () => {
               setSelectedVisitForCheckin(null);
+              setFotoCheckin(null);
               loadData();
             },
           },
@@ -664,6 +713,15 @@ export default function VisitasScreen() {
               <Text style={styles.newVisitBtnText}>Nueva Visita In-Situ</Text>
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={styles.fullRouteGmapsBtn}
+            onPress={handleOpenFullRouteGoogleMaps}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons name="directions" size={16} color="#FFFFFF" />
+            <Text style={styles.fullRouteGmapsText}>Trazar Ruta Completa en Google Maps</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -755,6 +813,15 @@ export default function VisitasScreen() {
                 routeCoordinates={osrmRoute}
                 height={260}
               />
+
+              <TouchableOpacity
+                style={styles.gmapsNavFullBtn}
+                onPress={handleOpenFullRouteGoogleMaps}
+                activeOpacity={0.8}
+              >
+                <MaterialIcons name="navigation" size={18} color="#FFFFFF" />
+                <Text style={styles.gmapsNavFullBtnText}>Navegar Ruta Completa en Google Maps</Text>
+              </TouchableOpacity>
             </View>
           }
           ListEmptyComponent={
@@ -1024,6 +1091,31 @@ export default function VisitasScreen() {
                 multiline
                 numberOfLines={3}
               />
+
+              {/* Evidencia Fotográfica */}
+              <Text style={styles.formLabel}>5. Evidencia Fotográfica (Fachada / Visita):</Text>
+              {fotoInSitu ? (
+                <View style={styles.photoPreviewRow}>
+                  <Image source={{ uri: fotoInSitu.uri }} style={styles.photoThumb} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.photoName} numberOfLines={1}>{fotoInSitu.name}</Text>
+                    <TouchableOpacity onPress={() => setFotoInSitu(null)}>
+                      <Text style={styles.photoRemoveText}>Eliminar foto</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.photoPickerBtn}
+                  onPress={async () => {
+                    const file = await pickImageOrPhoto('Foto de Fachada / Visita');
+                    if (file) setFotoInSitu(file);
+                  }}
+                >
+                  <MaterialIcons name="photo-camera" size={20} color="#D32F2F" />
+                  <Text style={styles.photoPickerText}>Tomar Foto o Elegir de Galería</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
 
             <TouchableOpacity
@@ -1167,6 +1259,31 @@ export default function VisitasScreen() {
                 multiline
                 numberOfLines={3}
               />
+
+              {/* Evidencia Fotográfica */}
+              <Text style={styles.formLabel}>Evidencia Fotográfica (Opcional):</Text>
+              {fotoCheckin ? (
+                <View style={styles.photoPreviewRow}>
+                  <Image source={{ uri: fotoCheckin.uri }} style={styles.photoThumb} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.photoName} numberOfLines={1}>{fotoCheckin.name}</Text>
+                    <TouchableOpacity onPress={() => setFotoCheckin(null)}>
+                      <Text style={styles.photoRemoveText}>Eliminar foto</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.photoPickerBtn}
+                  onPress={async () => {
+                    const file = await pickImageOrPhoto('Foto de Check-In / Fachada');
+                    if (file) setFotoCheckin(file);
+                  }}
+                >
+                  <MaterialIcons name="photo-camera" size={20} color="#D32F2F" />
+                  <Text style={styles.photoPickerText}>Tomar Foto o Elegir de Galería</Text>
+                </TouchableOpacity>
+              )}
 
               <TouchableOpacity
                 style={[styles.saveBtn, submittingCheckin && styles.saveBtnDisabled]}
@@ -1777,5 +1894,81 @@ const styles = StyleSheet.create({
     color: '#FFD54F',
     fontSize: 11,
     fontWeight: '700',
+  },
+  fullRouteGmapsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1E88E5',
+    borderRadius: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    marginTop: 8,
+    gap: 6,
+  },
+  fullRouteGmapsText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  gmapsNavFullBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1565C0',
+    borderRadius: 8,
+    paddingVertical: 10,
+    marginVertical: 10,
+    gap: 8,
+  },
+  gmapsNavFullBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  photoPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF5F5',
+    borderWidth: 1,
+    borderColor: '#FEB2B2',
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    paddingVertical: 10,
+    gap: 8,
+    marginVertical: 6,
+  },
+  photoPickerText: {
+    color: '#C53030',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  photoPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 8,
+    marginVertical: 6,
+  },
+  photoThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 6,
+    backgroundColor: '#E2E8F0',
+  },
+  photoName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#2D3748',
+  },
+  photoRemoveText: {
+    fontSize: 11,
+    color: '#E53E3E',
+    fontWeight: '700',
+    marginTop: 2,
   },
 });

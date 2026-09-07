@@ -15,8 +15,8 @@ import {
 import { toast } from "sonner";
 import {
   Activity, AlertOctagon, AlertTriangle, Bug, CheckCircle2, Database,
-  Eraser, FileDown, HardDrive, Layers, Loader2, RefreshCw, ScrollText,
-  Server, ShieldCheck, Sparkles, Trash2, Wrench, XCircle,
+  Eraser, FileDown, HardDrive, Image as ImageIcon, Layers, Loader2, RefreshCw, ScrollText,
+  Server, ShieldCheck, Sparkles, Trash2, Undo2, Wrench, XCircle,
 } from "lucide-react";
 
 const TERRACOTA = "#C1401E";
@@ -137,6 +137,284 @@ function ResultadoLimpieza({ res }) {
       {(res.avisos || []).map((a, i) => (
         <p key={i} className="text-xs text-slate-500 mt-2">• {a}</p>
       ))}
+    </div>
+  );
+}
+
+/* ================== Pestaña de Auto-Asignación de Imágenes ================== */
+function TabImagenesCatalogo() {
+  const [resumen, setResumen] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [limite, setLimite] = useState(100);
+  const [reusarIdenticos, setReusarIdenticos] = useState(true);
+  const [soloSinImagen, setSoloSinImagen] = useState(true);
+  const [ejecutando, setEjecutando] = useState(false);
+  const [ejecutandoRollback, setEjecutandoRollback] = useState(false);
+  const [resultado, setResultado] = useState(null);
+
+  const cargarResumen = useCallback(async () => {
+    setCargando(true);
+    try {
+      const { data } = await api.get("/dev/catalog-images/resumen");
+      setResumen(data);
+    } catch {
+      toast.error("No se pudo consultar el resumen de imágenes de catálogo");
+    } finally {
+      setCargando(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargarResumen();
+  }, [cargarResumen]);
+
+  const autoAsignar = async () => {
+    setEjecutando(true);
+    setResultado(null);
+    try {
+      const { data } = await api.post("/dev/catalog-images/auto-asignar", {
+        limite: Number(limite) || 100,
+        reusar_en_identicos: reusarIdenticos,
+        solo_sin_imagen: soloSinImagen,
+      });
+      setResultado(data);
+      toast.success(data.mensaje || "Imágenes asignadas con éxito");
+      await cargarResumen();
+    } catch (e) {
+      const msg = e?.response?.data?.detail || "Error al auto-asignar imágenes";
+      toast.error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    } finally {
+      setEjecutando(false);
+    }
+  };
+
+  const ejecutarRollback = async (batchId = null) => {
+    setEjecutandoRollback(true);
+    try {
+      const { data } = await api.post("/dev/catalog-images/rollback", {
+        batch_id: batchId,
+      });
+      toast.success(data.mensaje || "Reversión completada exitosamente");
+      await cargarResumen();
+    } catch (e) {
+      const msg = e?.response?.data?.detail || "Error al revertir imágenes";
+      toast.error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    } finally {
+      setEjecutandoRollback(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Tarjetas resumen */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="card-soft p-5">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Total Productos</div>
+          <div className="text-xl font-bold text-slate-800 mt-1">
+            {cargando ? "..." : nf.format(resumen?.total_productos ?? 0)}
+          </div>
+        </div>
+        <div className="card-soft p-5 border-l-4 border-l-emerald-500">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Con Imagen</div>
+          <div className="text-xl font-bold text-emerald-700 mt-1">
+            {cargando ? "..." : nf.format(resumen?.con_imagen ?? 0)}
+          </div>
+        </div>
+        <div className="card-soft p-5 border-l-4 border-l-amber-500">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Sin Imagen</div>
+          <div className="text-xl font-bold text-amber-700 mt-1">
+            {cargando ? "..." : nf.format(resumen?.sin_imagen ?? 0)}
+          </div>
+        </div>
+        <div className="card-soft p-5">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Cobertura</div>
+          <div className="text-xl font-bold text-blue-700 mt-1">
+            {cargando ? "..." : `${resumen?.porcentaje_cobertura ?? 0}%`}
+          </div>
+        </div>
+        <div className="card-soft p-5">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Familias Detectadas</div>
+          <div className="text-xl font-bold text-purple-700 mt-1">
+            {cargando ? "..." : nf.format(resumen?.grupos_similares ?? 0)}
+          </div>
+        </div>
+      </div>
+
+      {/* Formulario de asignación masiva */}
+      <div className="card-soft p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 className="font-display font-semibold text-lg text-slate-900 flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-amber-500" /> Auto-Asignación Semántica con IA & Catálogo Canónico
+          </h3>
+          <Button variant="outline" size="sm" onClick={cargarResumen} disabled={cargando}>
+            <RefreshCw className={`w-4 h-4 mr-1 ${cargando ? "animate-spin" : ""}`} /> Actualizar estado
+          </Button>
+        </div>
+        <p className="text-sm text-slate-500 mb-5 leading-relaxed">
+          Escanea los productos del inventario y les asigna fotografías de alta definición optimizadas según su
+          nombre comercial, descripción y familia canónica. Reutiliza exactamente la misma fotografía estandarizada
+          para variantes o productos equivalentes, evitando duplicidades y garantizando uniformidad visual en la app y el ERP.
+        </p>
+
+        <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+            <div>
+              <label className="text-xs font-semibold text-slate-700 block mb-1.5">
+                Límite de productos por lote
+              </label>
+              <Input
+                type="number"
+                min={1}
+                max={1000}
+                value={limite}
+                onChange={(e) => setLimite(Math.max(1, parseInt(e.target.value) || 100))}
+                className="bg-white"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-4">
+              <Checkbox
+                id="reusar"
+                checked={reusarIdenticos}
+                onCheckedChange={(v) => setReusarIdenticos(!!v)}
+              />
+              <label htmlFor="reusar" className="text-xs text-slate-700 font-medium cursor-pointer">
+                Reutilizar misma imagen en variantes idénticas
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2 pt-4">
+              <Checkbox
+                id="soloSin"
+                checked={soloSinImagen}
+                onCheckedChange={(v) => setSoloSinImagen(!!v)}
+              />
+              <label htmlFor="soloSin" className="text-xs text-slate-700 font-medium cursor-pointer">
+                Procesar únicamente productos sin fotografía
+              </label>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white font-medium"
+              onClick={autoAsignar}
+              disabled={ejecutando}
+            >
+              {ejecutando ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Procesando productos con IA...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 mr-2" /> Ejecutar Auto-Asignación
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {resultado && (
+          <div className="mt-4 rounded-xl border border-emerald-300 bg-emerald-50/70 p-4">
+            <div className="flex items-center gap-2 text-emerald-800 font-semibold text-sm">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+              {resultado.mensaje}
+            </div>
+            <div className="mt-2 text-xs text-emerald-700 grid grid-cols-3 gap-2">
+              <div>Productos actualizados: <b>{resultado.actualizados}</b></div>
+              <div>Imágenes asignadas: <b>{resultado.imagenes_distintas}</b></div>
+              <div>ID de lote (Snapshot): <b className="font-mono">{resultado.batch_id}</b></div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sección de Rollback / Snapshots */}
+      <div className="card-soft p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 className="font-display font-semibold text-lg text-slate-900 flex items-center gap-2">
+            <Undo2 className="w-5 h-5 text-red-600" /> Restauración y Rollback de Imágenes (1 Clic)
+          </h3>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => ejecutarRollback(null)}
+            disabled={ejecutandoRollback || !resumen?.ultimos_cambios?.some((c) => !c.revertido)}
+          >
+            {ejecutandoRollback ? (
+              <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+            ) : (
+              <Undo2 className="w-4 h-4 mr-1" />
+            )}
+            Deshacer último lote
+          </Button>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Cada asignación automática genera un snapshot transaccional inmutable. Si alguna imagen no cumple con los
+          requerimientos de calidad, puedes revertir el lote completo o un lote específico de manera instantánea.
+        </p>
+
+        {(!resumen?.ultimos_cambios || resumen.ultimos_cambios.length === 0) ? (
+          <p className="text-sm text-slate-400 py-6 text-center">
+            No se han registrado lotes de asignación de imágenes aún.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-2">
+                  <th className="py-2">Fecha y Hora</th>
+                  <th className="py-2">Lote ID</th>
+                  <th className="py-2">Modificados</th>
+                  <th className="py-2">Usuario</th>
+                  <th className="py-2">Estado</th>
+                  <th className="py-2 text-right">Acción</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {resumen.ultimos_cambios.map((snap) => (
+                  <tr key={snap.id} className="hover:bg-slate-50">
+                    <td className="py-2.5 text-xs text-slate-500">
+                      {(snap.fecha || "").slice(0, 19).replace("T", " ")}
+                    </td>
+                    <td className="py-2.5 font-mono text-xs font-semibold text-slate-700">
+                      {snap.id}
+                    </td>
+                    <td className="py-2.5 font-semibold text-slate-800">
+                      {snap.total_actualizados} productos
+                    </td>
+                    <td className="py-2.5 text-xs text-slate-600">
+                      {snap.usuario_nombre || "Sistema"}
+                    </td>
+                    <td className="py-2.5">
+                      {snap.revertido ? (
+                        <Badge variant="outline" className="text-slate-400 border-slate-200">
+                          Revertido
+                        </Badge>
+                      ) : (
+                        <Badge className="bg-emerald-600 text-white">
+                          Activo
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="py-2.5 text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={snap.revertido || ejecutandoRollback}
+                        onClick={() => ejecutarRollback(snap.id)}
+                        className="text-red-600 hover:text-red-800 hover:bg-red-50 text-xs h-8"
+                      >
+                        <Undo2 className="w-3.5 h-3.5 mr-1" /> Revertir lote
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -315,6 +593,7 @@ export default function DevTools() {
     puedeErrores && { id: "depuracion", label: "Depuración" },
     puedeInfo && { id: "basedatos", label: "Base de datos" },
     puedeDev && { id: "legacy", label: "Migración Legacy" },
+    puedeDev && { id: "imagenes", label: "Imágenes Catálogo (IA)" },
     puedeDev && { id: "limpieza", label: "Limpieza de datos" },
     puedeMant && { id: "pruebas", label: "Datos de prueba" },
     puedeMant && { id: "preproduccion", label: "Pre-producción" },
@@ -598,6 +877,13 @@ export default function DevTools() {
         {puedeDev && (
           <TabsContent value="legacy" className="mt-4">
             <LegacyMigration />
+          </TabsContent>
+        )}
+
+        {/* ==================== IMÁGENES CATÁLOGO (IA) ==================== */}
+        {puedeDev && (
+          <TabsContent value="imagenes" className="mt-4">
+            <TabImagenesCatalogo />
           </TabsContent>
         )}
 

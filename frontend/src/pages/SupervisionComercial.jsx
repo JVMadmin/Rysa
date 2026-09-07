@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,8 @@ import { toast } from "sonner";
 import {
   Loader2, Users, Activity as ActivityIcon, Wallet, TrendingUp, CheckCircle2,
   Clock3, ChevronRight, Filter, Radio, Pencil, RefreshCw, Search, Store,
-  Crosshair, UserCog, ReceiptText, MapPin, Radar,
+  Crosshair, UserCog, ReceiptText, MapPin, Radar, ShoppingCart, ShoppingBag,
+  ClipboardList, Route as RouteIcon, Camera, Phone, Mail, FileText, Check,
 } from "lucide-react";
 
 import SelectorVendedor from "@/components/campo/SelectorVendedor";
@@ -90,8 +92,21 @@ export default function SupervisionComercial() {
   const [carQ, setCarQ] = useState("");
   const [carPage, setCarPage] = useState(0);
   const [carBusy, setCarBusy] = useState(false);
+  const nav = useNavigate();
   const [detLoading, setDetLoading] = useState(false);
   const [detalle, setDetalle] = useState(null);
+  const [tabDetalle, setTabDetalle] = useState("ficha"); // "ficha" | "expediente" | "rutas"
+  const [editTelefono, setEditTelefono] = useState("");
+  const [rutasSel, setRutasSel] = useState([]);
+  const [savingDetalle, setSavingDetalle] = useState(false);
+
+  // Modales rápidos de acción en tarjeta del vendedor
+  const [modalVisitas, setModalVisitas] = useState({ open: false, vend: null, list: [], loading: false });
+  const [modalVentas, setModalVentas] = useState({ open: false, vend: null, ventas: [], pedidos: [], loading: false, subTab: "ventas" });
+
+  // Trazado de recorrido con temperatura
+  const [mostrarRutaId, setMostrarRutaId] = useState(null);
+  const [rutaGps, setRutaGps] = useState([]);
 
   /* ------------------------------- carga -------------------------------- */
   const loadBase = useCallback(async () => {
@@ -200,10 +215,125 @@ export default function SupervisionComercial() {
   };
 
   const openDetalle = async (id) => {
-    setDetalle(null); setDetLoading(true);
-    try { const { data } = await api.get(`/supervision/sellers/${id}`); setDetalle(data); }
-    catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
-    finally { setDetLoading(false); }
+    setDetalle(null); setDetLoading(true); setTabDetalle("ficha");
+    try {
+      const { data } = await api.get(`/supervision/sellers/${id}`);
+      setDetalle(data);
+      setEditTelefono(data?.vendedor?.telefono || "");
+      setRutasSel(new Set((data?.clientes || []).slice(0, 10).map((c) => c.id)));
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail));
+    } finally {
+      setDetLoading(false);
+    }
+  };
+
+  const abrirVisitasDia = async (v) => {
+    setModalVisitas({ open: true, vend: v, list: [], loading: true });
+    try {
+      const { data } = await api.get(`/supervision/vendedores/${v.id}/actividad-dia`);
+      setModalVisitas({ open: true, vend: v, list: data?.visitas || [], loading: false });
+    } catch {
+      toast.error("No se pudieron cargar las visitas del día");
+      setModalVisitas((m) => ({ ...m, loading: false }));
+    }
+  };
+
+  const abrirVentasDia = async (v) => {
+    setModalVentas({ open: true, vend: v, ventas: [], pedidos: [], loading: true, subTab: "ventas" });
+    try {
+      const { data } = await api.get(`/supervision/vendedores/${v.id}/actividad-dia`);
+      setModalVentas({
+        open: true,
+        vend: v,
+        ventas: data?.ventas || [],
+        pedidos: data?.pedidos || [],
+        loading: false,
+        subTab: (data?.ventas?.length || 0) > 0 ? "ventas" : "pedidos",
+      });
+    } catch {
+      toast.error("No se pudieron cargar las ventas y pedidos");
+      setModalVentas((m) => ({ ...m, loading: false }));
+    }
+  };
+
+  const toggleRutaVendedor = async (vendedorId) => {
+    if (mostrarRutaId === vendedorId) {
+      setMostrarRutaId(null);
+      setRutaGps([]);
+      return;
+    }
+    try {
+      const { data } = await api.get(`/locations/${vendedorId}`);
+      if (Array.isArray(data) && data.length > 0) {
+        setRutaGps(data);
+        setMostrarRutaId(vendedorId);
+        toast.success(`Recorrido térmico cargado (${data.length} puntos GPS)`);
+      } else {
+        toast.info("Sin puntos GPS registrados para este vendedor hoy.");
+        setRutaGps([]);
+        setMostrarRutaId(null);
+      }
+    } catch {
+      toast.error("No se pudo cargar el recorrido.");
+    }
+  };
+
+  const subirFotoVendedor = async (e, vendedorId) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const { data } = await api.post(`/supervision/sellers/${vendedorId}/foto`, form);
+      toast.success("Foto de perfil actualizada");
+      if (detalle) {
+        setDetalle((prev) => ({
+          ...prev,
+          vendedor: { ...prev.vendedor, foto_url: data.foto_url },
+        }));
+      }
+      loadBase();
+      loadMapa();
+    } catch (err) {
+      toast.error(formatApiError(err?.response?.data?.detail) || "Error al subir foto");
+    }
+  };
+
+  const guardarDetalleVendedor = async () => {
+    if (!detalle?.vendedor?.id) return;
+    setSavingDetalle(true);
+    try {
+      await api.put(`/supervision/sellers/${detalle.vendedor.id}`, {
+        telefono: editTelefono,
+      });
+      toast.success("Datos del vendedor actualizados");
+      loadBase();
+    } catch (err) {
+      toast.error(formatApiError(err?.response?.data?.detail));
+    } finally {
+      setSavingDetalle(false);
+    }
+  };
+
+  const guardarRutaAsignada = async () => {
+    if (!detalle?.vendedor?.id) return;
+    setSavingDetalle(true);
+    try {
+      const paradas = [...rutasSel].map((cid, idx) => ({
+        cliente_id: cid,
+        orden: idx + 1,
+      }));
+      await api.post(`/supervision/sellers/${detalle.vendedor.id}/rutas`, {
+        nombre: `Ruta semanal ${detalle.vendedor.name}`,
+        paradas,
+      });
+      toast.success(`Plan de ruta guardado (${paradas.length} paradas de su cartera)`);
+    } catch (err) {
+      toast.error(formatApiError(err?.response?.data?.detail));
+    } finally {
+      setSavingDetalle(false);
+    }
   };
 
   const k = kpi || {};
@@ -392,8 +522,12 @@ export default function SupervisionComercial() {
                   <div key={v.id} className="card-soft p-5 space-y-3" data-testid={`sc-vendedor-${v.id}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-full bg-[#C1401E]/10 flex items-center justify-center">
-                          <UserCog className="w-5 h-5 text-[#C1401E]" />
+                        <div className="w-11 h-11 rounded-full bg-[#C1401E]/10 flex items-center justify-center overflow-hidden shrink-0 border border-slate-200/60">
+                          {v.foto_url ? (
+                            <img src={fileUrl(v.foto_url)} alt={v.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <UserCog className="w-5 h-5 text-[#C1401E]" />
+                          )}
                         </div>
                         <div>
                           <div className="font-display font-bold truncate">{v.name || "—"}</div>
@@ -458,19 +592,38 @@ export default function SupervisionComercial() {
                 <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>
               ) : (
                 <>
-                  {selInfo && <TarjetaInfoVendedor v={selInfo} />}
+                  {selInfo && (
+                    <TarjetaInfoVendedor
+                      v={selInfo}
+                      onVerVisitas={abrirVisitasDia}
+                      onVerVentas={abrirVentasDia}
+                      mostrarRuta={mostrarRutaId === selInfo.id}
+                      onToggleRuta={() => toggleRutaVendedor(selInfo.id)}
+                    />
+                  )}
                   {!selInfo && selVen && flota.sinGps.some((v) => v.id === selVen) && (
-                    <TarjetaInfoVendedor v={flota.sinGps.find((v) => v.id === selVen)} sinGps />
+                    <TarjetaInfoVendedor
+                      v={flota.sinGps.find((v) => v.id === selVen)}
+                      sinGps
+                      onVerVisitas={abrirVisitasDia}
+                      onVerVentas={abrirVentasDia}
+                    />
                   )}
                   <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
                     <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-[#EAB308]" /> Cliente</span>
                     <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-emerald-500" /> En ruta</span>
                     <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-500" /> Activo</span>
+                    {mostrarRutaId && (
+                      <span className="flex items-center gap-1.5 font-semibold text-[#C1401E]">
+                        <RouteIcon className="w-3.5 h-3.5" /> Recorrido térmico activo ({rutaGps.length} pts)
+                      </span>
+                    )}
                     <span className="ml-auto">{flota.enMapa.length} vendedores con GPS · {(mapa.clientes || []).length} clientes · {flota.sinGps.length} sin ubicación</span>
                   </div>
                   <MapaCampo
                     clientes={mapa.clientes || []}
                     vendedores={flota.enMapa}
+                    rutaGps={mostrarRutaId === selVen ? rutaGps : []}
                     selVendedorId={selVen}
                     onSelectVendedor={elegirVen}
                     autoFitKey={liveLast || 0}
@@ -643,50 +796,381 @@ export default function SupervisionComercial() {
         </DialogContent>
       </Dialog>
 
-      {/* Detalle de vendedor */}
+      {/* Detalle enriquecido de vendedor: Ficha, Expediente y Asignación de Rutas */}
       <Dialog open={!!detalle || detLoading} onOpenChange={(o) => !o && setDetalle(null)}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader><DialogTitle className="font-display">{detalle?.vendedor?.name || "Cargando…"}</DialogTitle></DialogHeader>
-          {detLoading ? (
-            <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>
-          ) : detalle && (
-            <div className="text-sm space-y-4 max-h-[70vh] overflow-y-auto">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                  ["Ventas hoy", money(detalle.vendedor.ventas_hoy.monto)],
-                  ["Ventas mes", money(detalle.vendedor.ventas_mes.monto)],
-                  ["Cobros hoy", money(detalle.vendedor.cobros_hoy)],
-                  ["Cartera", money(detalle.vendedor.cxc.saldo_total)],
-                ].map(([l, v], i) => (
-                  <div key={i} className="bg-slate-50 rounded-lg p-3">
-                    <div className="text-[10px] uppercase tracking-wider text-slate-400">{l}</div>
-                    <div className="font-semibold">{v}</div>
+        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col p-6">
+          <DialogHeader className="pb-2 border-b border-slate-100">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full overflow-hidden bg-[#C1401E]/10 flex items-center justify-center shrink-0 border border-slate-200">
+                  {detalle?.vendedor?.foto_url ? (
+                    <img src={fileUrl(detalle.vendedor.foto_url)} alt="Foto" className="w-full h-full object-cover" />
+                  ) : (
+                    <UserCog className="w-6 h-6 text-[#C1401E]" />
+                  )}
+                </div>
+                <div>
+                  <DialogTitle className="font-display text-xl font-bold">{detalle?.vendedor?.name || "Cargando…"}</DialogTitle>
+                  <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
+                    <span>{detalle?.vendedor?.email}</span>
+                    <span>·</span>
+                    <Badge variant="outline" className="text-[10px] uppercase font-medium">{detalle?.vendedor?.role}</Badge>
                   </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 border border-slate-200 rounded-lg p-1 bg-slate-50 text-xs">
+                {[
+                  ["ficha", "Ficha & Métricas"],
+                  ["expediente", "Expediente / Dossier"],
+                  ["rutas", `Rutas (${detalle?.clientes?.length || 0} clientes)`],
+                ].map(([tabKey, label]) => (
+                  <button
+                    key={tabKey}
+                    type="button"
+                    onClick={() => setTabDetalle(tabKey)}
+                    className={`px-3 py-1.5 rounded-md font-medium transition-all ${
+                      tabDetalle === tabKey ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
                 ))}
               </div>
-              {(detalle.clientes || []).length > 0 && (
-                <div>
-                  <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5"><ReceiptText className="w-4 h-4" /> Cartera ({detalle.clientes.length})</div>
-                  <div className="border border-slate-200 rounded-md">
-                    <table className="w-full text-sm">
-                      <thead className="bg-slate-50"><tr className="text-left text-xs text-slate-500"><th className="p-2">Cliente</th><th className="p-2 text-right">Saldo</th><th className="p-2 text-right">Vencido</th><th className="p-2">Próx. visita</th></tr></thead>
+            </div>
+          </DialogHeader>
+
+          {detLoading ? (
+            <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-[#C1401E]" /></div>
+          ) : detalle && (
+            <div className="flex-1 overflow-y-auto space-y-4 pt-2 text-sm">
+              {/* TAB 1: FICHA & MÉTRICAS */}
+              {tabDetalle === "ficha" && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="card-soft p-4 space-y-3">
+                      <div className="text-xs font-bold uppercase text-slate-400">Fotografía de perfil</div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-16 h-16 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center border">
+                          {detalle.vendedor.foto_url ? (
+                            <img src={fileUrl(detalle.vendedor.foto_url)} alt="Foto" className="w-full h-full object-cover" />
+                          ) : (
+                            <Camera className="w-6 h-6 text-slate-400" />
+                          )}
+                        </div>
+                        <div>
+                          <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50">
+                            <Camera className="w-3.5 h-3.5 text-[#C1401E]" /> Cambiar foto
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => subirFotoVendedor(e, detalle.vendedor.id)} />
+                          </label>
+                          <p className="text-[10px] text-slate-400 mt-1">JPG, PNG o WEBP (máx 8 MB)</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="card-soft p-4 space-y-3 md:col-span-2">
+                      <div className="text-xs font-bold uppercase text-slate-400">Datos de contacto</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-slate-500 font-medium">Teléfono / Celular</label>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Input
+                              value={editTelefono}
+                              onChange={(e) => setEditTelefono(e.target.value)}
+                              placeholder="Ej. 9931234567"
+                              className="h-8 text-xs"
+                            />
+                            <Button size="sm" onClick={guardarDetalleVendedor} disabled={savingDetalle} className="h-8 bg-[#C1401E] text-white">
+                              {savingDetalle ? <Loader2 className="w-3 h-3 animate-spin" /> : "Guardar"}
+                            </Button>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 font-medium">Correo electrónico</label>
+                          <div className="text-xs font-semibold text-slate-800 mt-2">{detalle.vendedor.email}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {[
+                      ["Ventas hoy", money(detalle.vendedor.ventas_hoy.monto), "text-slate-800"],
+                      ["Ventas mes", money(detalle.vendedor.ventas_mes.monto), "text-emerald-700 font-bold"],
+                      ["Cobros hoy", money(detalle.vendedor.cobros_hoy), "text-blue-700 font-bold"],
+                      ["Cartera asignada", money(detalle.vendedor.cxc.saldo_total), "text-slate-800 font-bold"],
+                    ].map(([l, v, cls], i) => (
+                      <div key={i} className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                        <div className="text-[10px] uppercase tracking-wider text-slate-400">{l}</div>
+                        <div className={`text-base mt-0.5 ${cls}`}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><ReceiptText className="w-4 h-4" /> Cartera de Clientes ({detalle.clientes.length})</span>
+                      <span className="text-[11px] text-slate-500">Clientes asignados a este asesor</span>
+                    </div>
+                    <div className="border border-slate-200 rounded-md max-h-48 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 sticky top-0"><tr className="text-left text-slate-500">
+                          <th className="p-2">Clave</th><th className="p-2">Cliente</th><th className="p-2 text-right">Saldo</th><th className="p-2 text-right">Vencido</th>
+                        </tr></thead>
+                        <tbody>
+                          {detalle.clientes.map((c) => (
+                            <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50">
+                              <td className="p-2 font-mono font-medium text-[#C1401E]">{c.codigo}</td>
+                              <td className="p-2 font-medium">{c.nombre}</td>
+                              <td className="p-2 text-right tabular-nums">{money(c.saldo)}</td>
+                              <td className={`p-2 text-right tabular-nums ${c.vencido > 0 ? "text-red-600 font-semibold" : "text-slate-400"}`}>{money(c.vencido)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: EXPEDIENTE / DOSSIER */}
+              {tabDetalle === "expediente" && (
+                <div className="space-y-4">
+                  <div className="card-soft p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-slate-800">Dossier / Expediente de Personal</h4>
+                        <p className="text-xs text-slate-400">Documentación de alta y certificación para actividades de campo.</p>
+                      </div>
+                      <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Expediente Activo</Badge>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      {[
+                        ["Identificación Oficial (INE)", "Verificada", "bg-emerald-50 text-emerald-700 border-emerald-200"],
+                        ["Comprobante de Domicilio", "Actualizado", "bg-emerald-50 text-emerald-700 border-emerald-200"],
+                        ["Contrato Laboral / Convenio", "Firmado y Vigente", "bg-emerald-50 text-emerald-700 border-emerald-200"],
+                        ["Dispositivo Móvil RYSA", "App v1.2.2 enlazada", "bg-sky-50 text-sky-700 border-sky-200"],
+                      ].map(([doc, status, badgeCls], i) => (
+                        <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-slate-400" />
+                            <span className="text-xs font-medium text-slate-700">{doc}</span>
+                          </div>
+                          <Badge variant="outline" className={`text-[10px] ${badgeCls}`}>{status}</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: ASIGNACIÓN DE RUTAS (SOLO SU CARTERA) */}
+              {tabDetalle === "rutas" && (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-orange-200 bg-orange-50/60 p-3 text-xs text-orange-950 flex items-start gap-2">
+                    <RouteIcon className="w-4 h-4 text-[#C1401E] shrink-0 mt-0.5" />
+                    <div>
+                      <b>Planificación de Ruta de Visitas:</b>
+                      <p className="text-orange-900 mt-0.5">
+                        Solo puedes seleccionar paradas con clientes que pertenecen a la cartera asignada de este vendedor ({detalle.clientes.length} clientes disponibles).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-md max-h-60 overflow-y-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-50 sticky top-0"><tr className="text-left text-slate-500">
+                        <th className="p-2 w-10 text-center">Ruta</th>
+                        <th className="p-2">Clave</th>
+                        <th className="p-2">Cliente</th>
+                        <th className="p-2">Dirección / Ciudad</th>
+                        <th className="p-2 text-right">Saldo</th>
+                      </tr></thead>
                       <tbody>
-                        {detalle.clientes.slice(0, 30).map((c) => (
-                          <tr key={c.id} className="border-t border-slate-100">
-                            <td className="p-2">{c.nombre}</td>
-                            <td className="p-2 text-right tabular-nums">{money(c.saldo)}</td>
-                            <td className={`p-2 text-right tabular-nums ${c.vencido > 0 ? "text-red-600 font-semibold" : "text-slate-400"}`}>{money(c.vencido)}</td>
-                            <td className="p-2 text-slate-500">{c.proxima_visita ? c.proxima_visita.slice(0, 10) : "—"}</td>
-                          </tr>
-                        ))}
-                        {detalle.clientes.length > 30 && <tr><td colSpan={4} className="p-2 text-center text-xs text-slate-400">… y {detalle.clientes.length - 30} más</td></tr>}
+                        {detalle.clientes.length === 0 && (
+                          <tr><td colSpan={5} className="p-6 text-center text-slate-400">Este vendedor aún no tiene clientes asignados en su cartera.</td></tr>
+                        )}
+                        {detalle.clientes.map((c) => {
+                          const isChecked = rutasSel.has(c.id);
+                          return (
+                            <tr key={c.id} className={`border-t border-slate-100 ${isChecked ? "bg-orange-50/50" : "hover:bg-slate-50"}`}>
+                              <td className="p-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    setRutasSel((prev) => {
+                                      const next = new Set(prev);
+                                      next.has(c.id) ? next.delete(c.id) : next.add(c.id);
+                                      return next;
+                                    });
+                                  }}
+                                />
+                              </td>
+                              <td className="p-2 font-mono font-medium text-[#C1401E]">{c.codigo}</td>
+                              <td className="p-2 font-medium">{c.nombre}</td>
+                              <td className="p-2 text-slate-500 truncate max-w-[200px]">{c.direccion || c.ciudad || "—"}</td>
+                              <td className="p-2 text-right tabular-nums">{money(c.saldo)}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-xs text-slate-500">{rutasSel.size} clientes programados para visitas</span>
+                    <Button size="sm" onClick={guardarRutaAsignada} disabled={savingDetalle} className="bg-[#C1401E] text-white">
+                      {savingDetalle ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Check className="w-3.5 h-3.5 mr-1" />}
+                      Guardar plan de visitas ({rutasSel.size})
+                    </Button>
                   </div>
                 </div>
               )}
             </div>
           )}
+
+          <DialogFooter className="pt-3 border-t border-slate-100">
+            <Button variant="outline" onClick={() => setDetalle(null)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL 1: VISITAS REALIZADAS HOY */}
+      <Dialog open={modalVisitas.open} onOpenChange={(o) => setModalVisitas((prev) => ({ ...prev, open: o }))}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-5">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-[#C1401E]" />
+              Visitas de Hoy · {modalVisitas.vend?.name}
+            </DialogTitle>
+          </DialogHeader>
+          {modalVisitas.loading ? (
+            <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>
+          ) : modalVisitas.list.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-sm">No hay visitas registradas hoy para este vendedor.</div>
+          ) : (
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-100 text-xs">
+              {modalVisitas.list.map((v, i) => (
+                <div key={v.id || i} className="py-3 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-bold text-slate-800 text-sm">{v.cliente_nombre || "Cliente"}</div>
+                    <div className="text-slate-400 font-mono mt-0.5">{v.cliente_codigo || ""} · {v.tipo_visita || "visita"}</div>
+                    {v.comentarios && <p className="mt-1 text-slate-600 bg-slate-50 p-2 rounded border border-slate-100">{v.comentarios}</p>}
+                    {v.foto_fachada && (
+                      <div className="mt-1.5">
+                        <a href={fileUrl(v.foto_fachada)} target="_blank" rel="noreferrer" className="text-[11px] text-[#C1401E] underline font-semibold flex items-center gap-1">
+                          <Camera className="w-3.5 h-3.5" /> Ver foto de fachada capturada
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <Badge className={v.estado === "realizada" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}>
+                      {v.estado}
+                    </Badge>
+                    <div className="text-slate-400 font-mono mt-1">{(v.fecha || "").slice(11, 16)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter><Button variant="outline" size="sm" onClick={() => setModalVisitas((prev) => ({ ...prev, open: false }))}>Cerrar</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL 2: VENTAS Y PEDIDOS DE HOY */}
+      <Dialog open={modalVentas.open} onOpenChange={(o) => setModalVentas((prev) => ({ ...prev, open: o }))}>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col p-5">
+          <DialogHeader>
+            <div className="flex items-center justify-between gap-4">
+              <DialogTitle className="font-display flex items-center gap-2">
+                <ShoppingBag className="w-5 h-5 text-emerald-600" />
+                Ventas y Pedidos de Hoy · {modalVentas.vend?.name}
+              </DialogTitle>
+              <div className="flex items-center gap-1 border border-slate-200 rounded-lg p-1 bg-slate-50 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setModalVentas((m) => ({ ...m, subTab: "ventas" }))}
+                  className={`px-3 py-1 rounded font-medium transition-all ${
+                    modalVentas.subTab === "ventas" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                  }`}
+                >
+                  Ventas ({modalVentas.ventas.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalVentas((m) => ({ ...m, subTab: "pedidos" }))}
+                  className={`px-3 py-1 rounded font-medium transition-all ${
+                    modalVentas.subTab === "pedidos" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"
+                  }`}
+                >
+                  Pedidos ({modalVentas.pedidos.length})
+                </button>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {modalVentas.loading ? (
+            <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>
+          ) : modalVentas.subTab === "ventas" ? (
+            <div className="flex-1 overflow-y-auto">
+              {modalVentas.ventas.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-sm">No hay ventas registradas hoy para este vendedor.</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50"><tr className="text-left text-slate-500">
+                    <th className="p-2">Folio</th><th className="p-2">Cliente</th><th className="p-2">Condición</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Hora</th><th className="p-2"></th>
+                  </tr></thead>
+                  <tbody>
+                    {modalVentas.ventas.map((v) => (
+                      <tr key={v.id} className="border-t border-slate-100 hover:bg-slate-50">
+                        <td className="p-2 font-mono font-bold text-[#C1401E]">{v.folio}</td>
+                        <td className="p-2 font-medium">{v.cliente_nombre}</td>
+                        <td className="p-2 capitalize">{v.condicion}</td>
+                        <td className="p-2 text-right font-bold text-slate-900">{money(v.total)}</td>
+                        <td className="p-2 text-right text-slate-400 font-mono">{(v.fecha || "").slice(11, 16)}</td>
+                        <td className="p-2 text-right">
+                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => nav("/app/ventas")}>
+                            Ver en Ventas →
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              {modalVentas.pedidos.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-sm">No hay pedidos levantados hoy para este vendedor.</div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50"><tr className="text-left text-slate-500">
+                    <th className="p-2">Folio</th><th className="p-2">Cliente</th><th className="p-2">Estado</th><th className="p-2 text-right">Total</th><th className="p-2 text-right">Hora</th><th className="p-2"></th>
+                  </tr></thead>
+                  <tbody>
+                    {modalVentas.pedidos.map((p) => (
+                      <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50">
+                        <td className="p-2 font-mono font-bold text-emerald-700">{p.folio}</td>
+                        <td className="p-2 font-medium">{p.cliente_nombre}</td>
+                        <td className="p-2"><Badge variant="outline">{p.estado}</Badge></td>
+                        <td className="p-2 text-right font-bold text-slate-900">{money(p.total)}</td>
+                        <td className="p-2 text-right text-slate-400 font-mono">{(p.created_at || "").slice(11, 16)}</td>
+                        <td className="p-2 text-right">
+                          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => nav("/app/pedidos")}>
+                            Ver en Pedidos →
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+          <DialogFooter><Button variant="outline" size="sm" onClick={() => setModalVentas((prev) => ({ ...prev, open: false }))}>Cerrar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -148,6 +148,7 @@ class VisitInput(BaseModel):
     latitud: Optional[float] = None
     longitud: Optional[float] = None
     vendedor_id: Optional[str] = None
+    foto_evidencia: Optional[str] = ""
 
 
 class VisitUpdate(BaseModel):
@@ -159,6 +160,7 @@ class VisitUpdate(BaseModel):
     latitud: Optional[float] = None
     longitud: Optional[float] = None
     tipo_visita: Optional[str] = None
+    foto_evidencia: Optional[str] = None
 
 
 class CheckInInput(BaseModel):
@@ -166,6 +168,7 @@ class CheckInInput(BaseModel):
     longitud: Optional[float] = None
     comentarios: Optional[str] = ""
     resultado: Optional[str] = ""
+    foto_evidencia: Optional[str] = ""
 
 
 class RouteInput(BaseModel):
@@ -479,7 +482,11 @@ async def seller_clients(q: Optional[str] = None, scope: Optional[str] = "carter
         cid = c["id"]
         c_vid = str(c.get("vendedor_id") or "")
         c_vname = str(c.get("vendedor") or "").strip().lower()
-        es_mio = (c_vid == u_id) or (c_vname and c_vname == u_name) or _vende_todo(user)
+        
+        # Asignación directa de cartera: solo coincide por id o nombre exacto del vendedor
+        es_asignado = bool((c_vid and c_vid == u_id) or (c_vname and c_vname == u_name))
+        # Para administradores generales en módulo web se respeta _vende_todo solo si no es scope móvil
+        es_mio = es_asignado or (_vende_todo(user) and scope != "all")
 
         if es_mio:
             sal = round(float(c.get("saldo", 0) or 0), 2)
@@ -489,9 +496,11 @@ async def seller_clients(q: Optional[str] = None, scope: Optional[str] = "carter
             limite = round(float(c.get("limite_credito", 0) or 0), 2)
             autorizado = bool(c.get("credito_autorizado"))
         else:
+            # Clientes de otra cartera / cartera general:
+            # Protección estricta de privacidad comercial: saldos y moras en 0.00
             sal = 0.0
             venc = 0.0
-            semaforo = {"color": "gris", "resumen": "Cliente de otra cartera"}
+            semaforo = {"color": "gris", "resumen": "Cliente general (otra cartera)"}
             limite = 0.0
             autorizado = False
 
@@ -503,7 +512,7 @@ async def seller_clients(q: Optional[str] = None, scope: Optional[str] = "carter
             "rfc": c.get("rfc"), "saldo": sal,
             "vencido": venc,
             "semaforo": semaforo,
-            "en_cartera": es_mio,
+            "en_cartera": es_asignado,
             "documentos": c.get("documentos") or {},
             "limite_credito": limite,
             "credito_autorizado": autorizado,
@@ -956,9 +965,12 @@ async def create_visit(data: VisitInput, user: dict = Depends(require_permission
         "estado": data.estado,
         "comentarios": data.comentarios or "",
         "latitud": data.latitud, "longitud": data.longitud,
+        "foto_evidencia": data.foto_evidencia or "",
         "usuario_id": user["id"], "created_at": now, "updated_at": now,
     }
     await db.visits.insert_one(doc)
+    if data.foto_evidencia and not cliente.get("foto_fachada"):
+        await db.clients.update_one({"id": cliente["id"]}, {"$set": {"foto_fachada": data.foto_evidencia, "fachada_actualizada": now}})
     await log_audit(user, "crear", "visita", doc["id"], f"Cliente {cliente.get('nombre')} · {doc['estado']}")
     return await db.visits.find_one({"id": doc["id"]}, {"_id": 0})
 
@@ -1005,6 +1017,13 @@ async def visit_checkin(visita_id: str, data: CheckInInput,
     if data.latitud is not None and data.longitud is not None:
         upd["latitud"] = float(data.latitud)
         upd["longitud"] = float(data.longitud)
+    if data.foto_evidencia:
+        upd["foto_evidencia"] = data.foto_evidencia
+        cid = v.get("cliente_id")
+        if cid:
+            cli = await db.clients.find_one({"id": cid}, {"_id": 0, "foto_fachada": 1})
+            if cli and not cli.get("foto_fachada"):
+                await db.clients.update_one({"id": cid}, {"$set": {"foto_fachada": data.foto_evidencia, "fachada_actualizada": now}})
     # Registra la ubicación del check-in en el historial del vendedor.
     if data.latitud is not None and data.longitud is not None:
         await db.seller_locations.insert_one({
@@ -1062,21 +1081,26 @@ async def delete_route(route_id: str, user: dict = Depends(require_permission("v
 # ==========================================================================
 @router.get("/locations/{vendedor_id}")
 async def location_history(vendedor_id: str, desde: Optional[str] = None,
-                           hasta: Optional[str] = None, limit: int = 500,
+                           hasta: Optional[str] = None, fecha: Optional[str] = None,
+                           limit: int = 1000,
                            user: dict = Depends(get_current_user)):
     """Historial de ubicaciones de un vendedor. Solo supervisión/admin (o el propio vendedor)."""
     if not (_vende_todo(user) or user["id"] == vendedor_id):
         raise HTTPException(403, "No tienes permiso para ver estas ubicaciones")
     flt = {"vendedor_id": vendedor_id}
-    if desde:
-        flt["fecha"] = {"$gte": desde[:10]}
-    if hasta:
-        if "fecha" in flt and isinstance(flt["fecha"], dict):
-            flt["fecha"]["$lte"] = f"{hasta[:10]} 23:59:59"
-        else:
-            flt["fecha"] = {"$lte": f"{hasta[:10]} 23:59:59"}
+    if fecha:
+        flt["fecha"] = {"$regex": "^" + fecha[:10]}
+    else:
+        if desde:
+            flt["fecha"] = {"$gte": desde[:10]}
+        if hasta:
+            if "fecha" in flt and isinstance(flt["fecha"], dict):
+                flt["fecha"]["$lte"] = f"{hasta[:10]} 23:59:59"
+            else:
+                flt["fecha"] = {"$lte": f"{hasta[:10]} 23:59:59"}
+    # Orden cronológico ascendente (inicio del día a fin del día) para trazado de ruta
     return await db.seller_locations.find(
-        flt, {"_id": 0}).sort("fecha", -1).limit(min(limit, 2000)).to_list()
+        flt, {"_id": 0}).sort("fecha", 1).limit(min(limit, 2000)).to_list()
 
 
 # ==========================================================================
@@ -1218,6 +1242,9 @@ async def _metricas_vendedores(vendedores: list, fecha: Optional[str] = None) ->
         out.append({
             "id": vid, "name": v.get("name"), "email": v.get("email"),
             "role": v.get("role"), "sucursal_id": v.get("sucursal_id"),
+            "foto_url": v.get("foto_url") or v.get("foto") or "",
+            "telefono": v.get("telefono") or "",
+            "expediente": v.get("expediente") or {},
             "estado": _estado_de(ua, _iso_to_dt((ub or {}).get("fecha")), now),
             "ultima_ubicacion": ub,
             "ultima_actividad": ua.isoformat() if ua else None,
@@ -1418,6 +1445,9 @@ async def supervision_sellers(order_by: str = "ventas", order_dir: str = "desc",
         rows.append({
             "id": m["id"], "name": m["name"], "role": m["role"],
             "sucursal_id": m["sucursal_id"], "estado": m["estado"],
+            "foto_url": m.get("foto_url") or "",
+            "telefono": m.get("telefono") or "",
+            "expediente": m.get("expediente") or {},
             "clientes_asignados": pv["asignados"],
             "clientes_activos": pv["activos"],
             "clientes_con_adeudo": pv["con_adeudo"],
@@ -1490,6 +1520,9 @@ async def supervision_seller_detail(seller_id: str,
         "vendedor": {
             "id": seller["id"], "name": seller.get("name"), "email": seller.get("email"),
             "role": seller.get("role"), "sucursal_id": seller.get("sucursal_id"),
+            "foto_url": seller.get("foto_url") or seller.get("foto") or "",
+            "telefono": seller.get("telefono") or "",
+            "expediente": seller.get("expediente") or {},
             "estado": m.get("estado", "sin_datos"),
             "ultima_ubicacion": (m or {}).get("ultima_ubicacion"),
             "ultima_actividad": (m or {}).get("ultima_actividad"),
@@ -1557,3 +1590,182 @@ async def supervisar_cartera(data: CarteraAsignacion,
     await log_audit(user, "cartera", "cliente", data.vendedor_id,
                     f"{len(ids)} clientes asignados a {nombre}")
     return {"ok": True, "asignados": len(ids), "vendedor": nombre, "total_vendedor": len(ids)}
+
+
+# ==========================================================================
+# GESTIÓN Y EXPEDIENTE DE VENDEDORES (FOTO, EXPEDIENTE, ACTIVIDAD DÍA, RUTAS)
+# ==========================================================================
+class VendedorUpdateInput(BaseModel):
+    telefono: Optional[str] = None
+    foto_url: Optional[str] = None
+    expediente: Optional[dict] = None
+
+
+@router.get("/supervision/vendedores/{seller_id}/actividad-dia")
+async def supervision_vendedor_actividad_dia(
+    seller_id: str,
+    fecha: Optional[str] = None,
+    user: dict = Depends(require_permission("supervision.ver"))
+):
+    """Consulta consolidada de visitas, ventas y pedidos de un vendedor en el día."""
+    seller = await db.users.find_one({"id": seller_id}, {"_id": 0, "password": 0})
+    if not seller:
+        raise HTTPException(404, "Vendedor no encontrado")
+    
+    hoy = (fecha or now_utc().date().isoformat())[:10]
+    
+    # 1. Visitas del día
+    visitas = await db.visits.find(
+        {"vendedor_id": seller_id, "fecha": {"$regex": "^" + hoy}},
+        {"_id": 0}
+    ).sort("fecha", -1).to_list(1000)
+    
+    # 2. Ventas del día
+    ventas = await db.sales.find(
+        {"vendedor_id": seller_id, "fecha": {"$regex": "^" + hoy}},
+        {"_id": 0, "id": 1, "folio": 1, "fecha": 1, "cliente_nombre": 1, "total": 1,
+         "condicion": 1, "estado": 1, "metodo_pago": 1}
+    ).sort("fecha", -1).to_list(1000)
+    
+    # 3. Pedidos del día
+    pedidos = await db.pedidos.find(
+        {"vendedor_id": seller_id, "created_at": {"$regex": "^" + hoy}},
+        {"_id": 0, "id": 1, "folio": 1, "created_at": 1, "cliente_nombre": 1, "total": 1, "estado": 1}
+    ).sort("created_at", -1).to_list(1000)
+    
+    return {
+        "vendedor": {
+            "id": seller["id"],
+            "name": seller.get("name"),
+            "email": seller.get("email"),
+            "foto_url": seller.get("foto_url") or seller.get("foto") or "",
+            "telefono": seller.get("telefono") or "",
+            "expediente": seller.get("expediente") or {},
+        },
+        "fecha": hoy,
+        "visitas": visitas,
+        "ventas": ventas,
+        "pedidos": pedidos,
+        "resumen": {
+            "total_visitas": len(visitas),
+            "visitas_realizadas": sum(1 for v in visitas if v.get("estado") == "realizada"),
+            "total_ventas": len(ventas),
+            "monto_ventas": round(sum(float(v.get("total", 0) or 0) for v in ventas), 2),
+            "total_pedidos": len(pedidos),
+            "monto_pedidos": round(sum(float(p.get("total", 0) or 0) for p in pedidos), 2),
+        }
+    }
+
+
+@router.put("/supervision/sellers/{seller_id}")
+async def supervision_actualizar_vendedor(
+    seller_id: str,
+    data: VendedorUpdateInput,
+    user: dict = Depends(require_permission("supervision.cartera"))
+):
+    """Actualiza datos del vendedor: teléfono, foto y expediente laboral."""
+    seller = await db.users.find_one({"id": seller_id})
+    if not seller:
+        raise HTTPException(404, "Vendedor no encontrado")
+    
+    upd = {}
+    if data.telefono is not None:
+        upd["telefono"] = str(data.telefono).strip()
+    if data.foto_url is not None:
+        upd["foto_url"] = str(data.foto_url).strip()
+    if data.expediente is not None:
+        upd["expediente"] = data.expediente
+    
+    if upd:
+        await db.users.update_one({"id": seller_id}, {"$set": upd})
+        await log_audit(user, "update", "vendedor", seller_id, f"Actualización de expediente/datos de {seller.get('name')}")
+    
+    return {"ok": True, "vendedor_id": seller_id, "actualizado": list(upd.keys())}
+
+
+@router.post("/supervision/sellers/{seller_id}/foto")
+async def supervision_subir_foto_vendedor(
+    seller_id: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("supervision.cartera"))
+):
+    """Sube/actualiza la foto de perfil del vendedor."""
+    seller = await db.users.find_one({"id": seller_id})
+    if not seller:
+        raise HTTPException(404, "Vendedor no encontrado")
+    
+    data = await file.read()
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "La imagen no debe superar 8 MB.")
+    mime = storage.detect_mime_type(data)
+    if mime not in _MIME_EXT:
+        raise HTTPException(400, "Formato no permitido. Usa JPG, PNG, WEBP o GIF.")
+    
+    path = f"uploads/vendedores/{_uid()}{_MIME_EXT[mime]}"
+    try:
+        result = storage.put_object(path, data, mime)
+    except Exception:
+        raise HTTPException(502, "No se pudo guardar la imagen.")
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": _uid(), "storage_path": stored,
+        "original_filename": file.filename or "foto_vendedor",
+        "content_type": mime, "size": result.get("size", len(data)),
+        "original_size": len(data), "original_type": mime,
+        "is_deleted": False, "created_at": iso_now(),
+    })
+    
+    prev_foto = seller.get("foto_url") or ""
+    if prev_foto:
+        await _soft_delete_archivo(prev_foto)
+    
+    url = f"/api/files/{stored}"
+    await db.users.update_one({"id": seller_id}, {"$set": {"foto_url": url}})
+    return {"ok": True, "foto_url": url}
+
+
+class RutaPlanInput(BaseModel):
+    nombre: Optional[str] = "Ruta Asignada"
+    dias_semana: List[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5])
+    paradas: List[dict] = Field(default_factory=list)
+
+
+@router.post("/supervision/sellers/{seller_id}/rutas")
+async def supervision_asignar_ruta_vendedor(
+    seller_id: str,
+    data: RutaPlanInput,
+    user: dict = Depends(require_permission("supervision.cartera"))
+):
+    """Asigna o actualiza el plan de visitas/ruta para un vendedor.
+    REGLA DE NEGOCIO: Solo permite incluir clientes asignados a su propia cartera."""
+    seller = await db.users.find_one({"id": seller_id})
+    if not seller:
+        raise HTTPException(404, "Vendedor no encontrado")
+    
+    cliente_ids = [p.get("cliente_id") for p in data.paradas if p.get("cliente_id")]
+    if cliente_ids:
+        ajenos = await db.clients.find(
+            {"id": {"$in": cliente_ids}, "vendedor_id": {"$ne": seller_id}},
+            {"_id": 0, "id": 1, "nombre": 1}
+        ).to_list(100)
+        if ajenos:
+            nombres = ", ".join(c.get("nombre", "") for c in ajenos[:3])
+            raise HTTPException(
+                400,
+                f"No puedes agregar a la ruta clientes de otra cartera ({nombres}). Solo clientes asignados a este asesor."
+            )
+    
+    ruta_id = f"RUTA_{seller_id}"
+    doc = {
+        "id": ruta_id,
+        "vendedor_id": seller_id,
+        "vendedor_nombre": seller.get("name"),
+        "nombre": data.nombre,
+        "dias_semana": data.dias_semana,
+        "paradas": data.paradas,
+        "actualizada": iso_now(),
+        "actualizada_por": user.get("name"),
+    }
+    await db.sales_routes.replace_one({"id": ruta_id}, doc, upsert=True)
+    return {"ok": True, "ruta": doc}
+

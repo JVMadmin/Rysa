@@ -66,34 +66,62 @@ export default function ErpLayout() {
   const logoUrl = logo || "";
   const nav = useNavigate();
   const { pathname } = useLocation();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("rysa_sidebar_collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [searchOpen, setSearchOpen] = useState(false);
 
-  // Auto-ocultado automático a los 5 segundos de carga
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setCollapsed(true);
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, []);
+  // Guardar preferencia de colapso en localStorage
+  const handleToggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem("rysa_sidebar_collapsed", String(next)); } catch {}
+      return next;
+    });
+  };
 
-  // Acordeón interactivo para secciones del menú lateral
-  const [openSections, setOpenSections] = useState({
+  const DEFAULT_SECTIONS = {
     "PRINCIPAL": true,
     "OPERACIÓN Y VENTAS": true,
     "ABASTECIMIENTO": false,
     "COMERCIAL": false,
-    "FUERZA DE VENTAS": false,
+    "FUERZA DE VENTAS": true,
     "ADMINISTRACIÓN": false,
     "SISTEMA": false,
+  };
+
+  // Acordeón persistente con localStorage
+  const [openSections, setOpenSections] = useState(() => {
+    try {
+      const saved = localStorage.getItem("rysa_sidebar_accordions");
+      if (saved) return { ...DEFAULT_SECTIONS, ...JSON.parse(saved) };
+    } catch {}
+    return DEFAULT_SECTIONS;
   });
 
   const toggleSection = (sec) => {
-    setOpenSections((prev) => ({
-      ...prev,
-      [sec]: !prev[sec],
-    }));
+    setOpenSections((prev) => {
+      const next = { ...prev, [sec]: !prev[sec] };
+      try { localStorage.setItem("rysa_sidebar_accordions", JSON.stringify(next)); } catch {}
+      return next;
+    });
   };
+
+  // Mantener expandida automáticamente la sección que contiene la ruta activa actual
+  useEffect(() => {
+    const currentItem = NAV.find((n) => n.to === pathname || (n.to !== "/app/dashboard" && pathname.startsWith(n.to)));
+    if (currentItem?.section && !openSections[currentItem.section]) {
+      setOpenSections((prev) => {
+        const next = { ...prev, [currentItem.section]: true };
+        try { localStorage.setItem("rysa_sidebar_accordions", JSON.stringify(next)); } catch {}
+        return next;
+      });
+    }
+  }, [pathname]);
 
   const doLogout = async () => { await logout(); nav("/login"); };
 
@@ -190,20 +218,56 @@ export default function ErpLayout() {
 
       const sectionsOrder = ["PRINCIPAL", "OPERACIÓN Y VENTAS", "ABASTECIMIENTO", "COMERCIAL", "FUERZA DE VENTAS", "ADMINISTRACIÓN", "SISTEMA"];
 
+      const SECTION_PALETTE = {
+        "PRINCIPAL": {
+          badge: "bg-orange-50/80 text-[#C1401E] border border-orange-200/60",
+          header: "text-[#C1401E]",
+          collapsedIcon: "text-[#C1401E] bg-orange-50 hover:bg-orange-100",
+        },
+        "OPERACIÓN Y VENTAS": {
+          badge: "bg-sky-50/80 text-sky-800 border border-sky-200/60",
+          header: "text-sky-800",
+          collapsedIcon: "text-sky-700 bg-sky-50 hover:bg-sky-100",
+        },
+        "ABASTECIMIENTO": {
+          badge: "bg-amber-50/80 text-amber-900 border border-amber-200/60",
+          header: "text-amber-900",
+          collapsedIcon: "text-amber-800 bg-amber-50 hover:bg-amber-100",
+        },
+        "COMERCIAL": {
+          badge: "bg-indigo-50/80 text-indigo-800 border border-indigo-200/60",
+          header: "text-indigo-800",
+          collapsedIcon: "text-indigo-700 bg-indigo-50 hover:bg-indigo-100",
+        },
+        "FUERZA DE VENTAS": {
+          badge: "bg-emerald-50/80 text-emerald-800 border border-emerald-200/60",
+          header: "text-emerald-800",
+          collapsedIcon: "text-emerald-700 bg-emerald-50 hover:bg-emerald-100",
+        },
+        "ADMINISTRACIÓN": {
+          badge: "bg-slate-100/80 text-slate-800 border border-slate-200/60",
+          header: "text-slate-800",
+          collapsedIcon: "text-slate-700 bg-slate-100 hover:bg-slate-200",
+        },
+        "SISTEMA": {
+          badge: "bg-purple-50/80 text-purple-800 border border-purple-200/60",
+          header: "text-purple-800",
+          collapsedIcon: "text-purple-700 bg-purple-50 hover:bg-purple-100",
+        },
+      };
+
   return (
     <div className="min-h-screen flex bg-canvas">
       {/* Sidebar izquierdo: solo iconos, angosto */}
       <aside
         data-testid="sidebar"
-        className={`${collapsed ? "w-[76px] items-center" : "w-52 items-stretch px-3"} shrink-0 bg-white border-r border-slate-100 flex flex-col py-4 gap-4 transition-[width] duration-200 sticky top-0 h-screen z-30`}
+        className={`${collapsed ? "w-[76px] items-center" : "w-56 items-stretch px-3"} shrink-0 bg-white border-r border-slate-100 flex flex-col py-4 gap-4 transition-[width] duration-200 sticky top-0 h-screen z-30`}
       >
         <div className={`flex items-center justify-center gap-2 ${collapsed ? "mx-auto h-11 w-11" : "px-2"}`}>
           <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden ${logoUrl ? "" : "bg-terracota shadow-card"}`}>
             {logoUrl ? (
               <img src={logoUrl} alt="logo" className="w-full h-full object-contain"
                 onError={(e) => {
-                  // Fallback robusto: si la URL configurada no carga, se usa el
-                  // logotipo por defecto; solo se oculta si tampoco carga este.
                   if (!e.currentTarget.src.includes("isotipo1.png")) {
                     e.currentTarget.src = DEFAULT_LOGO;
                   } else {
@@ -222,33 +286,34 @@ export default function ErpLayout() {
           )}
         </div>
 
-        <nav className={collapsed ? "flex-1 flex flex-col items-center gap-1.5 overflow-y-auto" : "flex-1 space-y-1 overflow-y-auto"}>
+        <nav className={collapsed ? "flex-1 flex flex-col items-center gap-1.5 overflow-y-auto w-full px-1" : "flex-1 space-y-1.5 overflow-y-auto"}>
           {sectionsOrder.map((sec) => {
             const items = visibleGrouped[sec];
             if (!items || items.length === 0) return null;
             const isOpen = openSections[sec] !== false;
+            const pal = SECTION_PALETTE[sec] || SECTION_PALETTE["PRINCIPAL"];
             return (
               <div key={sec} className="w-full">
                 {/* Separador de sección */}
                 {collapsed ? (
-                  <div className="w-full h-px bg-slate-200 my-1" />
+                  <div className="w-8 h-px bg-slate-200 my-1 mx-auto" />
                 ) : (
                   <button
                     type="button"
                     onClick={() => toggleSection(sec)}
-                    className="w-full flex items-center justify-between px-2 py-1 my-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-semibold hover:text-slate-700 transition-colors"
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 my-1 text-[10.5px] uppercase tracking-wider font-bold rounded-lg transition-all ${pal.badge} ${pal.header}`}
                   >
-                    <span>{sec}</span>
+                    <span className="truncate">{sec}</span>
                     {isOpen ? (
-                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                      <ChevronDown className="w-3.5 h-3.5 opacity-70 shrink-0" />
                     ) : (
-                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                      <ChevronRight className="w-3.5 h-3.5 opacity-70 shrink-0" />
                     )}
                   </button>
                 )}
                 {/* Items del acordeón */}
                 {(!collapsed ? isOpen : true) && (
-                  <div className={collapsed ? "flex flex-col items-center gap-1" : "space-y-0.5"}>
+                  <div className={collapsed ? "flex flex-col items-center gap-1.5" : "space-y-0.5"}>
                     {items.map((n) => (
                       <NavLink
                         key={n.to}
@@ -257,11 +322,15 @@ export default function ErpLayout() {
                         data-testid={`nav-${n.to.split("/").pop()}`}
                         className={({ isActive }) =>
                           collapsed
-                            ? iconClass({ isActive })
+                            ? `w-11 h-11 flex items-center justify-center rounded-xl transition-all ${
+                                isActive
+                                  ? "bg-terracota text-white shadow-sm ring-2 ring-[#C1401E]/30"
+                                  : `${pal.collapsedIcon} border border-slate-100/80`
+                              }`
                             : `flex items-center gap-3 px-3 h-10 rounded-xl text-sm font-medium transition-colors ${
                                 isActive
-                                  ? "bg-terracota text-white shadow-sm"
-                                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                  ? "bg-terracota text-white shadow-sm font-semibold"
+                                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                               }`
                         }
                       >
@@ -277,7 +346,7 @@ export default function ErpLayout() {
         </nav>
 
         <button
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={handleToggleCollapsed}
           className={`${collapsed ? "h-11 w-11 mx-auto" : "h-11 w-full"} flex items-center justify-center rounded-xl hover:bg-slate-100 transition-colors`}
           data-testid="toggle-sidebar"
           title={collapsed ? "Expandir" : "Colapsar"}
