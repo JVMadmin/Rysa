@@ -35,6 +35,8 @@ KNOWN_COLLECTIONS = [
     "cot_pago_tokens", "payment_evidence",
     # Cargos por interés moratorio (CxC)
     "cxc_cargos",
+    # Snapshots de asignación de imágenes de catálogo (Rollback)
+    "catalog_image_snapshots",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.
