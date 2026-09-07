@@ -68,7 +68,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             />
             <Text style={styles.brandTitle}>GRUPO RYSA</Text>
             <Text style={styles.brandSubtitle}>Vendedores & Operación en Campo</Text>
-            <Text style={styles.brandVersion}>v1.2.0 Oficial</Text>
+            <Text style={styles.brandVersion}>v1.2.1 Oficial</Text>
           </View>
 
           {/* Form Card */}

@@ -90,7 +90,6 @@ export async function apiFetch<T = any>(
 ): Promise<T> {
   const token = await getAuthToken();
   const currentBaseUrl = await getBaseUrl();
-  API_URL = currentBaseUrl;
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
