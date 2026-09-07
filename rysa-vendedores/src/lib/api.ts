@@ -1,44 +1,25 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// Servidor oficial exclusivo de Grupo RYSA
 export const DEFAULT_PROD_URL = "https://gruporysa.com/api";
-export const DEFAULT_LOCAL_LAN_URL = "http://192.168.1.100:8002/api";
-export const DEFAULT_LOCAL_USB_URL = "http://localhost:8002/api";
-
-// Por defecto el backend oficial de produccion/preproduccion
 export const DEFAULT_API_URL = DEFAULT_PROD_URL;
+export const API_URL = DEFAULT_PROD_URL;
 
-const BASE_URL_STORAGE_KEY = "@rysa_api_base_url";
 const TOKEN_STORAGE_KEY = "@rysa_auth_token";
 const USER_STORAGE_KEY = "@rysa_auth_user";
 
-let inMemoryBaseUrl: string | null = null;
 let inMemoryToken: string | null = null;
 
 export async function getBaseUrl(): Promise<string> {
-  if (inMemoryBaseUrl) return inMemoryBaseUrl;
-  try {
-    const stored = await AsyncStorage.getItem(BASE_URL_STORAGE_KEY);
-    if (stored && stored.trim()) {
-      inMemoryBaseUrl = stored.trim();
-      return inMemoryBaseUrl;
-    }
-  } catch {}
-  inMemoryBaseUrl = DEFAULT_API_URL;
-  return DEFAULT_API_URL;
+  return DEFAULT_PROD_URL;
 }
 
-export async function setBaseUrl(url: string): Promise<void> {
-  const cleanUrl = url.trim().replace(/\/+$/, '');
-  inMemoryBaseUrl = cleanUrl;
-  await AsyncStorage.setItem(BASE_URL_STORAGE_KEY, cleanUrl);
+export async function setBaseUrl(_url: string): Promise<void> {
+  // Bloqueado estrictamente al backend oficial https://gruporysa.com/api
 }
 
-// Mantener compatibilidad de export
-export let API_URL = DEFAULT_API_URL;
-
-export async function testServerConnection(urlToCheck?: string): Promise<{ ok: boolean; message: string }> {
-  const base = (urlToCheck || await getBaseUrl()).trim().replace(/\/+$/, '');
-  const healthUrl = base.replace(/\/api$/, '') + '/health';
+export async function testServerConnection(): Promise<{ ok: boolean; message: string }> {
+  const healthUrl = "https://gruporysa.com/health";
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), 6000);
   try {

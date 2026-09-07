@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -14,14 +14,6 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { login, User } from '@/services/auth';
-import {
-  getBaseUrl,
-  setBaseUrl,
-  testServerConnection,
-  DEFAULT_PROD_URL,
-  DEFAULT_LOCAL_LAN_URL,
-  DEFAULT_LOCAL_USB_URL,
-} from '@/lib/api';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: User) => void;
@@ -33,20 +25,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-
-  // Configuracion de servidor
-  const [currentServer, setCurrentServer] = useState(DEFAULT_LOCAL_LAN_URL);
-  const [customServer, setCustomServer] = useState(DEFAULT_LOCAL_LAN_URL);
-  const [showServerConfig, setShowServerConfig] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [testingConnection, setTestingConnection] = useState(false);
-
-  useEffect(() => {
-    getBaseUrl().then((url) => {
-      setCurrentServer(url);
-      setCustomServer(url);
-    });
-  }, []);
 
   const handleLogin = async () => {
     if (!email.trim() || !password) {
@@ -63,37 +41,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     } catch (err: any) {
       let msg = err?.message || 'Error al iniciar sesión';
       if (msg.includes('502') || msg.includes('Failed to fetch') || msg.includes('Network request failed')) {
-        msg = `No se pudo conectar al servidor (${currentServer}). Verifica que el backend esté activo o cambia de servidor en la opción inferior.`;
+        msg = 'No se pudo conectar con el servidor oficial (gruporysa.com). Verifica tu conexión a internet e inténtalo nuevamente.';
       }
       setErrorMessage(msg);
     } finally {
       setLoading(false);
     }
   };
-
-  const handleApplyServer = async (url: string) => {
-    await setBaseUrl(url);
-    setCurrentServer(url);
-    setTestResult(null);
-    setErrorMessage(null);
-  };
-
-  const handleTestConnection = async (urlToTest?: string) => {
-    setTestingConnection(true);
-    setTestResult(null);
-    try {
-      if (urlToTest && urlToTest !== currentServer) {
-        await setBaseUrl(urlToTest);
-        setCurrentServer(urlToTest);
-      }
-      const res = await testServerConnection();
-      setTestResult(res);
-    } finally {
-      setTestingConnection(false);
-    }
-  };
-
-  const isLocalActive = currentServer.includes('192.168.') || currentServer.includes('localhost');
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -114,7 +68,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             />
             <Text style={styles.brandTitle}>GRUPO RYSA</Text>
             <Text style={styles.brandSubtitle}>Vendedores & Operación en Campo</Text>
-            <Text style={styles.brandVersion}>v1.0.0 Oficial</Text>
+            <Text style={styles.brandVersion}>v1.2.0 Oficial</Text>
           </View>
 
           {/* Form Card */}
@@ -188,157 +142,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
               )}
             </TouchableOpacity>
 
-            {/* Server Config Toggle */}
-            <TouchableOpacity
-              style={styles.serverToggle}
-              onPress={() => setShowServerConfig(!showServerConfig)}
-              activeOpacity={0.7}
-            >
-              <MaterialIcons
-                name="dns"
-                size={16}
-                color={isLocalActive ? '#D32F2F' : '#4A5568'}
-              />
-              <Text style={styles.serverToggleText}>
-                Servidor: {currentServer.replace(/^https?:\/\//, '')}
+            {/* Indicador de Servidor Institucional Exclusivo */}
+            <View style={styles.serverIndicator}>
+              <MaterialIcons name="cloud-done" size={16} color="#2E7D32" />
+              <Text style={styles.serverIndicatorText}>
+                Red Grupo RYSA · gruporysa.com
               </Text>
-              <MaterialIcons
-                name={showServerConfig ? 'expand-less' : 'expand-more'}
-                size={18}
-                color="#718096"
-              />
-            </TouchableOpacity>
-
-            {/* Panel de Configuración de Servidor */}
-            {showServerConfig && (
-              <View style={styles.serverConfigPanel}>
-                <Text style={styles.serverConfigTitle}>Selecciona Servidor de Destino:</Text>
-
-                {/* Preset 1: Docker Local LAN */}
-                <TouchableOpacity
-                  style={[
-                    styles.presetBtn,
-                    currentServer === DEFAULT_LOCAL_LAN_URL && styles.presetBtnActive,
-                  ]}
-                  onPress={() => handleApplyServer(DEFAULT_LOCAL_LAN_URL)}
-                >
-                  <MaterialIcons
-                    name="wifi"
-                    size={16}
-                    color={currentServer === DEFAULT_LOCAL_LAN_URL ? '#D32F2F' : '#718096'}
-                  />
-                  <View style={styles.presetTextContainer}>
-                    <Text style={styles.presetName}>Docker Local Wi-Fi (Esta PC)</Text>
-                    <Text style={styles.presetUrl}>{DEFAULT_LOCAL_LAN_URL}</Text>
-                  </View>
-                  {currentServer === DEFAULT_LOCAL_LAN_URL && (
-                    <MaterialIcons name="check-circle" size={16} color="#D32F2F" />
-                  )}
-                </TouchableOpacity>
-
-                {/* Preset 2: Docker Local USB (localhost) */}
-                <TouchableOpacity
-                  style={[
-                    styles.presetBtn,
-                    currentServer === DEFAULT_LOCAL_USB_URL && styles.presetBtnActive,
-                  ]}
-                  onPress={() => handleApplyServer(DEFAULT_LOCAL_USB_URL)}
-                >
-                  <MaterialIcons
-                    name="usb"
-                    size={16}
-                    color={currentServer === DEFAULT_LOCAL_USB_URL ? '#D32F2F' : '#718096'}
-                  />
-                  <View style={styles.presetTextContainer}>
-                    <Text style={styles.presetName}>USB ADB Reverse (localhost:8002)</Text>
-                    <Text style={styles.presetUrl}>{DEFAULT_LOCAL_USB_URL}</Text>
-                  </View>
-                  {currentServer === DEFAULT_LOCAL_USB_URL && (
-                    <MaterialIcons name="check-circle" size={16} color="#D32F2F" />
-                  )}
-                </TouchableOpacity>
-
-                {/* Preset 3: Producción */}
-                <TouchableOpacity
-                  style={[
-                    styles.presetBtn,
-                    currentServer === DEFAULT_PROD_URL && styles.presetBtnActive,
-                  ]}
-                  onPress={() => handleApplyServer(DEFAULT_PROD_URL)}
-                >
-                  <MaterialIcons
-                    name="cloud"
-                    size={16}
-                    color={currentServer === DEFAULT_PROD_URL ? '#D32F2F' : '#718096'}
-                  />
-                  <View style={styles.presetTextContainer}>
-                    <Text style={styles.presetName}>Nube Producción (gruporysa.com)</Text>
-                    <Text style={styles.presetUrl}>{DEFAULT_PROD_URL}</Text>
-                  </View>
-                  {currentServer === DEFAULT_PROD_URL && (
-                    <MaterialIcons name="check-circle" size={16} color="#D32F2F" />
-                  )}
-                </TouchableOpacity>
-
-                {/* Servidor Personalizado */}
-                <Text style={styles.customLabel}>O ingresa IP / URL manual:</Text>
-                <View style={styles.customInputRow}>
-                  <TextInput
-                    style={styles.customInput}
-                    value={customServer}
-                    onChangeText={setCustomServer}
-                    placeholder="http://192.168.X.X:8002/api"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                  <TouchableOpacity
-                    style={styles.saveBtn}
-                    onPress={() => handleApplyServer(customServer)}
-                  >
-                    <Text style={styles.saveBtnText}>Usar</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {/* Boton Probar Conexion */}
-                <TouchableOpacity
-                  style={[styles.testBtn, testingConnection && styles.testBtnDisabled]}
-                  onPress={() => handleTestConnection()}
-                  disabled={testingConnection}
-                >
-                  {testingConnection ? (
-                    <ActivityIndicator size="small" color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <MaterialIcons name="network-check" size={16} color="#FFFFFF" />
-                      <Text style={styles.testBtnText}>Probar Conexión Ahora</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-
-                {testResult && (
-                  <View
-                    style={[
-                      styles.testResultBox,
-                      testResult.ok ? styles.testResultBoxOk : styles.testResultBoxFail,
-                    ]}
-                  >
-                    <MaterialIcons
-                      name={testResult.ok ? 'check-circle' : 'cancel'}
-                      size={16}
-                      color={testResult.ok ? '#2E7D32' : '#C62828'}
-                    />
-                    <Text
-                      style={[
-                        styles.testResultText,
-                        testResult.ok ? styles.testResultTextOk : styles.testResultTextFail,
-                      ]}
-                    >
-                      {testResult.message}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -475,137 +285,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.5,
   },
-  serverToggle: {
+  serverIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 18,
     paddingVertical: 8,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: '#EDF2F7',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
     gap: 6,
   },
-  serverToggleText: {
-    fontSize: 11,
-    color: '#4A5568',
+  serverIndicatorText: {
+    fontSize: 12,
+    color: '#166534',
     fontWeight: '600',
-    maxWidth: 220,
-  },
-  serverConfigPanel: {
-    marginTop: 14,
-    padding: 12,
-    backgroundColor: '#F7FAFC',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  serverConfigTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2D3748',
-    marginBottom: 8,
-  },
-  presetBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    padding: 8,
-    borderRadius: 8,
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    gap: 8,
-  },
-  presetBtnActive: {
-    borderColor: '#D32F2F',
-    backgroundColor: '#FFEBEE',
-  },
-  presetTextContainer: {
-    flex: 1,
-  },
-  presetName: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#2D3748',
-  },
-  presetUrl: {
-    fontSize: 10,
-    color: '#718096',
-  },
-  customLabel: {
-    fontSize: 11,
-    color: '#718096',
-    marginTop: 6,
-    marginBottom: 4,
-  },
-  customInputRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  customInput: {
-    flex: 1,
-    height: 36,
-    borderWidth: 1,
-    borderColor: '#CBD5E0',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    fontSize: 12,
-    backgroundColor: '#FFFFFF',
-  },
-  saveBtn: {
-    backgroundColor: '#D32F2F',
-    paddingHorizontal: 14,
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  saveBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  testBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1E293B',
-    paddingVertical: 8,
-    borderRadius: 6,
-    marginTop: 10,
-    gap: 6,
-  },
-  testBtnDisabled: {
-    backgroundColor: '#64748B',
-  },
-  testBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  testResultBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-    borderRadius: 6,
-    marginTop: 8,
-    gap: 6,
-  },
-  testResultBoxOk: {
-    backgroundColor: '#E8F5E9',
-  },
-  testResultBoxFail: {
-    backgroundColor: '#FFEBEE',
-  },
-  testResultText: {
-    fontSize: 11,
-    fontWeight: '600',
-    flex: 1,
-  },
-  testResultTextOk: {
-    color: '#2E7D32',
-  },
-  testResultTextFail: {
-    color: '#C62828',
   },
 });

@@ -10,14 +10,14 @@ Esta guía detalla el entorno, configuración de firmado, proceso de compilació
 | :--- | :--- |
 | **Nombre de la Aplicación** | `RYSA Vendedores` |
 | **Package / Application ID** | `com.gruporysa.vendedores` |
-| **Versión (VersionName)** | `1.0.2` |
-| **Código de Versión (VersionCode)** | `3` |
+| **Versión (VersionName)** | `1.2.0` |
+| **Código de Versión (VersionCode)** | `6` |
 | **Tipo de Build** | `Release` (Firmado para instalación directa) |
 | **Arquitectura Nativa** | `arm64-v8a` (dispositivos Android modernos) |
 | **SDK Mínimo (minSdkVersion)** | `24` (Android 7.0+) |
 | **SDK Objetivo (targetSdkVersion)** | `34` (Android 14 estándar) |
-| **Backend de Producción** | `https://gruporysa.com/api` |
-| **Ruta del APK generado** | `dist/android/RYSA-Vendedores-v1.0.2-release.apk` |
+| **Backend de Producción** | `https://gruporysa.com/api` (Exclusivo) |
+| **Ruta del APK generado** | `dist/android/RYSA-Vendedores-v1.2.0-release.apk` |
 | **Ruta alternativa** | `dist/android/app-release.apk` |
 
 ---
