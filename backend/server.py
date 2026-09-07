@@ -1662,6 +1662,7 @@ async def list_categories(user: dict = Depends(get_current_user)):
         m = managed.get(n, {})
         out.append({
             "nombre": n,
+            "categoria": n,
             "clave": m.get("clave", ""),
             "descripcion": m.get("descripcion", ""),
             "ficha_tecnica": m.get("ficha_tecnica", ""),
