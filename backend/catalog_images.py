@@ -213,10 +213,11 @@ async def catalog_images_auto_assign(
     await db.catalog_image_snapshots.insert_one(snapshot_doc)
 
     await log_audit(
-        usuario=user.get("name") or "Desarrollador",
+        usuario=user,
         accion="DEV_AUTO_IMAGENES_CATALOGO",
+        entidad="CATALOGO",
+        registro_id=batch_id,
         detalle=f"Lote {batch_id}: {len(cambios)} productos actualizados con imágenes referenciales.",
-        modulo="CATALOGO",
     )
 
     return {
@@ -267,10 +268,11 @@ async def catalog_images_rollback(
     )
 
     await log_audit(
-        usuario=user.get("name") or "Desarrollador",
+        usuario=user,
         accion="DEV_ROLLBACK_IMAGENES_CATALOGO",
+        entidad="CATALOGO",
+        registro_id=snap["id"],
         detalle=f"Revertido lote {snap['id']}: {revertidos} productos regresados a su estado anterior.",
-        modulo="CATALOGO",
     )
 
     return {
