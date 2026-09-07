@@ -706,9 +706,6 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
     from pgstore.database import get_engine
     from sqlalchemy import text
 
-    if not data.items:
-        raise HTTPException(400, "La venta no tiene productos")
-
     if not data.idempotency_key or len(data.idempotency_key.strip()) < 8:
         raise HTTPException(400, "Se requiere idempotency_key único para registrar la venta")
 
@@ -735,6 +732,9 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
                 "total": float(doc.get("total") or 0),
                 "mensaje": "Venta previamente registrada (confirmada)",
             }
+
+    if not data.items:
+        raise HTTPException(400, "La venta no tiene productos")
 
     # 2. Obtener cliente
     cliente = None
