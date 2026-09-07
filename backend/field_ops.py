@@ -528,29 +528,62 @@ async def seller_clients(q: Optional[str] = None, scope: Optional[str] = "carter
     return out
 
 
+class VentaDirectaItem(BaseModel):
+    product_id: str
+    codigo: Optional[str] = ""
+    descripcion: Optional[str] = ""
+    unidad: Optional[str] = "PZA"
+    cantidad: float
+    precio: float
+    iva_tasa: Optional[float] = 0.0
+
+
+class VentaDirectaInput(BaseModel):
+    cliente_id: Optional[str] = ""
+    cliente_nombre: Optional[str] = "Público General"
+    cliente_codigo: Optional[str] = ""
+    items: List[VentaDirectaItem]
+    condicion: Optional[str] = "contado"
+    forma_pago: Optional[str] = "efectivo"
+    notas: Optional[str] = ""
+    latitud: Optional[float] = None
+    longitud: Optional[float] = None
+    idempotency_key: str
+    fecha: Optional[str] = None
+
+
+class FacturarSolicitudInput(BaseModel):
+    sale_id: str
+    folio: str
+    rfc: Optional[str] = ""
+    razon_social: Optional[str] = ""
+    uso_cfdi: Optional[str] = "G03"
+    regimen_fiscal: Optional[str] = ""
+    correo: Optional[str] = ""
+
+
 @router.get("/seller/clients/{client_id}/history")
 async def client_order_history(client_id: str, user: dict = Depends(get_current_user)):
-    """Historial de compras y pedidos del cliente, con atribución precisa de asesor."""
+    """Historial completo de compras y pedidos del cliente, unificando pedidos en línea,
+    ventas registradas en el ERP y tickets históricos del sistema comercial legacy."""
+    from pgstore.database import get_engine
+    from sqlalchemy import text
+    import json
+
     cli = await db.clients.find_one({"id": client_id}) or {}
     cod = cli.get("codigo")
     nom = cli.get("nombre")
-
-    p_flt = [{"cliente_id": client_id}]
-    if cod:
-        p_flt.append({"cliente_codigo": cod})
-    pedidos = await db.pedidos.find({"$or": p_flt} if len(p_flt) > 1 else p_flt[0], {"_id": 0}).sort("fecha_pedido", -1).to_list(30)
-
-    s_flt = [{"cliente_id": client_id}]
-    if cod:
-        s_flt.append({"cliente_codigo": cod})
-    if nom:
-        s_flt.append({"cliente_nombre": nom})
-    ventas = await db.sales.find({"$or": s_flt} if len(s_flt) > 1 else s_flt[0], {"_id": 0}).sort("fecha", -1).to_list(30)
 
     u_id = str(user.get("id") or "")
     u_name = str(user.get("name") or "").strip().lower()
 
     combined = []
+
+    # 1. Consultar pedidos recientes del ERP
+    p_flt = [{"cliente_id": client_id}]
+    if cod:
+        p_flt.append({"cliente_codigo": cod})
+    pedidos = await db.pedidos.find({"$or": p_flt} if len(p_flt) > 1 else p_flt[0], {"_id": 0}).sort("fecha_pedido", -1).to_list(30)
     for p in pedidos:
         v_id = str(p.get("vendedor_id") or "")
         v_name = p.get("vendedor_nombre") or "Asesor"
@@ -567,8 +600,17 @@ async def client_order_history(client_id: str, user: dict = Depends(get_current_
             "vendedor_nombre": v_name,
             "vendido_por_mi": es_mio,
             "items_count": len(p.get("items") or []),
-            "resumen_items": ", ".join(f"{it.get('solicitado', 1)}x {it.get('descripcion', '')[:20]}" for it in (p.get("items") or [])[:3])
+            "resumen_items": ", ".join(f"{it.get('solicitado', 1)}x {it.get('descripcion', '')[:20]}" for it in (p.get("items") or [])[:3]),
+            "facturable": False,
         })
+
+    # 2. Consultar ventas registradas en db.sales
+    s_flt = [{"cliente_id": client_id}]
+    if cod:
+        s_flt.append({"cliente_codigo": cod})
+    if nom:
+        s_flt.append({"cliente_nombre": nom})
+    ventas = await db.sales.find({"$or": s_flt} if len(s_flt) > 1 else s_flt[0], {"_id": 0}).sort("fecha", -1).to_list(30)
     for v in ventas:
         v_id = str(v.get("vendedor_id") or "")
         v_name = v.get("vendedor_nombre") or "Asesor"
@@ -585,11 +627,241 @@ async def client_order_history(client_id: str, user: dict = Depends(get_current_
             "vendedor_nombre": v_name,
             "vendido_por_mi": es_mio,
             "items_count": len(v.get("items") or []),
-            "resumen_items": ", ".join(f"{it.get('cantidad', 1)}x {it.get('descripcion', '')[:20]}" for it in (v.get("items") or [])[:3])
+            "resumen_items": ", ".join(f"{it.get('cantidad', 1)}x {it.get('descripcion', '')[:20]}" for it in (v.get("items") or [])[:3]),
+            "facturable": True,
         })
 
+    # 3. Consultar tickets históricos en legacy_tickets
+    eng = get_engine()
+    mapped_cod = None
+    try:
+        async with eng.connect() as conn:
+            # Buscar mapeo en legacy_customer_mapping
+            m_res = await conn.execute(
+                text("SELECT legacy_customer_key FROM legacy_customer_mapping WHERE rysa_customer_id = :cid LIMIT 1"),
+                {"cid": client_id}
+            )
+            m_row = m_res.fetchone()
+            if m_row and m_row[0]:
+                mapped_cod = str(m_row[0]).strip()
+
+            c_buscar = set()
+            if cod:
+                c_buscar.add(str(cod).strip())
+            if mapped_cod:
+                c_buscar.add(mapped_cod)
+
+            if c_buscar:
+                q_tickets = text("""
+                    SELECT t.legacy_key, t.legacy_serie, t.legacy_folio, t.legacy_fecha, t.legacy_total,
+                           t.legacy_condicion, t.legacy_vendedor, t.legacy_cancelado,
+                           count(d.partida) as items_count,
+                           substr(string_agg(concat(round(d.legacy_cantidad, 0), 'x ', coalesce(d.legacy_codigo, 'Art')), ', '), 1, 80) as resumen_items
+                    FROM legacy_tickets t
+                    LEFT JOIN legacy_ticket_details d ON d.doc_key = t.legacy_key
+                    WHERE t.legacy_cliente = ANY(:cods)
+                    GROUP BY t.legacy_key, t.legacy_serie, t.legacy_folio, t.legacy_fecha, t.legacy_total,
+                             t.legacy_condicion, t.legacy_vendedor, t.legacy_cancelado
+                    ORDER BY t.legacy_fecha DESC, t.legacy_folio DESC
+                    LIMIT 30
+                """)
+                t_res = await conn.execute(q_tickets, {"cods": list(c_buscar)})
+                for row in t_res.mappings().all():
+                    v_cod = str(row["legacy_vendedor"] or "").strip()
+                    # Si coincide con el asesor logueado (código legacy o nombre)
+                    es_mio = (v_cod and v_cod in u_name) or (u_id and v_cod == u_id)
+                    combined.append({
+                        "id": row["legacy_key"],
+                        "folio": f"{row['legacy_serie']}-{row['legacy_folio']}",
+                        "tipo": "venta",
+                        "fecha": str(row["legacy_fecha"] or ""),
+                        "total": float(row["legacy_total"] or 0),
+                        "condicion": "contado" if row["legacy_condicion"] == "C" else "credito",
+                        "estado": "cancelada" if row["legacy_cancelado"] else "confirmada",
+                        "vendedor_id": v_cod,
+                        "vendedor_nombre": f"Asesor {v_cod}" if v_cod else "Asesor RYSA",
+                        "vendido_por_mi": es_mio,
+                        "items_count": int(row["items_count"] or 0),
+                        "resumen_items": row["resumen_items"] or "",
+                        "facturable": True,
+                    })
+    except Exception as e:
+        logger.warning("Error consultando tickets legacy para cliente %s: %s", client_id, e)
+
     combined.sort(key=lambda x: str(x.get("fecha") or ""), reverse=True)
-    return combined[:25]
+    return combined[:35]
+
+
+@router.post("/seller/venta-directa")
+async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get_current_user)):
+    """Registra una Venta Directa desde la app móvil con control de idempotencia estricto
+    y asignación atómica de folios oficiales, evitando colisiones entre asesores en campo."""
+    import json
+    from pgstore.database import get_engine
+    from sqlalchemy import text
+
+    if not data.items:
+        raise HTTPException(400, "La venta no tiene productos")
+
+    if not data.idempotency_key or len(data.idempotency_key.strip()) < 8:
+        raise HTTPException(400, "Se requiere idempotency_key único para registrar la venta")
+
+    key = data.idempotency_key.strip()
+    eng = get_engine()
+
+    # 1. Verificación de Idempotencia: Si ya existe una venta con este idempotency_key,
+    # se retorna exactamente la venta previa con su folio oficial (sin duplicar).
+    async with eng.connect() as conn:
+        res = await conn.execute(
+            text('SELECT "id", "doc" FROM "sales" WHERE "doc"->>\'idempotency_key\' = :k LIMIT 1'),
+            {"k": key}
+        )
+        row = res.fetchone()
+        if row:
+            doc = json.loads(row[1]) if isinstance(row[1], str) else row[1]
+            return {
+                "ok": True,
+                "duplicado": True,
+                "venta": doc,
+                "id": doc.get("id"),
+                "folio": doc.get("folio"),
+                "total": float(doc.get("total") or 0),
+                "mensaje": "Venta previamente registrada (confirmada)",
+            }
+
+    # 2. Obtener cliente
+    cliente = None
+    if data.cliente_id:
+        cliente = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0})
+    cliente_nombre = (cliente.get("nombre") if cliente else "") or data.cliente_nombre or "Público General"
+
+    # 3. Calcular importes e impuestos
+    subtotal = 0.0
+    iva_total = 0.0
+    items_out = []
+    for it in data.items:
+        if it.cantidad <= 0:
+            continue
+        imp = round(it.cantidad * it.precio, 2)
+        iva_lin = round(imp * (it.iva_tasa / 100.0), 2) if it.iva_tasa else 0.0
+        subtotal += imp
+        iva_total += iva_lin
+        items_out.append({
+            "product_id": it.product_id,
+            "codigo": it.codigo,
+            "descripcion": it.descripcion,
+            "unidad": it.unidad or "PZA",
+            "cantidad": it.cantidad,
+            "precio": it.precio,
+            "iva_tasa": it.iva_tasa or 0.0,
+            "subtotal": imp,
+            "iva": iva_lin,
+            "total": imp + iva_lin,
+        })
+
+    if not items_out:
+        raise HTTPException(400, "No hay partidas con cantidad válida")
+
+    total = round(subtotal + iva_total, 2)
+
+    # 4. Asignación ATÓMICA del folio único de venta (V-XXXXXX)
+    folio = await next_counter("venta", "V", 6)
+
+    # 5. Estructurar documento de venta
+    now_dt = now_utc()
+    sale_id = _uid()
+    saldo = total if data.condicion == "credito" else 0.0
+    doc = {
+        "id": sale_id,
+        "folio": folio,
+        "fecha": data.fecha or iso_now()[:10],
+        "hora": now_dt.strftime("%H:%M"),
+        "origen": "movil_campo",
+        "tipo_venta": "venta_directa",
+        "condicion": data.condicion or "contado",
+        "forma_pago": data.forma_pago or "efectivo",
+        "cliente_id": data.cliente_id or "",
+        "cliente_nombre": cliente_nombre,
+        "cliente_codigo": (cliente.get("codigo") if cliente else "") or data.cliente_codigo or "",
+        "vendedor_id": user["id"],
+        "vendedor_nombre": user.get("name", "Asesor Móvil"),
+        "items": items_out,
+        "items_count": len(items_out),
+        "subtotal": round(subtotal, 2),
+        "iva_total": round(iva_total, 2),
+        "total": total,
+        "saldo": saldo,
+        "estado": "confirmada",
+        "factura": False,
+        "facturado": False,
+        "notas": data.notas or "",
+        "latitud": data.latitud,
+        "longitud": data.longitud,
+        "idempotency_key": key,
+        "created_at": iso_now(),
+    }
+
+    # 6. Insertar en db.sales
+    await db.sales.insert_one(doc)
+
+    # 7. Actualizar saldo del cliente si es venta a crédito
+    if data.condicion == "credito" and data.cliente_id:
+        await db.clients.update_one(
+            {"id": data.cliente_id},
+            {"$inc": {"saldo": total}}
+        )
+
+    # 8. Auditoría
+    await log_audit(
+        usuario=user,
+        accion="VENTA_DIRECTA_MOVIL",
+        entidad="VENTA",
+        registro_id=sale_id,
+        detalle=f"Venta directa móvil {folio} ({cliente_nombre}) por ${total:,.2f} MXN"
+    )
+
+    return {
+        "ok": True,
+        "duplicado": False,
+        "venta": doc,
+        "id": sale_id,
+        "folio": folio,
+        "total": total,
+        "mensaje": f"Venta directa {folio} registrada exitosamente.",
+    }
+
+
+@router.post("/seller/facturar-solicitud")
+async def seller_facturar_solicitud(data: FacturarSolicitudInput, user: dict = Depends(get_current_user)):
+    """Registra la solicitud de facturación para una venta del histórico."""
+    solicitud_id = _uid()
+    doc = {
+        "id": solicitud_id,
+        "sale_id": data.sale_id,
+        "folio": data.folio,
+        "solicitado_por_id": user["id"],
+        "solicitado_por_nombre": user.get("name", "Asesor"),
+        "rfc": data.rfc,
+        "razon_social": data.razon_social,
+        "uso_cfdi": data.uso_cfdi,
+        "regimen_fiscal": data.regimen_fiscal,
+        "correo": data.correo,
+        "estado": "pendiente_emision",
+        "fecha": iso_now(),
+    }
+    await db.cfdi_documents.insert_one(doc)
+    await log_audit(
+        usuario=user,
+        accion="SOLICITUD_FACTURACION_MOVIL",
+        entidad="FACTURA",
+        registro_id=data.sale_id,
+        detalle=f"Solicitud de factura para folio {data.folio} ({data.rfc})"
+    )
+    return {
+        "ok": True,
+        "solicitud_id": solicitud_id,
+        "mensaje": f"Solicitud de facturación para folio {data.folio} registrada correctamente."
+    }
 
 
 # ==========================================================================

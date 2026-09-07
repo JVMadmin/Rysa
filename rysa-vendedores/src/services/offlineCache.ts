@@ -12,6 +12,9 @@ const CACHE_KEYS = {
   DASHBOARD_META: '@rysa_cache_dashboard_meta',
   LAST_GPS: '@rysa_cache_last_gps',
   OFFLINE_OUTBOX: '@rysa_cache_offline_outbox',
+  CLIENT_HISTORY_PREFIX: '@rysa_cache_history_',
+  CATEGORIES: '@rysa_cache_categories',
+  OFFLINE_SALES: '@rysa_cache_offline_sales',
 };
 
 export interface CacheMetadata {
@@ -21,7 +24,7 @@ export interface CacheMetadata {
 
 export interface OfflineAction {
   id: string;
-  type: 'create_visit' | 'checkin_visit' | 'location_ping' | 'create_client';
+  type: 'create_visit' | 'checkin_visit' | 'location_ping' | 'create_client' | 'venta_directa';
   payload: any;
   createdAt: string;
   attempts: number;
@@ -227,3 +230,79 @@ export async function clearAllOfflineCache(): Promise<void> {
     console.warn('[OfflineCache] Error clearing cache:', err);
   }
 }
+
+// ----------------------------------------------------
+// CLIENT ORDER HISTORY CACHE
+// ----------------------------------------------------
+export async function saveClientHistoryCache(clientId: string, history: any[]): Promise<void> {
+  try {
+    const key = `${CACHE_KEYS.CLIENT_HISTORY_PREFIX}${clientId}`;
+    await AsyncStorage.setItem(key, JSON.stringify(history));
+  } catch (err) {
+    console.warn('[OfflineCache] Error saving client history cache:', err);
+  }
+}
+
+export async function getClientHistoryCache(clientId: string): Promise<any[]> {
+  try {
+    const key = `${CACHE_KEYS.CLIENT_HISTORY_PREFIX}${clientId}`;
+    const raw = await AsyncStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+// ----------------------------------------------------
+// CATEGORIES CACHE
+// ----------------------------------------------------
+export async function saveCategoriesCache(categories: any[]): Promise<void> {
+  try {
+    await AsyncStorage.setItem(CACHE_KEYS.CATEGORIES, JSON.stringify(categories));
+  } catch (err) {
+    console.warn('[OfflineCache] Error saving categories cache:', err);
+  }
+}
+
+export async function getCategoriesCache(): Promise<any[]> {
+  try {
+    const raw = await AsyncStorage.getItem(CACHE_KEYS.CATEGORIES);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+// ----------------------------------------------------
+// OFFLINE DIRECT SALES CACHE
+// ----------------------------------------------------
+export async function saveOfflineSale(sale: any): Promise<void> {
+  try {
+    const current = await getOfflineSales();
+    const filtered = current.filter((s: any) => s.idempotency_key !== sale.idempotency_key);
+    filtered.unshift(sale);
+    await AsyncStorage.setItem(CACHE_KEYS.OFFLINE_SALES, JSON.stringify(filtered));
+  } catch (err) {
+    console.warn('[OfflineCache] Error saving offline sale:', err);
+  }
+}
+
+export async function getOfflineSales(): Promise<any[]> {
+  try {
+    const raw = await AsyncStorage.getItem(CACHE_KEYS.OFFLINE_SALES);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function removeOfflineSale(idempotencyKey: string): Promise<void> {
+  try {
+    const current = await getOfflineSales();
+    const filtered = current.filter((s: any) => s.idempotency_key !== idempotencyKey);
+    await AsyncStorage.setItem(CACHE_KEYS.OFFLINE_SALES, JSON.stringify(filtered));
+  } catch (err) {
+    console.warn('[OfflineCache] Error removing offline sale:', err);
+  }
+}
+

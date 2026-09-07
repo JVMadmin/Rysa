@@ -16,9 +16,15 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConnectivityBar } from '@/components/ConnectivityBar';
-import { getFullCatalog, searchProducts } from '@/services/salesService';
+import { getFullCatalog, searchProducts, getCategoriesList } from '@/services/salesService';
 import { Product } from '@/types';
-import { getCatalogCache, saveCatalogCache, CacheMetadata } from '@/services/offlineCache';
+import {
+  getCatalogCache,
+  saveCatalogCache,
+  getCategoriesCache,
+  saveCategoriesCache,
+  CacheMetadata,
+} from '@/services/offlineCache';
 import { syncManager } from '@/services/syncManager';
 
 export default function CatalogoScreen() {
@@ -31,6 +37,29 @@ export default function CatalogoScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
+  // Categorías activas desde API / Caché con diferenciadores y conteos
+  const [serverCategories, setServerCategories] = useState<{ categoria: string; count: number }[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+
+  const fetchCategories = useCallback(async () => {
+    setLoadingCategories(true);
+    try {
+      const data = await getCategoriesList();
+      if (data && data.length > 0) {
+        setServerCategories(data);
+        await saveCategoriesCache(data);
+      }
+    } catch (err) {
+      console.warn('[CatalogoScreen] Error fetching categories:', err);
+      const cached = await getCategoriesCache();
+      if (cached && cached.length > 0) {
+        setServerCategories(cached);
+      }
+    } finally {
+      setLoadingCategories(false);
+    }
+  }, []);
 
   const fetchCatalog = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true);
@@ -64,9 +93,17 @@ export default function CatalogoScreen() {
       fetchCatalog(cached.products.length > 0);
     });
 
+    getCategoriesCache().then((cachedCats) => {
+      if (cachedCats && cachedCats.length > 0) {
+        setServerCategories(cachedCats);
+      }
+      fetchCategories();
+    });
+
     const unsubReconnect = syncManager.subscribeReconnect(() => {
-      console.log('[CatalogoScreen] Network reconnected - refreshing full catalog...');
+      console.log('[CatalogoScreen] Network reconnected - refreshing full catalog & categories...');
       fetchCatalog(true);
+      fetchCategories();
     });
 
     const unsubStatus = syncManager.subscribeStatus((st) => {
@@ -77,23 +114,46 @@ export default function CatalogoScreen() {
       unsubReconnect();
       unsubStatus();
     };
-  }, [fetchCatalog]);
+  }, [fetchCatalog, fetchCategories]);
 
   const onRefresh = () => {
     setRefreshing(true);
     fetchCatalog();
+    fetchCategories();
   };
 
-  // Categorías dinámicas desde el catálogo completo
+  // Categorías con conteo exacto y diferenciadores visuales
   const categories = useMemo(() => {
     const source = cachedAllProducts.length > 0 ? cachedAllProducts : products;
-    const set = new Set<string>();
+    const countMap = new Map<string, number>();
+
     source.forEach((p) => {
-      const cat = (p.categoria || p.linea || '').trim();
-      if (cat) set.add(cat.toUpperCase());
+      const cat = (p.categoria || p.linea || '').trim().toUpperCase();
+      if (cat) {
+        countMap.set(cat, (countMap.get(cat) || 0) + 1);
+      }
     });
-    return ['TODAS', ...Array.from(set).sort()];
-  }, [cachedAllProducts, products]);
+
+    const result: { name: string; count: number }[] = [
+      { name: 'TODAS', count: source.length },
+    ];
+
+    if (serverCategories.length > 0) {
+      serverCategories.forEach((sc) => {
+        const catUpper = sc.categoria.trim().toUpperCase();
+        const cnt = countMap.get(catUpper) || sc.count || 0;
+        result.push({ name: catUpper, count: cnt });
+      });
+    } else {
+      Array.from(countMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([name, count]) => {
+          result.push({ name, count });
+        });
+    }
+
+    return result;
+  }, [cachedAllProducts, products, serverCategories]);
 
   // Filtrado reactivo en tiempo real al escribir (0ms lag sobre los 2,244 productos)
   const filteredProducts = useMemo(() => {
@@ -261,30 +321,56 @@ export default function CatalogoScreen() {
           ) : null}
         </View>
 
-        {/* Chips de Categorías */}
-        {categories.length > 1 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoriesScroll}
-          >
-            {categories.map((cat) => {
-              const active = selectedCategory === cat;
-              return (
-                <TouchableOpacity
-                  key={cat}
-                  style={[styles.categoryChip, active && styles.categoryChipActive]}
-                  onPress={() => setSelectedCategory(cat)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
-                    {cat}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        )}
+        {/* Chips de Categorías con Conteo y Botón de Recarga */}
+        <View style={{ marginTop: 10 }}>
+          <View style={styles.categoriesHeaderRow}>
+            <Text style={styles.categoriesSectionLabel}>Líneas y Categorías ({categories.length - 1})</Text>
+            <TouchableOpacity
+              style={styles.reloadCategoriesBtn}
+              onPress={fetchCategories}
+              disabled={loadingCategories}
+              activeOpacity={0.7}
+            >
+              {loadingCategories ? (
+                <ActivityIndicator size="small" color="#B9F6CA" />
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <MaterialIcons name="refresh" size={14} color="#B9F6CA" />
+                  <Text style={styles.reloadCategoriesText}>Cargar Categorías</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {categories.length > 1 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.categoriesScroll}
+            >
+              {categories.map((cat) => {
+                const active = selectedCategory === cat.name;
+                return (
+                  <TouchableOpacity
+                    key={cat.name}
+                    style={[styles.categoryChip, active && styles.categoryChipActive]}
+                    onPress={() => setSelectedCategory(cat.name)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.categoryChipText, active && styles.categoryChipTextActive]}>
+                      {cat.name}
+                    </Text>
+                    <View style={[styles.catCountBadge, active && styles.catCountBadgeActive]}>
+                      <Text style={[styles.catCountBadgeText, active && styles.catCountBadgeTextActive]}>
+                        {cat.count}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          )}
+        </View>
       </View>
 
       {/* Lista de Productos */}
@@ -370,17 +456,50 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#1A202C',
   },
+  categoriesHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+    marginBottom: 4,
+  },
+  categoriesSectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A0AEC0',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  reloadCategoriesBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(185, 246, 202, 0.3)',
+  },
+  reloadCategoriesText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B9F6CA',
+  },
   categoriesScroll: {
-    paddingTop: 10,
+    paddingTop: 4,
     gap: 8,
   },
   categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    paddingHorizontal: 12,
+    paddingLeft: 12,
+    paddingRight: 6,
     paddingVertical: 5,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.15)',
+    gap: 6,
   },
   categoryChipActive: {
     backgroundColor: '#D32F2F',
@@ -393,6 +512,26 @@ const styles = StyleSheet.create({
   },
   categoryChipTextActive: {
     color: '#FFFFFF',
+  },
+  catCountBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+    minWidth: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catCountBadgeActive: {
+    backgroundColor: '#FFFFFF',
+  },
+  catCountBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#CBD5E0',
+  },
+  catCountBadgeTextActive: {
+    color: '#D32F2F',
   },
   loadingContainer: {
     alignItems: 'center',

@@ -6,6 +6,7 @@ import {
   getOfflineOutbox,
   removeOfflineAction,
   OfflineAction,
+  removeOfflineSale,
 } from './offlineCache';
 import {
   getSellerClients,
@@ -15,6 +16,9 @@ import {
   checkInVisit,
   registerSellerLocation,
   getFullCatalog,
+  createVentaDirecta,
+  getCategoriesList,
+  getClientOrderHistory,
 } from './salesService';
 import { apiFetch, testServerConnection } from '@/lib/api';
 import { Product } from '@/types';
@@ -170,14 +174,21 @@ class SyncManager {
           body: JSON.stringify(action.payload),
         });
         break;
+      case 'venta_directa':
+        await createVentaDirecta(action.payload);
+        if (action.payload.idempotency_key) {
+          await removeOfflineSale(action.payload.idempotency_key);
+        }
+        break;
       default:
         console.warn('[SyncManager] Unknown action type:', action.type);
     }
   }
 
   /**
-   * Precarga completa de Clientes, Catálogo, Visitas y Dashboard
-   * Guarda todo en AsyncStorage para navegación offline fluida
+   * Precarga completa de Clientes, Históricos de Cartera, Catálogo,
+   * Categorías, Visitas y Dashboard.
+   * Guarda todo en AsyncStorage para navegación offline fluida.
    */
   public async preloadAllData(): Promise<{
     clientsCount: number;
@@ -189,15 +200,26 @@ class SyncManager {
     let visitsCount = 0;
 
     try {
-      // 1. Clientes
-      const clients = await getSellerClients().catch(() => null);
+      // 1. Clientes (Cartera y General)
+      const clients = await getSellerClients(undefined, 'all').catch(() => null);
       if (clients && Array.isArray(clients)) {
         await saveClientsCache(clients);
         clientsCount = clients.length;
+
+        // 1.1 Precargar historial de los clientes en cartera (primeros 30)
+        const carteraClients = clients.filter((c: any) => c.en_cartera || (c.saldo || 0) > 0).slice(0, 30);
+        for (const c of carteraClients) {
+          if (c.id) {
+            getClientOrderHistory(c.id).catch(() => {});
+          }
+        }
       }
 
-      // 2. Catálogo completo de productos (2,244 artículos)
-      const catalog = await getFullCatalog().catch(() => []);
+      // 2. Catálogo completo de productos y categorías activas
+      const [catalog, categories] = await Promise.all([
+        getFullCatalog().catch(() => []),
+        getCategoriesList().catch(() => []),
+      ]);
       if (Array.isArray(catalog)) {
         catalogCount = catalog.length;
       }

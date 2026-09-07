@@ -30,6 +30,7 @@ import {
   getClientFrequentProducts,
   getClientOrderHistory,
   registerClientLocation,
+  solicitarFacturacion,
 } from '@/services/salesService';
 import { Client, SemaforoCrediticio } from '@/types';
 import { pickDocument, PickedFile } from '@/lib/filePicker';
@@ -271,6 +272,57 @@ export default function ClientesCarteraScreen() {
       Alert.alert('Error', err.message || 'No se pudo guardar la ubicación GPS.');
     } finally {
       setCapturingGps(false);
+    }
+  };
+
+  // Solicitud de Facturación con advertencia crítica si no fue vendido por el asesor
+  const handleFacturar = (h: any) => {
+    const isMine = !!h.vendido_por_mi;
+    const folioStr = h.folio || 'Venta';
+
+    const proceedWithFacturar = async () => {
+      try {
+        await solicitarFacturacion({
+          venta_id: h.id,
+          folio: h.folio,
+          cliente_id: selectedClient?.id,
+          cliente_rfc: selectedClient?.rfc,
+          confirmado_no_propio: !isMine,
+        });
+        Alert.alert(
+          'Facturación Solicitada',
+          `Se envió exitosamente la solicitud de factura para el comprobante ${folioStr}. El departamento de facturación emitirá el CFDI correspondiente.`
+        );
+      } catch (err: any) {
+        Alert.alert('Error', err.message || 'No se pudo registrar la solicitud de factura.');
+      }
+    };
+
+    if (!isMine) {
+      Alert.alert(
+        'Confirmación de Facturación',
+        'Esta venta no fue realizada por ti, ¿confirmas facturar?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Confirmar y Facturar',
+            style: 'destructive',
+            onPress: proceedWithFacturar,
+          },
+        ]
+      );
+    } else {
+      Alert.alert(
+        'Solicitar Factura',
+        `¿Confirmas solicitar la factura CFDI para el comprobante ${folioStr}?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Solicitar Factura',
+            onPress: proceedWithFacturar,
+          },
+        ]
+      );
     }
   };
 
@@ -840,7 +892,17 @@ export default function ClientesCarteraScreen() {
                           </Text>
                         ) : null}
                       </View>
-                      <Text style={styles.historyTotal}>{formatCurrency(h.total)}</Text>
+                      <View style={{ alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
+                        <Text style={styles.historyTotal}>{formatCurrency(h.total)}</Text>
+                        <TouchableOpacity
+                          style={styles.facturarBtn}
+                          onPress={() => handleFacturar(h)}
+                          activeOpacity={0.7}
+                        >
+                          <MaterialIcons name="receipt-long" size={12} color="#FFFFFF" />
+                          <Text style={styles.facturarBtnText}>Facturar</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ))
                 )}
@@ -1688,6 +1750,75 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  historyRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDF2F7',
+  },
+  historyFolio: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1A202C',
+  },
+  historyFecha: {
+    fontSize: 10,
+    color: '#718096',
+  },
+  historyItems: {
+    fontSize: 11,
+    color: '#4A5568',
+    marginTop: 2,
+  },
+  historyTotal: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1A202C',
+  },
+  badgeVendidoPorMi: {
+    backgroundColor: '#E8F5E9',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  badgeVendidoPorMiText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#2E7D32',
+  },
+  badgeVendidoPorOtro: {
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  badgeVendidoPorOtroText: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#E65100',
+  },
+  facturarBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1565C0',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    gap: 3,
+  },
+  facturarBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  frecuenteEmpty: {
+    fontSize: 11,
+    color: '#A0AEC0',
+    fontStyle: 'italic',
+    paddingVertical: 6,
+  },
   protectedNotice: {
     alignItems: 'center',
     paddingVertical: 20,
@@ -1941,62 +2072,6 @@ const styles = StyleSheet.create({
     color: '#FFD54F',
     fontSize: 11,
     fontWeight: '700',
-  },
-  // Historial de compras styles
-  historyRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EDF2F7',
-  },
-  historyFolio: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#1A202C',
-  },
-  historyFecha: {
-    fontSize: 10,
-    color: '#718096',
-  },
-  historyItems: {
-    fontSize: 11,
-    color: '#4A5568',
-    marginTop: 2,
-  },
-  historyTotal: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#2E7D32',
-  },
-  frecuenteEmpty: {
-    fontSize: 11,
-    color: '#A0AEC0',
-    fontStyle: 'italic',
-    paddingVertical: 4,
-  },
-  badgeVendidoPorMi: {
-    backgroundColor: '#E8F5E9',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  badgeVendidoPorMiText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#2E7D32',
-  },
-  badgeVendidoPorOtro: {
-    backgroundColor: '#EDF2F7',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  badgeVendidoPorOtroText: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: '#4A5568',
   },
   // Evidencia de abono styles
   evidencePickerRow: {

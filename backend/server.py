@@ -1626,23 +1626,48 @@ class CategoryInput(BaseModel):
 
 @api.get("/categories")
 async def list_categories(user: dict = Depends(get_current_user)):
+    from pgstore.database import get_engine
+    from sqlalchemy import text
+    eng = get_engine()
     counts = {}
-    async for r in db.products.aggregate([
-        {"$match": {"clasificacion": {"$nin": ["", None]}}},
-        {"$group": {"_id": "$clasificacion", "count": {"$sum": 1}}},
-    ]):
-        counts[r["_id"]] = r["count"]
+    try:
+        async with eng.connect() as conn:
+            res = await conn.execute(text("""
+                SELECT COALESCE(NULLIF(doc->>'categoria', ''), NULLIF(doc->>'linea', ''), NULLIF(doc->>'clasificacion', '')) as cat,
+                       count(*) as cnt
+                FROM "products"
+                WHERE COALESCE(NULLIF(doc->>'categoria', ''), NULLIF(doc->>'linea', ''), NULLIF(doc->>'clasificacion', '')) IS NOT NULL
+                GROUP BY 1
+                ORDER BY 2 DESC
+            """))
+            for row in res.fetchall():
+                if row[0]:
+                    counts[row[0].strip().upper()] = int(row[1])
+    except Exception as e:
+        logger.warning("Error consultando categorías en products: %s", e)
+
     managed = {}
-    async for c in db.categories.find({}, {"_id": 0}):
-        managed[c["nombre"]] = c
+    try:
+        cur = db.categories.find({}, {"_id": 0})
+        cats = await cur.to_list(1000) if hasattr(cur, "to_list") else []
+        for c in cats:
+            if c.get("nombre"):
+                managed[c["nombre"].strip().upper()] = c
+    except Exception:
+        pass
+
     nombres = set(counts) | set(managed)
-    nombres = {n for n in nombres if n}
     out = []
     for n in sorted(nombres):
         m = managed.get(n, {})
-        out.append({"nombre": n, "clave": m.get("clave", ""), "descripcion": m.get("descripcion", ""),
-                    "ficha_tecnica": m.get("ficha_tecnica", ""), "imagen_url": m.get("imagen_url", ""),
-                    "count": counts.get(n, 0)})
+        out.append({
+            "nombre": n,
+            "clave": m.get("clave", ""),
+            "descripcion": m.get("descripcion", ""),
+            "ficha_tecnica": m.get("ficha_tecnica", ""),
+            "imagen_url": m.get("imagen_url", ""),
+            "count": counts.get(n, 0),
+        })
     return out
 
 @api.post("/categories")

@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { registerSellerLocation } from './salesService';
 import { queueOfflineAction, saveLastGpsCache, getLastGpsCache } from './offlineCache';
+import { syncManager } from './syncManager';
 
 const TRACKING_STORAGE_KEY = 'rysa_tracking_active';
 const INTERVAL_MS = 15000;
@@ -14,7 +15,7 @@ export interface TrackingLocation {
   timestamp: string;
 }
 
-type TrackingListener = (isTracking: boolean, lastLocation?: TrackingLocation) => void;
+export type TrackingListener = (active: boolean, location?: TrackingLocation) => void;
 
 class TrackingService {
   private active = false;
@@ -23,8 +24,19 @@ class TrackingService {
   private listeners: Set<TrackingListener> = new Set();
   private lastLocation: TrackingLocation | null = null;
 
+  constructor() {
+    this.init();
+  }
+
   async init() {
     try {
+      syncManager.subscribeReconnect(() => {
+        if (this.active) {
+          console.log('[trackingService] Conexión restaurada - transmitiendo posición GPS...');
+          this.transmitCurrentPosition(true).catch(() => {});
+        }
+      });
+
       const stored = await AsyncStorage.getItem(TRACKING_STORAGE_KEY);
       if (stored === 'true') {
         await this.startTracking(true);

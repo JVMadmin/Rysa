@@ -18,8 +18,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/auth/AuthContext';
 import { ConnectivityBar } from '@/components/ConnectivityBar';
-import { getFullCatalog, getSellerClients, createOrder } from '@/services/salesService';
-import { getCatalogCache, getClientsCache, saveClientsCache } from '@/services/offlineCache';
+import { getFullCatalog, getSellerClients, createOrder, createVentaDirecta, VentaDirectaPayload } from '@/services/salesService';
+import { getCatalogCache, getClientsCache, saveClientsCache, saveOfflineSale, queueOfflineAction } from '@/services/offlineCache';
 import { Client, Product, PedidoInput, PedidoCreatedResponse } from '@/types';
 import { shareTicketPdf, generateTicketPdf } from '@/lib/ticketPdf';
 
@@ -33,6 +33,9 @@ interface CartItem {
 export default function PedidosScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+
+  // Tipo de operación: Venta Directa (inmediata) vs Cotización
+  const [tipoOperacion, setTipoOperacion] = useState<'venta_directa' | 'cotizacion'>('venta_directa');
 
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -248,43 +251,105 @@ export default function PedidosScreen() {
     };
   }, [cart, aplicaIva, tasaIva]);
 
-  // 7. Confirmación del pedido en el ERP
+  // 7. Confirmación de la transacción (Venta Directa vs Cotización)
   const handleConfirmSale = async () => {
     if (submitting) return;
     if (!selectedClient) {
-      Alert.alert('Atención', 'Selecciona un cliente para levantar el pedido.');
+      Alert.alert('Atención', `Selecciona un cliente para ${tipoOperacion === 'venta_directa' ? 'realizar la venta' : 'generar la cotización'}.`);
       return;
     }
     if (cart.length === 0) {
-      Alert.alert('Atención', 'Agrega al menos un producto al pedido.');
+      Alert.alert('Atención', 'Agrega al menos un producto a la orden.');
       return;
     }
 
     setSubmitting(true);
-    try {
-      const idempotencyKey = `idem_${user?.id || 'movil'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      const orderPayload: PedidoInput = {
-        cliente_id: selectedClient.id === 'publico_general' ? '' : selectedClient.id,
-        vendedor_id: user?.id,
-        fecha_pedido: new Date().toISOString().slice(0, 10),
-        notas: `[${condicion.toUpperCase()}${condicion === 'contado' ? ` - ${formaPago.toUpperCase()}` : ''}${aplicaIva ? ` - IVA ${tasaIva}%` : ' - SIN IVA'}] ${notas.trim()}`.trim(),
-        items: cart.map((c) => ({
-          product_id: c.product.id,
-          codigo: c.product.sku || '',
-          descripcion: c.product.descripcion || c.product.nombre || '',
-          unidad: c.product.unidad_medida || 'PZA',
-          solicitado: c.cantidad,
-          precio: c.precio,
-          iva_tasa: aplicaIva ? Number(tasaIva) : 0,
-        })),
-        idempotency_key: idempotencyKey,
-      };
+    const opKey = `idem_${tipoOperacion === 'venta_directa' ? 'vta' : 'cot'}_${user?.id || 'movil'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const fechaHoy = new Date().toISOString().slice(0, 10);
+    const notasFull = `[${tipoOperacion === 'venta_directa' ? 'VENTA DIRECTA' : 'COTIZACIÓN'} - ${condicion.toUpperCase()}${condicion === 'contado' ? ` - ${formaPago.toUpperCase()}` : ''}${aplicaIva ? ` - IVA ${tasaIva}%` : ' - SIN IVA'}] ${notas.trim()}`.trim();
 
-      const result = await createOrder(orderPayload);
-      setConfirmedOrder(result);
-      setTicketModalVisible(true);
+    try {
+      if (tipoOperacion === 'venta_directa') {
+        const ventaPayload: VentaDirectaPayload = {
+          cliente_id: selectedClient.id === 'publico_general' ? '' : selectedClient.id,
+          cliente_nombre: selectedClient.nombre || 'PÚBLICO EN GENERAL',
+          cliente_codigo: selectedClient.codigo || '',
+          items: cart.map((c) => ({
+            product_id: c.product.id,
+            codigo: c.product.sku || '',
+            descripcion: c.product.descripcion || c.product.nombre || '',
+            unidad: c.product.unidad_medida || 'PZA',
+            cantidad: c.cantidad,
+            precio: c.precio,
+            iva_tasa: aplicaIva ? Number(tasaIva) : 0,
+          })),
+          condicion,
+          forma_pago: formaPago,
+          notas: notasFull,
+          idempotency_key: opKey,
+          fecha: fechaHoy,
+        };
+
+        try {
+          const result = await createVentaDirecta(ventaPayload);
+          setConfirmedOrder(result.venta || result);
+          setTicketModalVisible(true);
+        } catch (netErr: any) {
+          // En caso de estar fuera de cobertura celular / offline:
+          // Guardar venta localmente con clave idempotente para asignación atómica al reconectar
+          const offlineDoc: any = {
+            id: `local_${opKey}`,
+            folio: 'FOLIO PENDIENTE (Sync)',
+            tipo_operacion: 'venta_directa',
+            fecha: fechaHoy,
+            cliente_id: ventaPayload.cliente_id,
+            cliente_nombre: ventaPayload.cliente_nombre,
+            items: ventaPayload.items,
+            subtotal: totals.subtotal,
+            iva: totals.iva,
+            total: totals.total,
+            condicion,
+            forma_pago: formaPago,
+            idempotency_key: opKey,
+            notas: notasFull,
+          };
+          await saveOfflineSale(offlineDoc);
+          await queueOfflineAction({
+            type: 'venta_directa',
+            payload: ventaPayload,
+          });
+          setConfirmedOrder(offlineDoc);
+          setTicketModalVisible(true);
+          Alert.alert(
+            'Venta Guardada Fuera de Línea',
+            'Sin señal de internet en este momento. La venta quedó registrada de forma segura en tu teléfono con clave única. En cuanto el dispositivo detecte red de datos se le asignará automáticamente su folio fiscal consecutivo único sin duplicarse.'
+          );
+        }
+      } else {
+        // Modo Cotización
+        const orderPayload: PedidoInput = {
+          cliente_id: selectedClient.id === 'publico_general' ? '' : selectedClient.id,
+          vendedor_id: user?.id,
+          fecha_pedido: fechaHoy,
+          notas: notasFull,
+          items: cart.map((c) => ({
+            product_id: c.product.id,
+            codigo: c.product.sku || '',
+            descripcion: c.product.descripcion || c.product.nombre || '',
+            unidad: c.product.unidad_medida || 'PZA',
+            solicitado: c.cantidad,
+            precio: c.precio,
+            iva_tasa: aplicaIva ? Number(tasaIva) : 0,
+          })),
+          idempotency_key: opKey,
+        };
+
+        const result = await createOrder(orderPayload);
+        setConfirmedOrder(result);
+        setTicketModalVisible(true);
+      }
     } catch (err: any) {
-      Alert.alert('Error al registrar pedido', err.message || 'No se pudo registrar el pedido en el servidor.');
+      Alert.alert('Error en transacción', err.message || 'No se pudo procesar la solicitud.');
     } finally {
       setSubmitting(false);
     }
@@ -376,6 +441,55 @@ export default function PedidosScreen() {
           <Text style={styles.headerSubtitle}>Sucursal Matriz (Palenque) • Pedido Oficial</Text>
         </View>
 
+        {/* Selector de Tipo de Operación: Venta Directa vs Cotización */}
+        <View style={styles.operationTypeCard}>
+          <TouchableOpacity
+            style={[
+              styles.operationTypeBtn,
+              tipoOperacion === 'venta_directa' && styles.operationTypeBtnActive,
+            ]}
+            onPress={() => setTipoOperacion('venta_directa')}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons
+              name="point-of-sale"
+              size={18}
+              color={tipoOperacion === 'venta_directa' ? '#FFFFFF' : '#4A5568'}
+            />
+            <Text
+              style={[
+                styles.operationTypeBtnText,
+                tipoOperacion === 'venta_directa' && styles.operationTypeBtnTextActive,
+              ]}
+            >
+              Venta Directa
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.operationTypeBtn,
+              tipoOperacion === 'cotizacion' && styles.operationTypeBtnActiveCot,
+            ]}
+            onPress={() => setTipoOperacion('cotizacion')}
+            activeOpacity={0.8}
+          >
+            <MaterialIcons
+              name="request-quote"
+              size={18}
+              color={tipoOperacion === 'cotizacion' ? '#FFFFFF' : '#4A5568'}
+            />
+            <Text
+              style={[
+                styles.operationTypeBtnText,
+                tipoOperacion === 'cotizacion' && styles.operationTypeBtnTextActive,
+              ]}
+            >
+              Cotización
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* 1. Selector de Cliente */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionLabel}>1. Cliente</Text>
@@ -442,9 +556,19 @@ export default function PedidosScreen() {
                 const hasStock = (p.existencia || 0) > 0;
                 const clientPrice = getProductPriceForClient(p, selectedClient);
                 const precioConIva = Math.round(clientPrice * 1.08 * 100) / 100;
+                const imgUri = p.foto || (p as any).imagen || (p as any).imagen_url;
 
                 return (
                   <View key={p.id} style={styles.productRow}>
+                    <View style={styles.productThumbBox}>
+                      {imgUri ? (
+                        <Image source={{ uri: imgUri }} style={styles.productThumb} resizeMode="contain" />
+                      ) : (
+                        <View style={styles.productThumbPlaceholder}>
+                          <MaterialIcons name="inventory-2" size={22} color="#A0AEC0" />
+                        </View>
+                      )}
+                    </View>
                     <View style={{ flex: 1, marginRight: 8 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <Text style={styles.productSku}>{p.sku || 'SIN SKU'}</Text>
@@ -643,6 +767,7 @@ export default function PedidosScreen() {
         <TouchableOpacity
           style={[
             styles.confirmBtn,
+            tipoOperacion === 'venta_directa' ? styles.confirmBtnVenta : styles.confirmBtnCotizacion,
             (submitting || cart.length === 0 || !selectedClient) && styles.confirmBtnDisabled,
             { marginBottom: Math.max(insets.bottom, 16) + 12 },
           ]}
@@ -653,8 +778,16 @@ export default function PedidosScreen() {
             <ActivityIndicator color="#FFFFFF" />
           ) : (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <MaterialIcons name="check-circle" size={22} color="#FFFFFF" />
-              <Text style={styles.confirmBtnText}>Confirmar Pedido ({formatCurrency(totals.total)})</Text>
+              <MaterialIcons
+                name={tipoOperacion === 'venta_directa' ? 'point-of-sale' : 'request-quote'}
+                size={22}
+                color="#FFFFFF"
+              />
+              <Text style={styles.confirmBtnText}>
+                {tipoOperacion === 'venta_directa'
+                  ? `Finalizar Venta Directa (${formatCurrency(totals.total)})`
+                  : `Generar Cotización (${formatCurrency(totals.total)})`}
+              </Text>
             </View>
           )}
         </TouchableOpacity>
@@ -898,6 +1031,47 @@ const styles = StyleSheet.create({
     color: '#718096',
     marginTop: 2,
   },
+  operationTypeCard: {
+    flexDirection: 'row',
+    backgroundColor: '#EDF2F7',
+    borderRadius: 10,
+    padding: 4,
+    marginBottom: 14,
+    gap: 6,
+  },
+  operationTypeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  operationTypeBtnActive: {
+    backgroundColor: '#2E7D32',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  operationTypeBtnActiveCot: {
+    backgroundColor: '#1976D2',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  operationTypeBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4A5568',
+  },
+  operationTypeBtnTextActive: {
+    color: '#FFFFFF',
+  },
   sectionCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -949,6 +1123,27 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontSize: 13,
     color: '#1A202C',
+  },
+  productThumbBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#EDF2F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+    overflow: 'hidden',
+  },
+  productThumb: {
+    width: '100%',
+    height: '100%',
+  },
+  productThumbPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F7FAFC',
   },
   productRow: {
     flexDirection: 'row',
@@ -1228,6 +1423,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 3,
+  },
+  confirmBtnVenta: {
+    backgroundColor: '#2E7D32',
+  },
+  confirmBtnCotizacion: {
+    backgroundColor: '#1976D2',
   },
   confirmBtnDisabled: {
     backgroundColor: '#CBD5E0',

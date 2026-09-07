@@ -1,6 +1,6 @@
 import { apiFetch } from '@/lib/api';
 import { SellerDashboardData, Client, Product, SaleInput, AbonoInput, Visit, PedidoInput, PedidoCreatedResponse } from '@/types';
-import { saveCatalogCache, getCatalogCache } from '@/services/offlineCache';
+import { saveCatalogCache, getCatalogCache, saveClientHistoryCache, getClientHistoryCache, saveCategoriesCache, getCategoriesCache } from '@/services/offlineCache';
 
 export async function getSellerDashboard(): Promise<SellerDashboardData> {
   return await apiFetch<SellerDashboardData>('/seller/dashboard');
@@ -20,11 +20,78 @@ export async function getSellerClients(q?: string, scope: 'cartera' | 'all' = 'a
 export async function getClientOrderHistory(clientId: string): Promise<any[]> {
   try {
     const data = await apiFetch<any[]>(`/seller/clients/${clientId}/history`);
-    if (Array.isArray(data)) return data;
-    return [];
+    if (Array.isArray(data) && data.length > 0) {
+      await saveClientHistoryCache(clientId, data);
+      return data;
+    }
   } catch {
-    return [];
+    // Fallback a caché offline si no hay conexión
   }
+  return await getClientHistoryCache(clientId);
+}
+
+export interface VentaDirectaPayload {
+  cliente_id?: string;
+  cliente_nombre?: string;
+  cliente_codigo?: string;
+  items: Array<{
+    product_id: string;
+    codigo?: string;
+    descripcion?: string;
+    unidad?: string;
+    cantidad: number;
+    precio: number;
+    iva_tasa?: number;
+  }>;
+  condicion?: 'contado' | 'credito';
+  forma_pago?: string;
+  notas?: string;
+  latitud?: number;
+  longitud?: number;
+  idempotency_key: string;
+  fecha?: string;
+}
+
+export async function createVentaDirecta(payload: VentaDirectaPayload): Promise<any> {
+  return await apiFetch<any>('/seller/venta-directa', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface FacturarSolicitudPayload {
+  sale_id?: string;
+  venta_id?: string;
+  folio: string;
+  rfc?: string;
+  cliente_id?: string;
+  cliente_rfc?: string;
+  razon_social?: string;
+  uso_cfdi?: string;
+  regimen_fiscal?: string;
+  correo?: string;
+  email?: string;
+  confirmado_no_propio?: boolean;
+}
+
+export async function solicitarFacturacion(payload: FacturarSolicitudPayload): Promise<any> {
+  return await apiFetch<any>('/seller/facturar-solicitud', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getCategoriesList(): Promise<any[]> {
+  try {
+    const data = await apiFetch<any[]>('/categories');
+    if (Array.isArray(data) && data.length > 0) {
+      await saveCategoriesCache(data);
+      return data;
+    }
+  } catch {
+    // Fallback a caché local
+  }
+  return await getCategoriesCache();
 }
 
 export interface AbonoSolicitudPayload {

@@ -304,11 +304,11 @@ export default function VisitasScreen() {
           },
         });
         const nowStr = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-        setCurrentGps((prev) => ({ ...prev, ultimaSincronizacion: `${nowStr} (en cola)` }));
+        setCurrentGps((prev) => ({ ...prev, ultimaSincronizacion: `${nowStr} (auto-activo al reconectar)` }));
         if (!silent) {
           Alert.alert(
-            'Ubicación Guardada Localmente',
-            `Sin señal celular. Tu ubicación (${coords.latitud}, ${coords.longitud}) quedó guardada en el teléfono y se transmitirá al reconectar.`
+            'Sin Señal de Datos',
+            'Tu ubicación quedó registrada en el dispositivo. En cuanto se detecte señal de red celular se activará y transmitirá automáticamente.'
           );
         }
       }
