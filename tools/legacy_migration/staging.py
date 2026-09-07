@@ -131,19 +131,146 @@ class Stager:
 
     # --------------------------------------------------- estado RYSA (lectura)
     async def load_rysa(self, conn) -> None:
-        self.log("leyendo clientes/productos RYSA (solo lectura) ...")
+        self.log("leyendo clientes/productos RYSA ...")
         self.rysa_clients: dict[str, str] = {}
         rows = await conn.fetch(
             "SELECT doc->>'codigo' AS codigo, id FROM clients "
             "WHERE doc->>'codigo' IS NOT NULL AND doc->>'codigo' <> ''")
         for r in rows:
             self.rysa_clients.setdefault(r["codigo"].strip(), r["id"])
+
+        # Si no hay clientes en RYSA (entorno limpio), tomar todo de legacy desde 0 o actualizar
+        if len(self.rysa_clients) == 0:
+            self.log("base limpia sin clientes: sincronizando desde CLIENTES.dbf y ARTICULO.dbf...")
+            await self._sync_clients_and_products(conn)
+            rows = await conn.fetch(
+                "SELECT doc->>'codigo' AS codigo, id FROM clients "
+                "WHERE doc->>'codigo' IS NOT NULL AND doc->>'codigo' <> ''")
+            for r in rows:
+                self.rysa_clients.setdefault(r["codigo"].strip(), r["id"])
+
         self.rysa_products: dict[str, str] = {}
         rows = await conn.fetch(
             "SELECT doc->>'codigo' AS codigo, id FROM products "
             "WHERE doc->>'codigo' IS NOT NULL AND doc->>'codigo' <> ''")
         for r in rows:
             self.rysa_products.setdefault(r["codigo"].strip(), r["id"])
+
+    async def _sync_clients_and_products(self, conn) -> None:
+        """Toma clientes y productos de legacy como si fuera de 0 y si existen los actualiza."""
+        import uuid
+        now_str = datetime.now(timezone.utc).isoformat()
+        d = self.dir
+
+        # 1. Clientes
+        cli_file = d / "CLIENTES.dbf"
+        if cli_file.is_file():
+            self.log("  · importando/actualizando clientes desde CLIENTES.dbf ...")
+            for r in iter_records(cli_file):
+                clave = (r.get("CLAVE") or "").strip()
+                if not clave:
+                    continue
+                nombre = (r.get("NOMBRE") or "").strip()
+                rfc = (r.get("RFC") or "").strip()
+                dir_ = (r.get("DIRECCION") or "").strip()
+                tel = (r.get("TELEFONO") or "").strip()
+                saldo = round(float(r.get("SALDO") or 0.0), 2)
+                dias_cred = int(r.get("DIASCRED") or 0)
+                lim_cred = round(float(r.get("LIMCRED") or 0.0), 2)
+                is_del = r.get("_deleted", False)
+
+                existing = await conn.fetchrow(
+                    "SELECT id, doc FROM clients WHERE doc->>'codigo' = $1", clave
+                )
+                if existing:
+                    cid = existing["id"]
+                    doc = json.loads(existing["doc"]) if isinstance(existing["doc"], str) else dict(existing["doc"])
+                    doc["nombre"] = nombre
+                    doc["rfc"] = rfc
+                    doc["direccion"] = dir_
+                    doc["telefono"] = tel
+                    doc["saldo"] = saldo
+                    doc["legacy_master_saldo"] = saldo
+                    doc["dias_credito"] = dias_cred
+                    doc["limite_credito"] = lim_cred
+                    doc["estado"] = "inactivo" if is_del else "activo"
+                    doc["updated_at"] = now_str
+                    await conn.execute(
+                        "UPDATE clients SET saldo = $1, limite_credito = $2, doc = $3::jsonb WHERE id = $4",
+                        saldo, lim_cred, json.dumps(doc, ensure_ascii=False, default=str), cid
+                    )
+                elif not is_del:
+                    cid = uuid.uuid4().hex
+                    doc = {
+                        "id": cid, "_id": cid, "codigo": clave, "nombre": nombre, "rfc": rfc,
+                        "direccion": dir_, "telefono": tel, "saldo": saldo, "legacy_master_saldo": saldo,
+                        "dias_credito": dias_cred, "limite_credito": lim_cred,
+                        "estado": "activo", "tipo": "publico",
+                        "created_at": now_str, "updated_at": now_str
+                    }
+                    await conn.execute(
+                        'INSERT INTO clients ("_id", "id", "doc", "created_at", "saldo", "limite_credito") '
+                        'VALUES ($1, $1, $2::jsonb, now(), $3, $4)',
+                        cid, json.dumps(doc, ensure_ascii=False, default=str), saldo, lim_cred
+                    )
+
+        # 2. Productos
+        art_file = d / "ARTICULO.dbf"
+        if art_file.is_file():
+            self.log("  · importando/actualizando productos desde ARTICULO.dbf ...")
+            for r in iter_records(art_file):
+                cod = (r.get("CODIGO") or "").strip()
+                if not cod:
+                    continue
+                costo = round(float(r.get("COSTO") or 0.0), 4)
+                precio = round(float(r.get("PRECIO1") or 0.0), 2)
+                exist = round(float(r.get("EXISTENCIA") or 0.0), 3)
+                min_stock = round(float(r.get("MINIMO") or 0.0), 3)
+                desc = (r.get("DESCRIP") or "").strip()
+                linea = (r.get("LINEA") or "").strip()
+                um = (r.get("UNIDAD") or "").strip() or "PZA"
+                is_del = r.get("_deleted", False)
+
+                existing = await conn.fetchrow(
+                    "SELECT id, doc FROM products WHERE doc->>'codigo' = $1", cod
+                )
+                if existing:
+                    pid = existing["id"]
+                    doc = json.loads(existing["doc"]) if isinstance(existing["doc"], str) else dict(existing["doc"])
+                    doc["descripcion"] = desc
+                    doc["linea"] = linea
+                    doc["unidad_medida"] = um
+                    doc["costo"] = costo
+                    doc["precio_con_iva"] = precio
+                    doc["precio_sin_iva"] = round(precio / 1.16, 2)
+                    doc["existencia"] = exist
+                    doc["stock_minimo"] = min_stock
+                    doc["estado"] = "inactivo" if is_del else "activo"
+                    doc["updated_at"] = now_str
+                    await conn.execute(
+                        "UPDATE products SET existencia = $1, precio_con_iva = $2, costo = $3, doc = $4::jsonb WHERE id = $5",
+                        exist, precio, costo, json.dumps(doc, ensure_ascii=False, default=str), pid
+                    )
+                elif not is_del:
+                    pid = uuid.uuid4().hex
+                    pres_id = f"pres_{pid[:8]}"
+                    doc = {
+                        "id": pid, "_id": pid, "codigo": cod, "descripcion": desc, "linea": linea,
+                        "unidad_medida": um, "costo": costo, "precio_con_iva": precio,
+                        "precio_sin_iva": round(precio / 1.16, 2),
+                        "existencia": exist, "stock_minimo": min_stock, "estado": "activo",
+                        "presentaciones": [{
+                            "id": pres_id, "nombre": um, "factor": 1.0,
+                            "codigo_barras": cod, "precio": precio, "costo": costo, "es_base": True,
+                            "es_predeterminada": True
+                        }],
+                        "created_at": now_str, "updated_at": now_str
+                    }
+                    await conn.execute(
+                        'INSERT INTO products ("_id", "id", "doc", "created_at", "existencia", "precio_con_iva", "costo") '
+                        'VALUES ($1, $1, $2::jsonb, now(), $3, $4, $5)',
+                        pid, json.dumps(doc, ensure_ascii=False, default=str), exist, precio, costo
+                    )
 
     # ------------------------------------------------------------ clasificación
     def classify(self) -> None:

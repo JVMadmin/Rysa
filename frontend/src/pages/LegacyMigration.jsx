@@ -13,7 +13,7 @@ import {
 import { toast } from "sonner";
 import {
   AlertTriangle, CheckCircle2, Clock, Database, FileDown, History,
-  Loader2, Lock, RefreshCw, RotateCcw, ShieldAlert, Sparkles, Upload,
+  Loader2, Lock, RefreshCw, RotateCcw, ShieldAlert, Sparkles, Upload, Users,
 } from "lucide-react";
 
 const TERRACOTA = "#C1401E";
@@ -111,6 +111,25 @@ export default function LegacyMigration() {
       setDataBusy(false);
     }
   }, []);
+
+  const [syncBusy, setSyncBusy] = useState(false);
+  const sincronizarMaestros = async () => {
+    setSyncBusy(true);
+    try {
+      const { data } = await api.post("/legacy/replace/apply", {});
+      if (data?.ok) {
+        toast.success(`Catálogo sincronizado: ${data.estadisticas?.clientes?.creados ?? 0} clientes creados/actualizados, ${data.estadisticas?.productos?.creados ?? 0} productos.`);
+        cargar();
+        cargarDatos();
+      } else {
+        toast.error("Error sincronizando catálogo");
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "No se pudo sincronizar el catálogo");
+    } finally {
+      setSyncBusy(false);
+    }
+  };
 
   const cargarSnapshots = useCallback(async () => {
     try {
@@ -422,11 +441,17 @@ export default function LegacyMigration() {
             <input ref={zipRef} type="file" accept=".zip" data-testid="legacy-zip-input"
                    className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm hover:file:bg-slate-200" />
             <Button style={{ background: TERRACOTA }} className="hover:opacity-90 text-white"
-                    disabled={dataBusy} onClick={desplegarZip} data-testid="legacy-zip-deploy">
+                    disabled={dataBusy || syncBusy} onClick={desplegarZip} data-testid="legacy-zip-deploy">
               {dataBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Upload className="w-4 h-4 mr-1" />}
               Desplegar ZIP
             </Button>
-            <Button variant="outline" onClick={cargarDatos} disabled={dataBusy}
+            <Button variant="outline" onClick={sincronizarMaestros} disabled={dataBusy || syncBusy}
+                    title="Importa o actualiza clientes y productos desde CLIENTES.dbf y ARTICULO.dbf"
+                    data-testid="legacy-sync-masters">
+              {syncBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Users className="w-4 h-4 mr-1 text-[#C1401E]" />}
+              Sincronizar Catálogo Maestro
+            </Button>
+            <Button variant="outline" onClick={cargarDatos} disabled={dataBusy || syncBusy}
                     data-testid="legacy-datos-refresh">
               <RefreshCw className={`w-4 h-4 mr-1 ${dataBusy ? "animate-spin" : ""}`} /> Refrescar
             </Button>
