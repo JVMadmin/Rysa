@@ -19,7 +19,7 @@ import storage
 
 from deps import (
     db, iso_now, now_utc, get_current_user, require_permission,
-    user_has_permission, log_audit,
+    user_has_permission, log_audit, next_counter,
 )
 
 router = APIRouter(prefix="/api")
@@ -553,13 +553,19 @@ class VentaDirectaInput(BaseModel):
 
 
 class FacturarSolicitudInput(BaseModel):
-    sale_id: str
+    sale_id: Optional[str] = ""
+    venta_id: Optional[str] = ""
     folio: str
     rfc: Optional[str] = ""
+    cliente_id: Optional[str] = ""
+    cliente_nombre: Optional[str] = ""
+    cliente_rfc: Optional[str] = ""
     razon_social: Optional[str] = ""
     uso_cfdi: Optional[str] = "G03"
     regimen_fiscal: Optional[str] = ""
     correo: Optional[str] = ""
+    email: Optional[str] = ""
+    confirmado_no_propio: Optional[bool] = False
 
 
 @router.get("/seller/clients/{client_id}/history")
@@ -721,6 +727,7 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
             doc = json.loads(row[1]) if isinstance(row[1], str) else row[1]
             return {
                 "ok": True,
+                "status": "success",
                 "duplicado": True,
                 "venta": doc,
                 "id": doc.get("id"),
@@ -822,6 +829,7 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
 
     return {
         "ok": True,
+        "status": "success",
         "duplicado": False,
         "venta": doc,
         "id": sale_id,
@@ -835,17 +843,25 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
 async def seller_facturar_solicitud(data: FacturarSolicitudInput, user: dict = Depends(get_current_user)):
     """Registra la solicitud de facturación para una venta del histórico."""
     solicitud_id = _uid()
+    sid = data.sale_id or data.venta_id or ""
+    rfc = data.rfc or data.cliente_rfc or ""
+    razon = data.razon_social or data.cliente_nombre or ""
+    email = data.correo or data.email or ""
+
     doc = {
         "id": solicitud_id,
-        "sale_id": data.sale_id,
+        "sale_id": sid,
         "folio": data.folio,
         "solicitado_por_id": user["id"],
         "solicitado_por_nombre": user.get("name", "Asesor"),
-        "rfc": data.rfc,
-        "razon_social": data.razon_social,
+        "cliente_id": data.cliente_id,
+        "cliente_nombre": razon,
+        "rfc": rfc,
+        "razon_social": razon,
         "uso_cfdi": data.uso_cfdi,
         "regimen_fiscal": data.regimen_fiscal,
-        "correo": data.correo,
+        "correo": email,
+        "confirmado_no_propio": bool(data.confirmado_no_propio),
         "estado": "pendiente_emision",
         "fecha": iso_now(),
     }
@@ -854,11 +870,12 @@ async def seller_facturar_solicitud(data: FacturarSolicitudInput, user: dict = D
         usuario=user,
         accion="SOLICITUD_FACTURACION_MOVIL",
         entidad="FACTURA",
-        registro_id=data.sale_id,
-        detalle=f"Solicitud de factura para folio {data.folio} ({data.rfc})"
+        registro_id=sid or data.folio,
+        detalle=f"Solicitud de factura para folio {data.folio} ({rfc})"
     )
     return {
         "ok": True,
+        "status": "success",
         "solicitud_id": solicitud_id,
         "mensaje": f"Solicitud de facturación para folio {data.folio} registrada correctamente."
     }
