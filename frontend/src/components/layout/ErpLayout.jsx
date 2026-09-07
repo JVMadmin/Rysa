@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
   UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3, Smartphone, Bug, Wrench,
-  Search, ChevronRight, Radar, Route as RouteIcon, ShoppingBag, Truck, Images,
+  Search, ChevronRight, ChevronDown, Radar, Route as RouteIcon, ShoppingBag, Truck, Images,
 } from "lucide-react";
 import {
   Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
@@ -18,15 +18,15 @@ const NAV = [
   // PRINCIPAL
   { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, section: "PRINCIPAL" },
   
-  // OPERACIÓN
-  { to: "/app/pos", label: "Punto de venta", icon: ShoppingCart, perm: "venta.crear", section: "OPERACIÓN" },
-  { to: "/app/ventas", label: "Ventas", icon: Receipt, perm: "venta.crear", section: "OPERACIÓN" },
-  { to: "/app/catalogo", label: "Catálogo", icon: Images, perm: "catalogo.ver", section: "OPERACIÓN" },
-  { to: "/app/inventario", label: "Inventario", icon: Package, perm: "producto.crear", section: "OPERACIÓN" },
+  // OPERACIÓN Y VENTAS
+  { to: "/app/pos", label: "Punto de venta", icon: ShoppingCart, perm: "venta.crear", section: "OPERACIÓN Y VENTAS" },
+  { to: "/app/ventas", label: "Ventas", icon: Receipt, perm: "venta.crear", section: "OPERACIÓN Y VENTAS" },
+  { to: "/app/catalogo", label: "Catálogo", icon: Images, perm: "catalogo.ver", section: "OPERACIÓN Y VENTAS" },
+  { to: "/app/inventario", label: "Inventario", icon: Package, perm: "producto.crear", section: "OPERACIÓN Y VENTAS" },
   // Categorías vive DENTRO de Inventario (botón en la cabecera de Productos).
-  { to: "/app/clientes", label: "Clientes", icon: Users, perm: "clientes.gestionar", section: "OPERACIÓN" },
-  { to: "/app/cxc", label: "Cuentas por cobrar", icon: HandCoins, perm: "cxc.ver", section: "OPERACIÓN" },
-  { to: "/app/recargas", label: "Recargas y Servicios", icon: Smartphone, perm: "recargas.usar", section: "OPERACIÓN" },
+  { to: "/app/clientes", label: "Clientes", icon: Users, perm: "clientes.gestionar", section: "OPERACIÓN Y VENTAS" },
+  { to: "/app/cxc", label: "Cuentas por cobrar", icon: HandCoins, perm: "cxc.ver", section: "OPERACIÓN Y VENTAS" },
+  { to: "/app/recargas", label: "Recargas y Servicios", icon: Smartphone, perm: "recargas.usar", section: "OPERACIÓN Y VENTAS" },
   
   // ASAUSTECIMIENTO
   { to: "/app/compras", label: "Compras y gastos", icon: ShoppingBag, perm: "compra.ver", section: "ABASTECIMIENTO" },
@@ -66,8 +66,34 @@ export default function ErpLayout() {
   const logoUrl = logo || "";
   const nav = useNavigate();
   const { pathname } = useLocation();
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // Auto-ocultado automático a los 5 segundos de carga
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setCollapsed(true);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Acordeón interactivo para secciones del menú lateral
+  const [openSections, setOpenSections] = useState({
+    "PRINCIPAL": true,
+    "OPERACIÓN Y VENTAS": true,
+    "ABASTECIMIENTO": false,
+    "COMERCIAL": false,
+    "FUERZA DE VENTAS": false,
+    "ADMINISTRACIÓN": false,
+    "SISTEMA": false,
+  });
+
+  const toggleSection = (sec) => {
+    setOpenSections((prev) => ({
+      ...prev,
+      [sec]: !prev[sec],
+    }));
+  };
 
   const doLogout = async () => { await logout(); nav("/login"); };
 
@@ -162,7 +188,7 @@ export default function ErpLayout() {
         return groups;
       })();
 
-      const sectionsOrder = ["PRINCIPAL", "OPERACIÓN", "ABASTECIMIENTO", "COMERCIAL", "FUERZA DE VENTAS", "ADMINISTRACIÓN", "SISTEMA"];
+      const sectionsOrder = ["PRINCIPAL", "OPERACIÓN Y VENTAS", "ABASTECIMIENTO", "COMERCIAL", "FUERZA DE VENTAS", "ADMINISTRACIÓN", "SISTEMA"];
 
   return (
     <div className="min-h-screen flex bg-canvas">
@@ -197,43 +223,55 @@ export default function ErpLayout() {
         </div>
 
         <nav className={collapsed ? "flex-1 flex flex-col items-center gap-1.5 overflow-y-auto" : "flex-1 space-y-1 overflow-y-auto"}>
-          {sectionsOrder.map((sec, si) => {
+          {sectionsOrder.map((sec) => {
             const items = visibleGrouped[sec];
             if (!items || items.length === 0) return null;
+            const isOpen = openSections[sec] !== false;
             return (
-              <React.Fragment key={sec}>
+              <div key={sec} className="w-full">
                 {/* Separador de sección */}
-                {collapsed && (
+                {collapsed ? (
                   <div className="w-full h-px bg-slate-200 my-1" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(sec)}
+                    className="w-full flex items-center justify-between px-2 py-1 my-0.5 text-[10px] uppercase tracking-wider text-slate-400 font-semibold hover:text-slate-700 transition-colors"
+                  >
+                    <span>{sec}</span>
+                    {isOpen ? (
+                      <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    )}
+                  </button>
                 )}
-                {!collapsed && (
-                  <div className="px-2 py-1">
-                    <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold px-2">
-                      {sec}
-                    </div>
-                    <div className="h-px bg-slate-200 mt-1" />
+                {/* Items del acordeón */}
+                {(!collapsed ? isOpen : true) && (
+                  <div className={collapsed ? "flex flex-col items-center gap-1" : "space-y-0.5"}>
+                    {items.map((n) => (
+                      <NavLink
+                        key={n.to}
+                        to={n.to}
+                        title={n.label}
+                        data-testid={`nav-${n.to.split("/").pop()}`}
+                        className={({ isActive }) =>
+                          collapsed
+                            ? iconClass({ isActive })
+                            : `flex items-center gap-3 px-3 h-10 rounded-xl text-sm font-medium transition-colors ${
+                                isActive
+                                  ? "bg-terracota text-white shadow-sm"
+                                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                              }`
+                        }
+                      >
+                        <n.icon className="w-5 h-5 shrink-0" strokeWidth={2} />
+                        {!collapsed && <span className="truncate">{n.label}</span>}
+                      </NavLink>
+                    ))}
                   </div>
                 )}
-                {/* Items del Ítem */}
-                {items.map((n) => (
-                  <NavLink
-                    key={n.to}
-                    to={n.to}
-                    title={n.label}
-                    data-testid={`nav-${n.to.split("/").pop()}`}
-                    className={({ isActive }) =>
-                      collapsed
-                        ? iconClass({ isActive })
-                        : `flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium transition-colors ${
-                            isActive ? "bg-terracota text-white" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-                          }`
-                    }
-                  >
-                    <n.icon className="w-5 h-5 shrink-0" strokeWidth={2} />
-                    {!collapsed && <span>{n.label}</span>}
-                  </NavLink>
-                ))}
-              </React.Fragment>
+              </div>
             );
           })}
         </nav>

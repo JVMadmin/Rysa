@@ -120,13 +120,13 @@ ROLE_PERMISSIONS = {
         "abono.ver", "abono.comprobante", "cuentas.ver",
         "pedido.gestionar", "cxp.pagar",
     },
-    # VENDEDOR (piso): sucursal, caja física, POS, facturación y recargas.
-    # SIN: inventario completo, datos sensibles de clientes (módulo), reportes
-    # completos, finanzas ni actividad de campo.
+    # VENDEDOR (piso): sucursal, caja física, POS, facturación, recargas y apoyo en campo.
     "vendedor": {
         "venta.crear", "venta.cancelar", "venta.descuento", "venta.facturar",
         "recargas.usar", "catalogo.ver", "caja.abrir", "caja.cerrar",
         "caja.ver", "caja.retiro", "caja.entrada", "pedido.gestionar",
+        "cliente.crear", "visita.crear", "visita.editar", "visita.ver", "visita.cancelar",
+        "cxc.abono", "cxc.ver",
     },
     # CAJERA: opera caja y POS (facturación y recargas) sin cotizaciones
     # complejas de campo; mismo alcance restringido que vendedor de piso.
@@ -136,11 +136,12 @@ ROLE_PERMISSIONS = {
         "caja.entrada", "pedido.gestionar",
     },
     # VENDEDOR DE CAMPO: celular/APK — visitas, rutas, GPS, levanta pedidos
-    # y venta directa opcional. SIN facturación ni recargas.
+    # y cobros de su cartera.
     "vendedor_campo": {
         "venta.crear", "cliente.crear", "visita.crear", "visita.editar",
         "visita.ver", "visita.cancelar", "catalogo.ver", "pedido.gestionar",
         "caja.abrir", "caja.cerrar", "caja.ver", "caja.retiro",
+        "cxc.abono", "cxc.ver",
     },
     # Supervisor/Gerente comercial: monitoreo de vendedores de campo,
     # cartera, CxC, actividad, mapa y autorizaciones comerciales.

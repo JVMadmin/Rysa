@@ -846,6 +846,7 @@ class PedidoInput(BaseModel):
     items: List[PedidoItemInput] = Field(default_factory=list)
     estado: str = "borrador"  # borrador | confirmado | surtido | convertido | cancelado
     sucursal_id: Optional[str] = None
+    idempotency_key: Optional[str] = None  # Evita pedidos duplicados por reintentos de red o doble clic
 
 class PedidoEstadoInput(BaseModel):
     estado: str  # borrador | confirmado | surtido | cancelado
@@ -967,7 +968,9 @@ def _iso_to_dt(value) -> Optional[datetime]:
 
 
 def _cookie_secure() -> bool:
-    return os.environ.get("ENVIRONMENT", "development").lower() == "production"
+    env = os.environ.get("ENVIRONMENT", "development").lower()
+    base = os.environ.get("PUBLIC_BASE_URL", "").lower()
+    return env == "production" or base.startswith("https://")
 
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
@@ -1934,13 +1937,21 @@ async def create_client(data: ClientInput, user: dict = Depends(require_permissi
         raise HTTPException(400, f"La CLAVE '{codigo}' ya existe")
     doc = normalize_client_doc(data.model_dump())
     # Un vendedor registra el cliente bajo su propia cartera en campo.
-    if not doc.get("vendedor_id") and user.get("role") in ("vendedor", "supervisor"):
+    if not doc.get("vendedor_id") and user.get("role") in ("vendedor", "vendedor_campo", "supervisor"):
         doc["vendedor_id"] = user["id"]
     if not doc.get("vendedor") and doc.get("vendedor_id"):
         doc["vendedor"] = user.get("name", "")
+
+    # Restricción de campo: si el usuario no autoriza crédito, inicia estrictamente en CONTADO sin crédito.
+    if not user_has_permission(user, "credito.autorizar"):
+        doc["credito_autorizado"] = False
+        doc["limite_credito"] = 0.0
+        doc["dias_credito"] = 0
+        doc["condicion_pago"] = "contado"
+        doc["saldo"] = 0.0
+
     doc["codigo"] = codigo
     doc["id"] = uid()
-    doc["saldo"] = float(data.saldo or 0.0)
     doc["created_at"] = iso_now()
     await db.clients.insert_one(doc)
     await log_audit(user, "crear", "cliente", doc["id"], doc["nombre"])
@@ -2181,24 +2192,34 @@ async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = 
     if con_existencia:
         flt["existencia"] = {"$gt": 0}
     docs = await db.products.find(
-        flt, {"_id": 0, "id": 1, "codigo": 1, "descripcion": 1,
-              "clasificacion": 1, "categoria": 1, "imagen": 1, "IMAGEN": 1,
-              "precios": 1, "existencia": 1}).sort("descripcion", 1).to_list(5000)
+        flt, {"_id": 0, "id": 1, "codigo": 1, "sku": 1, "descripcion": 1,
+              "clasificacion": 1, "categoria": 1, "imagen": 1, "IMAGEN": 1, "imagen_url": 1,
+              "precios": 1, "existencia": 1, "unidad_medida": 1, "unimedida": 1,
+              "iva_tasa": 1, "impuesto": 1, "precio1": 1, "precio2": 1,
+              "precio_con_iva": 1, "precio_sin_iva": 1}).sort("descripcion", 1).to_list(5000)
     out = []
     for d in docs:
-        precio = ""
+        precio = 0.0
         try:
-            precio = float(((d.get("precios") or [{}])[0]).get("precio_con_iva") or 0)
+            precio = float(d.get("precio_con_iva") or ((d.get("precios") or [{}])[0]).get("precio_con_iva") or d.get("precio1") or 0)
         except Exception:
             precio = 0.0
         out.append({
             "id": d.get("id"),
             "nombre": d.get("descripcion") or "",
-            "codigo": d.get("codigo") or "",
+            "descripcion": d.get("descripcion") or "",
+            "codigo": d.get("codigo") or d.get("sku") or "",
+            "sku": d.get("codigo") or d.get("sku") or "",
             "categoria": d.get("clasificacion") or d.get("categoria") or "",
-            "imagen": d.get("imagen") or d.get("IMAGEN") or "",
+            "imagen": d.get("imagen") or d.get("IMAGEN") or d.get("imagen_url") or "",
             "precio_publico": round(precio, 2),
+            "precio": round(precio, 2),
+            "precio1": float(d.get("precio1") or precio),
+            "precio2": float(d.get("precio2") or precio),
             "existencia": round(float(d.get("existencia") or 0), 3),
+            "unidad_medida": d.get("unidad_medida") or d.get("unimedida") or "PZA",
+            "iva_tasa": float(d.get("iva_tasa") or d.get("impuesto") or 16.0),
+            "precios": d.get("precios") or [],
         })
     return out
 
@@ -3240,6 +3261,13 @@ async def pedido_detail(ped_id: str, user: dict = Depends(get_current_user)):
 async def pedido_create(data: PedidoInput, user: dict = Depends(require_permission("pedido.gestionar"))):
     if not data.items:
         raise HTTPException(400, "Agrega al menos un producto al pedido")
+
+    # Idempotencia en pedidos de campo: evita folios y registros duplicados por reintentos de red o doble pulsación
+    if data.idempotency_key:
+        existing = await db.pedidos.find_one({"idempotency_key": data.idempotency_key}, {"_id": 0})
+        if existing:
+            return existing
+
     cliente = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0}) if data.cliente_id else None
     cliente_nombre = cliente["nombre"] if cliente else "Público General"
     items = []
@@ -3272,6 +3300,7 @@ async def pedido_create(data: PedidoInput, user: dict = Depends(require_permissi
         "subtotal": round(subtotal, 2), "iva": iva, "total": round(subtotal + iva, 2),
         "estado": "borrador", "sucursal_id": data.sucursal_id or user.get("sucursal_id"),
         "usuario_id": user["id"], "usuario_nombre": user["name"],
+        "idempotency_key": data.idempotency_key,
         "creado_en": iso_now(), "actualizado_en": iso_now(),
     }
     await db.pedidos.insert_one(doc)
@@ -3743,6 +3772,151 @@ async def cxc_abono(client_id: str, data: AbonoInput, user: dict = Depends(requi
             user=user, caja=caja, folio=folio)
     except _pgcxc.CxcError as e:
         raise HTTPException(e.status, e.message)
+
+
+# =========================================================================
+# SOLICITUDES DE ABONO DE CAMPO CON EVIDENCIA FOTOGRÁFICA
+# =========================================================================
+class AbonoSolicitudInput(BaseModel):
+    cliente_id: str
+    monto: float = Field(gt=0)
+    metodo: str = "efectivo"
+    referencia: Optional[str] = ""
+    nota: Optional[str] = ""
+    evidencia_b64: Optional[str] = None
+    foto_url: Optional[str] = None
+
+@api.post("/seller/abono-solicitud")
+async def seller_solicitar_abono(data: AbonoSolicitudInput, user: dict = Depends(get_current_user)):
+    """El asesor de campo envía una solicitud de abono con evidencia fotográfica (ficha o transferencia).
+    Inicia en estado 'pendiente_aprobacion' hasta que Gerencia/Admin lo apruebe."""
+    cli = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    monto = round(float(data.monto), 2)
+    if monto <= 0:
+        raise HTTPException(400, "El monto debe ser mayor a cero")
+
+    evidencia_path = ""
+    evidencia_url = data.foto_url or ""
+    if data.evidencia_b64:
+        try:
+            import base64
+            raw_b64 = data.evidencia_b64
+            if "," in raw_b64:
+                header, raw_b64 = raw_b64.split(",", 1)
+            img_bytes = base64.b64decode(raw_b64)
+            path = f"abonos_evidencia/AB-EVID-{int(now_utc().timestamp())}-{uid()[:6]}.jpg"
+            storage.put_object(path, img_bytes, "image/jpeg")
+            evidencia_path = path
+            evidencia_url = f"/api/solicitudes-abono/archivo/{os.path.basename(path)}"
+        except Exception as e:
+            logger.warning(f"Error guardando evidencia de abono: {e}")
+
+    folio_sol = await next_counter("sol_abono", "SAB", 6)
+    doc = {
+        "id": uid(),
+        "folio": folio_sol,
+        "cliente_id": data.cliente_id,
+        "cliente_nombre": cli.get("nombre") or "Cliente",
+        "cliente_codigo": cli.get("codigo") or "",
+        "vendedor_id": user["id"],
+        "vendedor_nombre": user["name"],
+        "monto": monto,
+        "metodo": data.metodo,
+        "referencia": (data.referencia or "").strip(),
+        "nota": (data.nota or "").strip(),
+        "evidencia_path": evidencia_path,
+        "evidencia_url": evidencia_url or data.foto_url or "",
+        "evidencia_b64": data.evidencia_b64 if len(data.evidencia_b64 or "") < 500000 else None,
+        "estado": "pendiente_aprobacion",
+        "created_at": iso_now(),
+        "reviewed_at": "",
+        "reviewed_by": "",
+        "motivo_rechazo": "",
+        "abono_folio": "",
+    }
+    await db.solicitudes_abono.insert_one(doc)
+    await log_audit(user, "solicitud_abono_creada", "solicitud_abono", doc["id"],
+                    f"{folio_sol} - {cli.get('nombre')} - ${monto}")
+    return {"ok": True, "folio": folio_sol, "mensaje": "Solicitud de abono enviada a revisión gerencial."}
+
+@api.get("/solicitudes-abono")
+async def listar_solicitudes_abono(estado: Optional[str] = None, user: dict = Depends(require_permission("cxc.abono"))):
+    """Lista las solicitudes de abono en campo para aprobación de gerencia."""
+    flt = {}
+    if estado and estado != "todos":
+        flt["estado"] = estado
+    docs = await db.solicitudes_abono.find(flt, {"_id": 0}).sort("created_at", -1).to_list(200)
+    return docs
+
+@api.get("/solicitudes-abono/{sol_id}")
+async def detalle_solicitud_abono(sol_id: str, user: dict = Depends(require_permission("cxc.abono"))):
+    doc = await db.solicitudes_abono.find_one({"id": sol_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Solicitud no encontrada")
+    return doc
+
+@api.post("/solicitudes-abono/{sol_id}/aprobar")
+async def aprobar_solicitud_abono(sol_id: str, user: dict = Depends(require_permission("cxc.abono"))):
+    """Aprobación gerencial: aplica el abono real al saldo del cliente vía abonar_pg."""
+    doc = await db.solicitudes_abono.find_one({"id": sol_id})
+    if not doc:
+        raise HTTPException(404, "Solicitud no encontrada")
+    if doc.get("estado") != "pendiente_aprobacion":
+        raise HTTPException(400, f"La solicitud ya fue procesada (estado: {doc.get('estado')})")
+
+    caja = await caja_abierta_de(user["id"])
+    folio_abono = await next_counter("abono", "AB", 6)
+    try:
+        res = await _pgcxc.abonar_pg(
+            client_id=doc["cliente_id"], monto=float(doc["monto"]),
+            metodo=doc.get("metodo", "efectivo"),
+            referencia=f"CAMPO-{doc.get('folio')} {doc.get('referencia','')}".strip(),
+            nota=f"Abono en campo autorizado. {doc.get('nota','')}".strip(),
+            user=user, caja=caja, folio=folio_abono
+        )
+        ab_folio = res.get("abono", {}).get("folio", folio_abono)
+        await db.solicitudes_abono.update_one({"id": sol_id}, {"$set": {
+            "estado": "aprobado",
+            "reviewed_by": user["name"],
+            "reviewed_at": iso_now(),
+            "abono_folio": ab_folio
+        }})
+        await log_audit(user, "solicitud_abono_aprobada", "solicitud_abono", sol_id, f"Abono {ab_folio}")
+        return {"ok": True, "abono_folio": ab_folio}
+    except _pgcxc.CxcError as e:
+        raise HTTPException(e.status, e.message)
+
+@api.post("/solicitudes-abono/{sol_id}/rechazar")
+async def rechazar_solicitud_abono(sol_id: str, payload: dict, user: dict = Depends(require_permission("cxc.abono"))):
+    """Rechaza la solicitud de abono con un motivo."""
+    doc = await db.solicitudes_abono.find_one({"id": sol_id})
+    if not doc:
+        raise HTTPException(404, "Solicitud no encontrada")
+    if doc.get("estado") != "pendiente_aprobacion":
+        raise HTTPException(400, "La solicitud ya fue procesada")
+    motivo = str(payload.get("motivo") or "Evidencia no válida").strip()
+    await db.solicitudes_abono.update_one({"id": sol_id}, {"$set": {
+        "estado": "rechazado",
+        "reviewed_by": user["name"],
+        "reviewed_at": iso_now(),
+        "motivo_rechazo": motivo
+    }})
+    await log_audit(user, "solicitud_abono_rechazada", "solicitud_abono", sol_id, motivo)
+    return {"ok": True}
+
+@api.get("/solicitudes-abono/archivo/{filename}")
+async def ver_solicitud_abono_archivo(filename: str, user: dict = Depends(require_permission("cxc.abono"))):
+    """Descarga/visualización de la evidencia fotográfica de abono en campo."""
+    path = f"abonos_evidencia/{filename}"
+    try:
+        data, ctype = storage.get_object(path)
+    except Exception:
+        raise HTTPException(404, "Archivo no disponible")
+    from fastapi.responses import Response as FastResponse
+    return FastResponse(content=data, media_type=ctype or "image/jpeg")
+
 
 # =========================================================================
 # INTERÉS MORATORIO: recálculo de deuda vencida (admin/gerente)

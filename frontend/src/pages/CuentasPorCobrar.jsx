@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useBranding } from "@/hooks/useBranding";
@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock, MessageCircle, FileText, ArrowUp, ArrowDown, ArrowUpDown, Download, Printer, Share2 } from "lucide-react";
+import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock, MessageCircle, FileText, ArrowUp, ArrowDown, ArrowUpDown, Download, Printer, Share2, Camera, Check, X } from "lucide-react";
 
 const METODOS = [["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferencia", "Transferencia"], ["deposito", "Depósito"], ["otros", "Otros"]];
 
@@ -34,26 +34,95 @@ export default function CuentasPorCobrar() {
   const [soloVencidos, setSoloVencidos] = useState(false);
   const [estado, setEstado] = useState("todos");
   const [facturada, setFacturada] = useState("todas");
+  const [vendedorFilter, setVendedorFilter] = useState("todos");
   const [sort, setSort] = useState({ key: "saldo", dir: "desc" });
   const [legacyRes, setLegacyRes] = useState(null);
   const toggleSort = (key) => setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
-  const sorted = [...(data.clientes || [])];
-  if (sort.key) {
-    sorted.sort((a, b) => {
-      const getV = (r) => {
-        if (["saldo", "vencido", "corriente"].includes(sort.key)) return r[sort.key];
-        if (["b1_30", "b31_60", "b61_90", "b90"].includes(sort.key)) return r.aging?.[sort.key] ?? 0;
-        if (sort.key === "dias") return r.max_dias ?? 0;
-        if (sort.key === "cliente") return r.nombre || "";
-        if (sort.key === "contacto") return r.telefono || r.celular || "";
-        return r[sort.key];
-      };
-      let x = getV(a), y = getV(b);
-      if (["saldo", "vencido", "corriente", "b1_30", "b31_60", "b61_90", "b90", "dias"].includes(sort.key)) { x = Number(x || 0); y = Number(y || 0); return sort.dir === "asc" ? x - y : y - x; }
-      const r = String(x || "").localeCompare(String(y || ""), "es", { numeric: true });
-      return sort.dir === "asc" ? r : -r;
+
+  // Solicitudes de abono en campo con evidencia
+  const [solicitudesAbono, setSolicitudesAbono] = useState([]);
+  const [solAbonoDlg, setSolAbonoDlg] = useState(false);
+  const [solProcessing, setSolProcessing] = useState(false);
+
+  const loadSolicitudes = async () => {
+    try {
+      const { data } = await api.get("/solicitudes-abono", { params: { estado: "pendiente_aprobacion" } });
+      setSolicitudesAbono(Array.isArray(data) ? data : []);
+    } catch {
+      setSolicitudesAbono([]);
+    }
+  };
+
+  useEffect(() => {
+    loadSolicitudes();
+  }, []);
+
+  const aprobarSolicitud = async (solId) => {
+    setSolProcessing(true);
+    try {
+      const { data } = await api.post(`/solicitudes-abono/${solId}/aprobar`);
+      toast.success(`Abono aprobado y aplicado correctamente (Folio: ${data.abono_folio || "AB"})`);
+      loadSolicitudes();
+      load();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail || "Error al aprobar abono"));
+    } finally {
+      setSolProcessing(false);
+    }
+  };
+
+  const rechazarSolicitud = async (solId) => {
+    const motivo = window.prompt("Motivo del rechazo de la evidencia:");
+    if (!motivo) return;
+    setSolProcessing(true);
+    try {
+      await api.post(`/solicitudes-abono/${solId}/rechazar`, { motivo });
+      toast.info("Solicitud de abono rechazada");
+      loadSolicitudes();
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail || "Error al rechazar abono"));
+    } finally {
+      setSolProcessing(false);
+    }
+  };
+
+  // Lista única de asesores / vendedores presentes en la cartera
+  const vendedoresList = useMemo(() => {
+    const s = new Set();
+    (data.clientes || []).forEach((c) => {
+      const v = c.vendedor_nombre || c.vendedor || c.vendedor_id;
+      if (v && typeof v === "string" && v.trim()) s.add(v.trim());
     });
-  }
+    return Array.from(s).sort();
+  }, [data.clientes]);
+
+  const sorted = useMemo(() => {
+    let clients = [...(data.clientes || [])];
+    if (vendedorFilter && vendedorFilter !== "todos") {
+      clients = clients.filter((c) => {
+        const v = (c.vendedor_nombre || c.vendedor || c.vendedor_id || "").trim().toLowerCase();
+        return v === vendedorFilter.trim().toLowerCase();
+      });
+    }
+    if (sort.key) {
+      clients.sort((a, b) => {
+        const getV = (r) => {
+          if (["saldo", "vencido", "corriente"].includes(sort.key)) return r[sort.key];
+          if (["b1_30", "b31_60", "b61_90", "b90"].includes(sort.key)) return r.aging?.[sort.key] ?? 0;
+          if (sort.key === "dias") return r.max_dias ?? 0;
+          if (sort.key === "cliente") return r.nombre || "";
+          if (sort.key === "contacto") return r.telefono || r.celular || "";
+          return r[sort.key];
+        };
+        let x = getV(a), y = getV(b);
+        if (["saldo", "vencido", "corriente", "b1_30", "b31_60", "b61_90", "b90", "dias"].includes(sort.key)) { x = Number(x || 0); y = Number(y || 0); return sort.dir === "asc" ? x - y : y - x; }
+        const r = String(x || "").localeCompare(String(y || ""), "es", { numeric: true });
+        return sort.dir === "asc" ? r : -r;
+      });
+    }
+    return clients;
+  }, [data.clientes, vendedorFilter, sort]);
+
   const puedeCobrar = can("caja.entrada");
 
   // Abono
@@ -336,7 +405,25 @@ export default function CuentasPorCobrar() {
             <SelectItem value="no">Solo no facturadas</SelectItem>
           </SelectContent>
         </Select>
+        <Select value={vendedorFilter} onValueChange={setVendedorFilter}>
+          <SelectTrigger className="w-48" data-testid="cxc-vendedor"><SelectValue placeholder="Asesor / Vendedor" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos los asesores</SelectItem>
+            {vendedoresList.map((v) => (
+              <SelectItem key={v} value={v}>{v}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button variant="outline" onClick={load} data-testid="cxc-refrescar"><Search className="w-4 h-4" /></Button>
+        {solicitudesAbono.length > 0 && (
+          <Button
+            onClick={() => setSolAbonoDlg(true)}
+            className="bg-amber-600 hover:bg-amber-700 text-white font-semibold flex items-center gap-1.5 shadow-sm"
+          >
+            <Camera className="w-4 h-4" />
+            <span>Abonos de Campo ({solicitudesAbono.length})</span>
+          </Button>
+        )}
       </div>
 
       <div className="card-soft overflow-x-auto">
@@ -428,10 +515,11 @@ export default function CuentasPorCobrar() {
           <DialogHeader><DialogTitle className="font-display">Estado de cuenta · {detCli?.nombre}</DialogTitle></DialogHeader>
           {!detalle ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div> : (
             <div className="space-y-5">
-              <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Saldo</div><div className="font-display font-bold text-red-600">{money(detalle.cliente.saldo)}</div></div>
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Límite</div><div className="font-display font-bold">{money(detalle.cliente.limite_credito)}</div></div>
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Días crédito</div><div className="font-display font-bold">{detalle.cliente.dias_credito}</div></div>
+                <div className="bg-indigo-50/60 rounded p-3 border border-indigo-100"><div className="text-xs text-indigo-600 font-medium">Asesor Asignado</div><div className="font-display font-bold text-indigo-950 text-sm truncate" title={detalle.cliente.vendedor_nombre || detalle.cliente.vendedor || detCli.vendedor_nombre || detCli.vendedor || "No asignado"}>{detalle.cliente.vendedor_nombre || detalle.cliente.vendedor || detCli.vendedor_nombre || detCli.vendedor || "No asignado"}</div></div>
               </div>
 
               <div>
@@ -730,6 +818,87 @@ export default function CuentasPorCobrar() {
               </DialogFooter>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo para revisar solicitudes de abono en campo con evidencia fotográfica */}
+      <Dialog open={solAbonoDlg} onOpenChange={setSolAbonoDlg}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Camera className="w-5 h-5 text-amber-600" />
+              Solicitudes de Abono en Campo ({solicitudesAbono.length})
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 my-2">
+            {solicitudesAbono.length === 0 ? (
+              <p className="text-center text-slate-400 py-8">No hay solicitudes de abono pendientes de revisión.</p>
+            ) : (
+              solicitudesAbono.map((sol) => (
+                <div key={sol.id} className="border border-slate-200 rounded-xl p-4 bg-white shadow-sm space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="text-xs font-mono text-slate-400">{sol.folio} • {(sol.created_at || "").slice(0, 16).replace("T", " ")}</div>
+                      <div className="font-bold text-slate-800 text-base">{sol.cliente_nombre}</div>
+                      <div className="text-xs text-slate-500">Asesor de campo: <b className="text-slate-700">{sol.vendedor_nombre}</b></div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-slate-400 uppercase tracking-wider">Monto a abonar</div>
+                      <div className="text-xl font-display font-black text-emerald-600">{money(sol.monto)}</div>
+                      <Badge variant="outline" className="capitalize text-xs">{sol.metodo}</Badge>
+                    </div>
+                  </div>
+
+                  {sol.referencia && (
+                    <div className="text-xs text-slate-600 bg-slate-50 p-2 rounded">
+                      <b>Referencia / Comprobante:</b> {sol.referencia}
+                    </div>
+                  )}
+
+                  {sol.nota && (
+                    <div className="text-xs text-slate-500 italic">
+                      "{sol.nota}"
+                    </div>
+                  )}
+
+                  {/* Evidencia fotográfica */}
+                  {(sol.evidencia_url || sol.evidencia_b64) && (
+                    <div className="border border-slate-100 rounded-lg p-2 bg-slate-50">
+                      <span className="text-[11px] uppercase font-bold text-slate-400 block mb-1">Comprobante / Ficha de pago:</span>
+                      <img
+                        src={sol.evidencia_b64 || sol.evidencia_url}
+                        alt="Comprobante de pago"
+                        className="max-h-56 max-w-full rounded object-contain mx-auto border border-slate-200"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={solProcessing}
+                      onClick={() => rechazarSolicitud(sol.id)}
+                      className="text-red-600 border-red-200 hover:bg-red-50"
+                    >
+                      <X className="w-4 h-4 mr-1" /> Rechazar
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={solProcessing}
+                      onClick={() => aprobarSolicitud(sol.id)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                      <Check className="w-4 h-4 mr-1" /> Aprobar y Aplicar Saldo
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSolAbonoDlg(false)}>Cerrar</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

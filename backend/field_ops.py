@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
+from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Form
 from pydantic import BaseModel, Field
 
 import storage
@@ -100,12 +100,17 @@ async def _usuarios_campo(sucursal_id: Optional[str] = None) -> list:
 
 
 def _cartera_filtro(user: dict) -> dict:
-    """Clientes de la cartera de un vendedor: asignados + sin asignar."""
-    return {"$or": [
-        {"vendedor_id": user["id"]},
-        {"vendedor": user.get("name", "")},
-        {"vendedor_id": {"$exists": False}},
-    ]}
+    """Clientes estrictamente de la cartera asignada al vendedor (por ID o nombre)."""
+    vid = str(user.get("id") or "")
+    vname = str(user.get("name") or "").strip()
+    conds = []
+    if vid:
+        conds.append({"vendedor_id": vid})
+    if vname:
+        conds.append({"vendedor": vname})
+    if not conds:
+        return {"id": "__sin_cartera__"}
+    return {"$or": conds}
 
 
 async def _cartera_clients(user: dict) -> list:
@@ -115,7 +120,7 @@ async def _cartera_clients(user: dict) -> list:
 async def _clientes_por_seller(por_vendedor: Optional[str] = None) -> list:
     flt = {}
     if por_vendedor:
-        flt["$or"] = [{"vendedor_id": por_vendedor}, {"vendedor": {"$exists": False}}]
+        flt["vendedor_id"] = por_vendedor
     else:
         flt["vendedor_id"] = {"$exists": True}
     return await db.clients.find(flt, {"_id": 0}).to_list(50000)
@@ -181,11 +186,41 @@ class CarteraAsignacion(BaseModel):
 # ==========================================================================
 # VENDEDOR — dashboard, mapa, ubicación, cartera
 # ==========================================================================
+def _calcular_semaforo(saldo: float, vencido: float, dias_mora_max: int = 0) -> dict:
+    saldo = round(float(saldo or 0), 2)
+    vencido = round(float(vencido or 0), 2)
+    if vencido <= 0.01:
+        return {
+            "color": "verde",
+            "nivel": "Excelente",
+            "badge": "Puntual",
+            "resumen": "Al corriente · Sin saldos vencidos",
+            "dias_mora": 0
+        }
+    elif dias_mora_max <= 15 and (saldo <= 0 or vencido < (saldo * 0.5)):
+        return {
+            "color": "amarillo",
+            "nivel": "En Observación",
+            "badge": "Observación",
+            "resumen": f"Atraso leve ({dias_mora_max}d · ${vencido:,.2f} vencido)",
+            "dias_mora": dias_mora_max
+        }
+    else:
+        return {
+            "color": "rojo",
+            "nivel": "Alto Riesgo",
+            "badge": "Alto Riesgo",
+            "resumen": f"Mora crítica ({dias_mora_max}d · ${vencido:,.2f} en riesgo)",
+            "dias_mora": dias_mora_max
+        }
+
+
 async def _resumen_cxc_cliente(cliente_id: str, saldo_cliente: float, dias_credito: int) -> dict:
-    """Saldo y vencido de un cliente a partir de sus ventas a crédito activas."""
+    """Saldo, vencido y semáforo de un cliente a partir de sus ventas a crédito activas."""
     hoy = now_utc().date()
     vencido = 0.0
     corriente = 0.0
+    dias_mora_max = 0
     sales = await db.sales.find(
         {"cliente_id": cliente_id, "condicion": "credito",
          "estado": "confirmada", "saldo": {"$gt": 0}},
@@ -194,6 +229,8 @@ async def _resumen_cxc_cliente(cliente_id: str, saldo_cliente: float, dias_credi
         dv, _ = _dias_vencido(s["fecha"], dias_credito, hoy)
         if dv > 0:
             vencido += float(s.get("saldo", 0))
+            if dv > dias_mora_max:
+                dias_mora_max = dv
         else:
             corriente += float(s.get("saldo", 0))
     return {
@@ -201,18 +238,29 @@ async def _resumen_cxc_cliente(cliente_id: str, saldo_cliente: float, dias_credi
         "vencido": round(vencido, 2),
         "corriente": round(corriente, 2),
         "por_vencer": round(max(0.0, float(saldo_cliente or 0) - vencido), 2),
+        "dias_mora_max": dias_mora_max,
+        "semaforo": _calcular_semaforo(saldo_cliente, vencido, dias_mora_max),
     }
 
 
-async def _cxc_de_cartera(vendedor_id: str) -> dict:
-    """CxC consolidada de la cartera de un vendedor (saldo, vencido, cobrado)."""
+async def _cxc_de_cartera(vendedor_id: str, vendedor_nombre: str = "") -> dict:
+    """CxC consolidada estrictamente de la cartera asignada al vendedor (saldo, vencido, cobrado)."""
     hoy = now_utc().date()
+    conds = []
+    if vendedor_id:
+        conds.append({"vendedor_id": vendedor_id})
+    if vendedor_nombre:
+        conds.append({"vendedor": vendedor_nombre})
+    if not conds:
+        return {"saldo_total": 0.0, "vencido": 0.0, "por_vencer": 0.0, "cobrado_hoy": 0.0}
+
     clientes = await db.clients.find(
-        {"$or": [{"vendedor_id": vendedor_id}, {"vendedor_id": {"$exists": False}}]},
+        {"$or": conds},
         {"_id": 0, "id": 1, "saldo": 1, "dias_credito": 1}).to_list(50000)
     cmap = {c["id"]: c for c in clientes}
+    cids = list(cmap.keys())
     sales = await db.sales.find(
-        {"vendedor_id": vendedor_id, "condicion": "credito",
+        {"cliente_id": {"$in": cids}, "condicion": "credito",
          "estado": "confirmada", "saldo": {"$gt": 0}},
         {"_id": 0, "cliente_id": 1, "fecha": 1, "saldo": 1}).to_list(200000)
     vencido = 0.0
@@ -241,6 +289,7 @@ async def _cxc_de_cartera(vendedor_id: str) -> dict:
 async def seller_dashboard(user: dict = Depends(get_current_user)):
     """Dashboard del vendedor autenticado (ventas, cobros, CxC, visitas)."""
     vid = user["id"]
+    vname = user.get("name", "")
     now = now_utc()
     hoy = now.date().isoformat()
     mes = now.strftime("%Y-%m")
@@ -256,7 +305,7 @@ async def seller_dashboard(user: dict = Depends(get_current_user)):
 
     clientes_hoy = {v.get("cliente_id") for v in ventas_hoy if v.get("cliente_id")}
 
-    cxc = await _cxc_de_cartera(vid)
+    cxc = await _cxc_de_cartera(vid, vname)
 
     abonos_hoy = await db.abonos.find(
         {"usuario_id": vid, "fecha": {"$regex": "^" + hoy}},
@@ -282,11 +331,23 @@ async def seller_dashboard(user: dict = Depends(get_current_user)):
         if len(ultimos_clientes) >= 5:
             break
 
+    meta_mes = float(user.get("meta_mensual") or 150000.0)
+    monto_mes = round(sum(float(v.get("total", 0) or 0) for v in ventas_mes), 2)
+    avance_pct = round((monto_mes / meta_mes) * 100, 1) if meta_mes > 0 else 0.0
+
     return {
         "ventas_dia": {"monto": round(sum(float(v.get("total", 0) or 0) for v in ventas_hoy), 2),
                        "numero": len(ventas_hoy)},
-        "ventas_mes": {"monto": round(sum(float(v.get("total", 0) or 0) for v in ventas_mes), 2),
-                       "numero": len(ventas_mes)},
+        "ventas_mes": {"monto": monto_mes,
+                       "numero": len(ventas_mes),
+                       "meta": meta_mes,
+                       "avance_pct": avance_pct},
+        "cartera_credito_total": {
+            "saldo_total": cxc.get("saldo_total", 0.0),
+            "vencido": cxc.get("vencido", 0.0),
+            "por_vencer": cxc.get("por_vencer", 0.0),
+        },
+        "sucursal": user.get("sucursal") or "Sucursal Matriz",
         "clientes_atendidos_hoy": len(clientes_hoy),
         "cxc": cxc,
         "cobros_hoy": {"monto": round(sum(float(a.get("monto", 0) or 0) for a in abonos_hoy), 2),
@@ -373,35 +434,153 @@ async def seller_map(user: dict = Depends(get_current_user)):
 
 
 @router.get("/seller/clients")
-async def seller_clients(q: Optional[str] = None, user: dict = Depends(get_current_user)):
-    """Clientes de la cartera del vendedor autenticado (búsqueda por nombre,
-    teléfono, código o RFC)."""
-    flt = _cartera_filtro(user)
-    if q:
-        rx = {"$regex": _escape_re(q), "$options": "i"}
-        flt["$and"] = [{"$or": [
-            {"nombre": rx}, {"codigo": rx}, {"rfc": rx},
-            {"telefono": rx}, {"celular": rx}, {"whatsapp": rx}]}]
+async def seller_clients(q: Optional[str] = None, scope: Optional[str] = "cartera", user: dict = Depends(get_current_user)):
+    """Clientes de la cartera del vendedor autenticado o de toda la empresa (scope=all).
+    Para clientes ajenos se protegen saldos y líneas de crédito."""
+    es_global = scope == "all" or _vende_todo(user)
+    if es_global:
+        flt = {}
+        if q:
+            rx = {"$regex": _escape_re(q), "$options": "i"}
+            flt["$or"] = [
+                {"nombre": rx}, {"codigo": rx}, {"rfc": rx},
+                {"telefono": rx}, {"celular": rx}, {"whatsapp": rx}
+            ]
+    else:
+        flt = _cartera_filtro(user)
+        if q:
+            rx = {"$regex": _escape_re(q), "$options": "i"}
+            flt["$and"] = [{"$or": [
+                {"nombre": rx}, {"codigo": rx}, {"rfc": rx},
+                {"telefono": rx}, {"celular": rx}, {"whatsapp": rx}]}]
     clientes = await db.clients.find(flt, {"_id": 0}).sort("nombre", 1).to_list(50000)
+    hoy = now_utc().date()
+    cids = [c["id"] for c in clientes]
+    unpaid = await db.sales.find(
+        {"cliente_id": {"$in": cids}, "condicion": "credito", "estado": "confirmada", "saldo": {"$gt": 0}},
+        {"_id": 0, "cliente_id": 1, "fecha": 1, "saldo": 1}).to_list(100000)
+    vencido_map = {}
+    dias_mora_map = {}
+    cmap = {c["id"]: c for c in clientes}
+    for s in unpaid:
+        cid = s.get("cliente_id")
+        dc = (cmap.get(cid) or {}).get("dias_credito", 0)
+        dv, _ = _dias_vencido(s["fecha"], dc, hoy)
+        if dv > 0:
+            vencido_map[cid] = vencido_map.get(cid, 0.0) + float(s.get("saldo", 0))
+            if dv > dias_mora_map.get(cid, 0):
+                dias_mora_map[cid] = dv
+
+    u_id = str(user.get("id") or "")
+    u_name = str(user.get("name") or "").strip().lower()
+
     out = []
     for c in clientes:
+        cid = c["id"]
+        c_vid = str(c.get("vendedor_id") or "")
+        c_vname = str(c.get("vendedor") or "").strip().lower()
+        es_mio = (c_vid == u_id) or (c_vname and c_vname == u_name) or _vende_todo(user)
+
+        if es_mio:
+            sal = round(float(c.get("saldo", 0) or 0), 2)
+            venc = round(vencido_map.get(cid, 0.0), 2)
+            dm = dias_mora_map.get(cid, 0)
+            semaforo = _calcular_semaforo(sal, venc, dm)
+            limite = round(float(c.get("limite_credito", 0) or 0), 2)
+            autorizado = bool(c.get("credito_autorizado"))
+        else:
+            sal = 0.0
+            venc = 0.0
+            semaforo = {"color": "gris", "resumen": "Cliente de otra cartera"}
+            limite = 0.0
+            autorizado = False
+
         out.append({
-            "id": c["id"], "codigo": c.get("codigo"), "nombre": c.get("nombre"),
+            "id": cid, "codigo": c.get("codigo"), "nombre": c.get("nombre"),
             "telefono": c.get("telefono") or c.get("celular"), "whatsapp": c.get("whatsapp"),
             "correo": c.get("correo"), "direccion": c.get("direccion"),
             "ciudad": c.get("ciudad"), "estado_geo": c.get("estado_geo"),
-            "rfc": c.get("rfc"), "saldo": round(float(c.get("saldo", 0) or 0), 2),
-            "limite_credito": round(float(c.get("limite_credito", 0) or 0), 2),
-            "credito_autorizado": bool(c.get("credito_autorizado")),
-            "dias_credito": c.get("dias_credito", 0),
+            "rfc": c.get("rfc"), "saldo": sal,
+            "vencido": venc,
+            "semaforo": semaforo,
+            "en_cartera": es_mio,
+            "documentos": c.get("documentos") or {},
+            "limite_credito": limite,
+            "credito_autorizado": autorizado,
+            "dias_credito": c.get("dias_credito", 0) if es_mio else 0,
             "latitud": c.get("latitud"), "longitud": c.get("longitud"),
             "proxima_visita": c.get("proxima_visita") or "",
             "ult_fecha_compra": c.get("ult_fecha_compra") or "",
             "vendedor_id": c.get("vendedor_id"),
+            "vendedor_nombre": c.get("vendedor") or "",
             "condicion_pago": c.get("condicion_pago", "contado"),
             "foto_fachada": c.get("foto_fachada") or "",
         })
     return out
+
+
+@router.get("/seller/clients/{client_id}/history")
+async def client_order_history(client_id: str, user: dict = Depends(get_current_user)):
+    """Historial de compras y pedidos del cliente, con atribución precisa de asesor."""
+    cli = await db.clients.find_one({"id": client_id}) or {}
+    cod = cli.get("codigo")
+    nom = cli.get("nombre")
+
+    p_flt = [{"cliente_id": client_id}]
+    if cod:
+        p_flt.append({"cliente_codigo": cod})
+    pedidos = await db.pedidos.find({"$or": p_flt} if len(p_flt) > 1 else p_flt[0], {"_id": 0}).sort("fecha_pedido", -1).to_list(30)
+
+    s_flt = [{"cliente_id": client_id}]
+    if cod:
+        s_flt.append({"cliente_codigo": cod})
+    if nom:
+        s_flt.append({"cliente_nombre": nom})
+    ventas = await db.sales.find({"$or": s_flt} if len(s_flt) > 1 else s_flt[0], {"_id": 0}).sort("fecha", -1).to_list(30)
+
+    u_id = str(user.get("id") or "")
+    u_name = str(user.get("name") or "").strip().lower()
+
+    combined = []
+    for p in pedidos:
+        v_id = str(p.get("vendedor_id") or "")
+        v_name = p.get("vendedor_nombre") or "Asesor"
+        es_mio = (v_id == u_id) or (v_name.strip().lower() == u_name)
+        combined.append({
+            "id": p.get("id"),
+            "folio": p.get("folio") or "PEDIDO",
+            "tipo": "pedido",
+            "fecha": p.get("fecha_pedido") or p.get("creado_en") or "",
+            "total": float(p.get("total") or 0),
+            "condicion": "pedido",
+            "estado": p.get("estado") or "pendiente",
+            "vendedor_id": v_id,
+            "vendedor_nombre": v_name,
+            "vendido_por_mi": es_mio,
+            "items_count": len(p.get("items") or []),
+            "resumen_items": ", ".join(f"{it.get('solicitado', 1)}x {it.get('descripcion', '')[:20]}" for it in (p.get("items") or [])[:3])
+        })
+    for v in ventas:
+        v_id = str(v.get("vendedor_id") or "")
+        v_name = v.get("vendedor_nombre") or "Asesor"
+        es_mio = (v_id == u_id) or (v_name.strip().lower() == u_name)
+        combined.append({
+            "id": v.get("id"),
+            "folio": v.get("folio") or "VENTA",
+            "tipo": "venta",
+            "fecha": v.get("fecha") or "",
+            "total": float(v.get("total") or 0),
+            "condicion": v.get("condicion") or "contado",
+            "estado": v.get("estado") or "confirmada",
+            "vendedor_id": v_id,
+            "vendedor_nombre": v_name,
+            "vendido_por_mi": es_mio,
+            "items_count": len(v.get("items") or []),
+            "resumen_items": ", ".join(f"{it.get('cantidad', 1)}x {it.get('descripcion', '')[:20]}" for it in (v.get("items") or [])[:3])
+        })
+
+    combined.sort(key=lambda x: str(x.get("fecha") or ""), reverse=True)
+    return combined[:25]
 
 
 # ==========================================================================
@@ -488,6 +667,121 @@ async def eliminar_fachada_cliente(cliente_id: str, user: dict = Depends(get_cur
         {"$set": {"foto_fachada": "", "fachada_actualizada": ""}})
     await log_audit(user, "eliminar_fachada", "cliente", cliente_id, cli.get("nombre", ""))
     return {"ok": True}
+
+
+# ==========================================================================
+# DOCUMENTOS DE EXPEDIENTE DEL CLIENTE (INE, CSF) - SOLO CONTADO EN CAMPO
+# ==========================================================================
+_DOC_MIME_EXT = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "application/pdf": ".pdf",
+}
+
+
+@router.post("/clients/{cliente_id}/documentos")
+async def subir_documento_cliente(
+    cliente_id: str,
+    tipo: str = Form(...),
+    file: UploadFile = File(...),
+    user: dict = Depends(get_current_user)
+):
+    """Sube un documento de expediente de cliente (ine_frontal, ine_reverso, csf).
+    Permitido para JPG, PNG, WEBP y PDF (máx 15 MB)."""
+    cli = await db.clients.find_one({"id": cliente_id})
+    if not cli:
+        raise HTTPException(404, "Cliente no encontrado")
+    if not _puede_gestionar_fachada(user, cli):
+        raise HTTPException(403, "Solo puedes subir documentos de tus clientes asignados")
+
+    if tipo not in ("ine_frontal", "ine_reverso", "csf"):
+        raise HTTPException(400, "Tipo de documento no válido. Usa ine_frontal, ine_reverso o csf.")
+
+    data = await file.read()
+    if len(data) > 15 * 1024 * 1024:
+        raise HTTPException(400, "El documento no debe superar 15 MB.")
+
+    mime = storage.detect_mime_type(data)
+    if mime not in _DOC_MIME_EXT:
+        raise HTTPException(400, f"Formato no permitido ({mime}). Usa JPG, PNG, WEBP o PDF.")
+
+    ext = _DOC_MIME_EXT[mime]
+    path = f"uploads/documentos_cliente/{cliente_id}_{tipo}_{_uid()[:8]}{ext}"
+    try:
+        result = storage.put_object(path, data, mime)
+    except Exception:
+        raise HTTPException(502, "No se pudo guardar el documento en el servidor.")
+
+    stored = result.get("path", path)
+    await db.files.insert_one({
+        "id": _uid(),
+        "storage_path": stored,
+        "original_filename": file.filename or f"{tipo}{ext}",
+        "content_type": mime,
+        "size": result.get("size", len(data)),
+        "cliente_id": cliente_id,
+        "tipo_doc": tipo,
+        "is_deleted": False,
+        "created_at": iso_now(),
+    })
+
+    url = f"/api/files/{stored}"
+    docs = cli.get("documentos") or {}
+    # Reemplazar documento previo si existía
+    if isinstance(docs, dict) and docs.get(tipo) and isinstance(docs[tipo], dict):
+        await _soft_delete_archivo(docs[tipo].get("url", ""))
+
+    docs[tipo] = {
+        "url": url,
+        "filename": file.filename or f"{tipo}{ext}",
+        "mime": mime,
+        "size": len(data),
+        "fecha": iso_now()
+    }
+
+    await db.clients.update_one(
+        {"id": cliente_id},
+        {"$set": {"documentos": docs}}
+    )
+
+    await log_audit(user, "subir_documento", "cliente", cliente_id, cli.get("nombre", ""), f"{tipo}: {url}")
+    return {"ok": True, "tipo": tipo, "url": url, "documentos": docs}
+
+
+@router.get("/clients/{cliente_id}/frecuentes")
+async def productos_frecuentes_cliente(
+    cliente_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """Retorna los productos más frecuentes comprados por el cliente."""
+    sales = await db.sales.find(
+        {"cliente_id": cliente_id, "estado": {"$ne": "cancelada"}},
+        {"_id": 0, "productos": 1, "items": 1}
+    ).sort("fecha", -1).to_list(200)
+
+    contador = {}
+    for s in sales:
+        items = s.get("items") or s.get("productos") or []
+        for it in items:
+            pid = str(it.get("producto_id") or it.get("id") or it.get("codigo") or "")
+            if not pid:
+                continue
+            if pid not in contador:
+                contador[pid] = {
+                    "producto_id": pid,
+                    "codigo": it.get("codigo") or pid,
+                    "nombre": it.get("nombre") or it.get("descripcion") or "Producto",
+                    "veces_comprado": 0,
+                    "total_unidades": 0,
+                    "ultimo_precio": float(it.get("precio") or it.get("precio_unitario") or 0),
+                    "linea": it.get("linea") or "",
+                }
+            contador[pid]["veces_comprado"] += 1
+            contador[pid]["total_unidades"] += float(it.get("cantidad") or 1)
+
+    top = sorted(contador.values(), key=lambda x: (x["veces_comprado"], x["total_unidades"]), reverse=True)[:8]
+    return {"ok": True, "cliente_id": cliente_id, "frecuentes": top}
 
 
 @router.get("/seller/cxc")
