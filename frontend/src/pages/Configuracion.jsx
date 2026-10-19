@@ -419,17 +419,17 @@ export default function Configuracion() {
             <div>
               <h3 className="text-sm font-bold text-indigo-950 flex items-center gap-2">
                 <Receipt className="w-4 h-4 text-indigo-600" />
-                Constructor Visual de Machotes RYSA (WYSIWYG)
+                Editor de formatos de documentos
               </h3>
               <p className="text-xs text-indigo-700 mt-0.5">
-                Diseña visualmente tickets (58mm, 80mm) y cartas de venta con lienzo en vivo, simulación y variables dinámicas.
+                Personaliza tickets, notas de venta, cotizaciones, abonos, compras y movimientos de caja con vista previa real. El formato predeterminado siempre se puede restaurar.
               </p>
             </div>
             <a
               href="/app/machotes"
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap"
             >
-              Abrir Constructor Visual →
+              Abrir editor de formatos →
             </a>
           </div>
 

@@ -40,15 +40,16 @@ def get_safe_local_path(storage_path: str) -> str:
     return target
 
 
-# Logotipo oficial incluido con el proyecto (fallback cuando no hay logo
-# personalizado en Configuración). Se usa en TODOS los documentos generados.
-_ASSET_LOGO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "isotipo1.png")
+# Logotipo OFICIAL de Grupo RYSA ("GRUPO RYSA" + productos + giro), en escala
+# de grises para que también imprima nítido en térmica. Se usa en TODOS los
+# documentos generados. El isotipo "GR" queda disponible como variante.
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+_ASSET_LOGO = os.path.join(_ASSETS_DIR, "logotipo.png")
+_ASSET_ISOTIPO = os.path.join(_ASSETS_DIR, "isotipo1.png")
+LOGO_VARIANTES = {"logotipo": _ASSET_LOGO, "isotipo": _ASSET_ISOTIPO}
 
 
-def logo_local(settings: dict) -> str | None:
-    """Ruta local del logotipo para documentos (ticket/carta/PDF).
-    Prioridad: 1) logo subido en Configuración · 2) asset oficial del repo.
-    Devuelve None si no hay ninguno disponible."""
+def _logo_configurado(settings: dict) -> str | None:
     lu = (settings or {}).get("logo_url") or ""
     if lu and "/api/files/" in lu:
         try:
@@ -57,25 +58,40 @@ def logo_local(settings: dict) -> str | None:
                 return p
         except Exception:
             pass
-    try:
-        if os.path.isfile(_ASSET_LOGO):
-            return _ASSET_LOGO
-    except Exception:
-        pass
     return None
+
+
+def logo_local(settings: dict, variante: str = "") -> str | None:
+    """Ruta local del logotipo para documentos (ticket/carta/PDF).
+
+    variante:
+      ""/"oficial"/"logotipo" -> logotipo oficial de Grupo RYSA (predeterminado;
+                                  si en Configuración se subió un logo propio,
+                                  ese tiene prioridad)
+      "isotipo"                -> isotipo "GR"
+      "configuracion"          -> solo el logo subido en Configuración
+    Devuelve None si no hay ninguno disponible."""
+    if variante == "isotipo":
+        return _ASSET_ISOTIPO if os.path.isfile(_ASSET_ISOTIPO) else None
+    propio = _logo_configurado(settings)
+    if variante == "configuracion":
+        return propio
+    if propio:
+        return propio
+    return _ASSET_LOGO if os.path.isfile(_ASSET_LOGO) else None
 
 
 def imagen_con_proporcion(ruta: str, ancho_max_mm: float, alto_max_mm: float):
     """Image de reportlab que respeta la proporción real del archivo
-    (nunca deforma el logo) y cabe dentro del caja dada."""
+    (nunca deforma el logo) y cabe dentro de la caja dada (en milímetros)."""
     from reportlab.platypus import Image
     iw, ih = ImageReader(ruta).getSize()
     if not iw or not ih:
         return None
     ar = iw / float(ih)
-    w, h = ancho_max_mm, ancho_max_mm / ar
-    if h > alto_max_mm:
-        h = alto_max_mm
+    w, h = ancho_max_mm * mm, ancho_max_mm * mm / ar
+    if h > alto_max_mm * mm:
+        h = alto_max_mm * mm
         w = h * ar
     return Image(ruta, width=w, height=h)
 
@@ -345,7 +361,20 @@ def build_entrega_pdf(mov: dict, caja: dict, settings: dict,
     line = 11.5          # alto por línea de texto normal
     # Estimar altura dinámica del ticket.
     concepto_lines = _wrap_lines(mov.get("concepto") or "", W - 2 * margin - 4, 9)
-    h = 26 * mm                     # encabezado empresa
+    # Logotipo oficial arriba (proporción real, máx. 52x22 mm).
+    logo_p = logo_local(settings)
+    logo_dw = logo_dh = 0
+    if logo_p:
+        try:
+            iw, ih = ImageReader(logo_p).getSize()
+            ar = (iw / float(ih)) if ih else 2
+            logo_dw, logo_dh = 52 * mm, 52 * mm / ar
+            if logo_dh > 22 * mm:
+                logo_dh = 22 * mm
+                logo_dw = logo_dh * ar
+        except Exception:
+            logo_p = None
+    h = 26 * mm + (logo_dh + 3 * mm if logo_p else 0)   # logo + encabezado empresa
     h += 8 * mm                     # título + línea punteada
     h += len(concepto_lines) * 4.2 * mm + 22 * mm   # cuerpo + montos
     h += 16 * mm                    # firmas
@@ -379,6 +408,13 @@ def build_entrega_pdf(mov: dict, caja: dict, settings: dict,
         y -= 5
 
     # --- Encabezado empresa ---
+    if logo_p:
+        try:
+            c.drawImage(ImageReader(logo_p), W / 2 - logo_dw / 2, y - logo_dh, logo_dw, logo_dh,
+                        preserveAspectRatio=True, mask="auto")
+            y -= logo_dh + 3 * mm
+        except Exception:
+            pass
     txt(empresa, size=12, bold=True, align="center")
     sub = [settings.get("rfc") and f"RFC: {settings['rfc']}",
            settings.get("direccion"),
@@ -537,7 +573,8 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
                         try:
                             iw, ih = ImageReader(p).getSize()
                             ar = (iw / float(ih)) if ih else 1.5
-                            box_w, box_h = 22 * mm, 14 * mm
+                            # Logotipo apaisado: hasta 80% del ancho útil, máx. 58x26 mm
+                            box_w, box_h = min(w * 0.8, 58 * mm), 26 * mm
                             dw, dh = box_w, box_w / ar
                             if dh > box_h:
                                 dh = box_h
@@ -724,7 +761,7 @@ def build_letter_pdf(sale: dict, settings: dict, cliente: dict = None) -> bytes:
     lp = logo_local(settings)
     if lp:
         try:
-            img = imagen_con_proporcion(lp, ancho_max_mm=40, alto_max_mm=26)
+            img = imagen_con_proporcion(lp, ancho_max_mm=44, alto_max_mm=22)
             if img is not None:
                 logos.append(img)
         except Exception:
@@ -926,28 +963,12 @@ def build_abono_pdf(abono: dict, settings: dict, cliente: dict = None) -> bytes:
 
     # --- Encabezado ---
     logos = []
-    # Logo oficial: el de Configuración, o el isotipo RYSA empaquetado.
-    lu = settings.get("logo_url") or ""
-    logo_src = None
-    if lu and "/api/files/" in lu:
-        try:
-            lp = get_safe_local_path(lu.split("/api/files/", 1)[1])
-            if os.path.isfile(lp):
-                logo_src = lp
-        except Exception:
-            logo_src = None
-    if logo_src is None:
-        # Respaldo: logotipo oficial pre-cargado en backend/brand/
-        # (__file__ = <backend>/storage.py -> dirname + /brand/logotipo.png)
-        for cand in (os.path.join(os.path.dirname(__file__), "brand", "logotipo.png"),
-                     os.path.join(os.getcwd(), "brand", "logotipo.png")):
-            cand = os.path.abspath(cand)
-            if os.path.isfile(cand):
-                logo_src = cand
-                break
+    # Logotipo oficial (o el de Configuración), con su proporción real.
+    lp = logo_local(settings)
     try:
-        if logo_src:
-            logos.append(Image(logo_src, width=34 * mm, height=24 * mm))
+        img = imagen_con_proporcion(lp, ancho_max_mm=40, alto_max_mm=20) if lp else None
+        if img is not None:
+            logos.append(img)
     except Exception:
         logos = []
     emp_lines = [Paragraph("<b>" + (settings.get("empresa_nombre") or "Grupo RYSA") + "</b>", sEmpresa)]
@@ -1091,14 +1112,14 @@ def build_compra_pdf(compra: dict, settings: dict, proveedor: dict = None) -> by
 
     # Encabezado empresa + logo
     logos_left = []
-    lu = settings.get("logo_url") or ""
-    if lu and "/api/files/" in lu:
-        try:
-            lp = get_safe_local_path(lu.split("/api/files/", 1)[1])
-            if os.path.isfile(lp):
-                logos_left.append(Image(lp, width=34 * mm, height=24 * mm))
-        except Exception:
-            logos_left = []
+    # Logotipo oficial (o el de Configuración), con su proporción real.
+    lp = logo_local(settings)
+    try:
+        img = imagen_con_proporcion(lp, ancho_max_mm=46, alto_max_mm=22) if lp else None
+        if img is not None:
+            logos_left.append(img)
+    except Exception:
+        logos_left = []
     if not logos_left:
         logos_left.append(Paragraph("", sMeta))
     emp_lines = [Paragraph("<b>%s</b>" % (settings.get("empresa_nombre") or "Grupo RYSA"), sEmpresa)]
@@ -1276,7 +1297,7 @@ def build_cotizacion_pdf(sale: dict, settings: dict, cliente: dict = None,
     lp = logo_local(settings)
     if lp:
         try:
-            img = imagen_con_proporcion(lp, ancho_max_mm=52, alto_max_mm=30)
+            img = imagen_con_proporcion(lp, ancho_max_mm=62, alto_max_mm=30)
             if img is not None:
                 logos.append(img)
         except Exception:

@@ -48,6 +48,8 @@ import pgstore.compras as _pgcompras
 from pgstore.database import transaction
 from sqlalchemy import text
 import storage
+import doc_engine
+import formatos_api
 import exports
 import ocr_invoice as _ocr_invoice
 import pac_provider
@@ -2303,8 +2305,10 @@ async def caja_mov_comprobante(mov_id: str, user: dict = Depends(get_current_use
     res = resumen_caja(caja, movs)
     settings_doc = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
     try:
-        pdf_bytes = storage.build_entrega_pdf(mov, caja, settings_doc,
-                                              efectivo_en_caja=res.get("efectivo_esperado"))
+        pdf_bytes = await formatos_api.pdf_personalizado(
+            "entrega", doc_engine.contexto_entrega(mov, caja, settings_doc, res.get("efectivo_esperado")),
+            settings_doc) or storage.build_entrega_pdf(mov, caja, settings_doc,
+                                                       efectivo_en_caja=res.get("efectivo_esperado"))
         nombre_base = (mov.get("folio") or mov_id[:8]).replace("/", "-")
         path = f"caja/comprobante-{nombre_base}-{uid()[:8]}.pdf"
         result = storage.put_object(path, pdf_bytes, "application/pdf")
@@ -4044,7 +4048,8 @@ async def abono_pdf(abono_id: str, user: dict = Depends(get_current_user)):
                        "telefono": c.get("telefono") or c.get("celular") or c.get("whatsapp"),
                        "correo": c.get("correo") or c.get("correos")}
     try:
-        pdf_bytes = storage.build_abono_pdf(abono, settings, cliente)
+        pdf_bytes = await formatos_api.pdf_personalizado(
+            "abono", doc_engine.contexto_abono(abono, settings, cliente), settings)             or storage.build_abono_pdf(abono, settings, cliente)
         folio_clean = "".join(c for c in abono.get('folio', 'abono') if c.isalnum())
         path = f"abonos/{folio_clean}-{uid()[:8]}.pdf"
         result = storage.put_object(path, pdf_bytes, "application/pdf")
@@ -5197,8 +5202,9 @@ async def compra_pdf(compra_id: str, user: dict = Depends(get_current_user)):
     proveedor = None
     if doc.get("proveedor_id"):
         proveedor = await db.proveedores.find_one({"id": doc["proveedor_id"]}, {"_id": 0})
-    settings = await db.settings.find_one({"_id": "app"}) or {}
-    data = storage.build_compra_pdf(doc, settings, proveedor)
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    data = await formatos_api.pdf_personalizado(
+        "compra", doc_engine.contexto_compra(doc, settings, proveedor), settings)         or storage.build_compra_pdf(doc, settings, proveedor)
     return StreamingResponse(io.BytesIO(data), media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename=compra-{doc.get("folio", compra_id)}.pdf'})
 
@@ -7780,213 +7786,6 @@ async def reporte_centro(desde: Optional[str] = None, hasta: Optional[str] = Non
 
 
 # =========================================================================
-# MACHOTES Y CONSTRUCTOR VISUAL DE DOCUMENTOS (WYSIWYG)
-# =========================================================================
-@api.get("/templates")
-async def list_document_templates(user: dict = Depends(get_current_user)):
-    async with transaction() as conn:
-        rows = (await conn.execute(
-            text("""
-                SELECT t.id, t.tipo, t.nombre, t.descripcion, t.activo, t.version_actual,
-                       v.formato_fisico, v.configuracion, v.estado, v.created_at as version_created_at
-                FROM document_templates t
-                LEFT JOIN document_template_versions v
-                    ON v.template_id = t.id AND v.version = t.version_actual
-                ORDER BY t.tipo, t.nombre
-            """)
-        )).fetchall()
-        return [
-            {
-                "id": r.id, "tipo": r.tipo, "nombre": r.nombre, "descripcion": r.descripcion,
-                "activo": r.activo, "version_actual": r.version_actual,
-                "formato_fisico": r.formato_fisico, "configuracion": r.configuracion,
-                "estado": r.estado, "version_created_at": r.version_created_at.isoformat() if r.version_created_at else None
-            }
-            for r in rows
-        ]
-
-
-@api.get("/templates/{template_id}")
-async def get_document_template(template_id: str, user: dict = Depends(get_current_user)):
-    async with transaction() as conn:
-        row = (await conn.execute(
-            text("""
-                SELECT t.id, t.tipo, t.nombre, t.descripcion, t.activo, t.version_actual,
-                       v.formato_fisico, v.configuracion, v.estado
-                FROM document_templates t
-                LEFT JOIN document_template_versions v
-                    ON v.template_id = t.id AND v.version = t.version_actual
-                WHERE t.id = :id
-            """),
-            {"id": template_id}
-        )).first()
-        if not row:
-            raise HTTPException(404, "Plantilla no encontrada")
-
-        vers = (await conn.execute(
-            text("SELECT version, formato_fisico, estado, creado_por, created_at "
-                 "FROM document_template_versions WHERE template_id = :id ORDER BY version DESC"),
-            {"id": template_id}
-        )).fetchall()
-
-        return {
-            "id": row.id, "tipo": row.tipo, "nombre": row.nombre, "descripcion": row.descripcion,
-            "activo": row.activo, "version_actual": row.version_actual,
-            "formato_fisico": row.formato_fisico, "configuracion": row.configuracion,
-            "estado": row.estado,
-            "versiones": [
-                {
-                    "version": v.version, "formato_fisico": v.formato_fisico,
-                    "estado": v.estado, "creado_por": v.creado_por,
-                    "created_at": v.created_at.isoformat() if v.created_at else None
-                }
-                for v in vers
-            ]
-        }
-
-
-@api.post("/templates")
-async def create_document_template(data: dict, user: dict = Depends(require_permission("config"))):
-    tipo = (data.get("tipo") or "ticket").strip()
-    nombre = (data.get("nombre") or "").strip()
-    if not nombre:
-        raise HTTPException(400, "El nombre de la plantilla es requerido")
-    tid = f"tpl_{uid()}"
-    cfg = data.get("configuracion") or {"formato_fisico": data.get("formato_fisico", "80mm"), "elementos": []}
-    fmt = data.get("formato_fisico") or cfg.get("formato_fisico", "80mm")
-
-    async with transaction() as conn:
-        await conn.execute(
-            text("""
-                INSERT INTO document_templates (id, tipo, nombre, descripcion, activo, version_actual, created_at, updated_at)
-                VALUES (:id, :tipo, :nombre, :desc, TRUE, 1, now(), now())
-            """),
-            {"id": tid, "tipo": tipo, "nombre": nombre, "desc": data.get("descripcion", "")}
-        )
-        vid = f"ver_{tid}_1"
-        await conn.execute(
-            text("""
-                INSERT INTO document_template_versions (id, template_id, version, formato_fisico, configuracion, estado, creado_por, created_at)
-                VALUES (:vid, :tid, 1, :fmt, CAST(:cfg AS jsonb), 'ACTIVO', :user, now())
-            """),
-            {"vid": vid, "tid": tid, "fmt": fmt, "cfg": json.dumps(cfg, ensure_ascii=False), "user": user.get("name")}
-        )
-    return {"ok": True, "id": tid, "nombre": nombre}
-
-
-@api.put("/templates/{template_id}")
-async def update_document_template(template_id: str, data: dict, user: dict = Depends(require_permission("config"))):
-    cfg = data.get("configuracion")
-    if not cfg:
-        raise HTTPException(400, "Configuración es requerida")
-    fmt = data.get("formato_fisico") or cfg.get("formato_fisico", "80mm")
-
-    async with transaction() as conn:
-        trow = (await conn.execute(
-            text("SELECT version_actual, nombre FROM document_templates WHERE id = :id"),
-            {"id": template_id}
-        )).first()
-        if not trow:
-            raise HTTPException(404, "Plantilla no encontrada")
-
-        nueva_version = trow.version_actual + 1
-        vid = f"ver_{template_id}_{nueva_version}"
-
-        # Insertar nueva versión
-        await conn.execute(
-            text("""
-                INSERT INTO document_template_versions (id, template_id, version, formato_fisico, configuracion, estado, creado_por, created_at)
-                VALUES (:vid, :tid, :v, :fmt, CAST(:cfg AS jsonb), 'ACTIVO', :user, now())
-            """),
-            {"vid": vid, "tid": template_id, "v": nueva_version, "fmt": fmt,
-             "cfg": json.dumps(cfg, ensure_ascii=False), "user": user.get("name")}
-        )
-
-        # Actualizar versión actual en plantilla
-        await conn.execute(
-            text("""
-                UPDATE document_templates
-                SET version_actual = :v, updated_at = now(),
-                    nombre = COALESCE(NULLIF(:nom, ''), nombre),
-                    descripcion = COALESCE(:desc, descripcion)
-                WHERE id = :tid
-            """),
-            {"v": nueva_version, "nom": data.get("nombre"), "desc": data.get("descripcion"), "tid": template_id}
-        )
-
-    return {"ok": True, "version": nueva_version}
-
-
-@api.post("/templates/{template_id}/simulate")
-async def simulate_document_template(template_id: str, data: dict = Body(default={}), user: dict = Depends(get_current_user)):
-    from machotes import MachoteCompiler, generar_datos_sinteticos, cargar_datos_reales
-
-    cfg = data.get("configuracion")
-    async with transaction() as conn:
-        if not cfg:
-            row = (await conn.execute(
-                text("""
-                    SELECT v.configuracion
-                    FROM document_templates t
-                    JOIN document_template_versions v ON v.template_id = t.id AND v.version = t.version_actual
-                    WHERE t.id = :id
-                """),
-                {"id": template_id}
-            )).first()
-            if not row:
-                raise HTTPException(404, "Plantilla no encontrada")
-            cfg = dict(row[0])
-
-        doc_id = data.get("documento_id")
-        if doc_id:
-            context = await cargar_datos_reales(conn, doc_id)
-        else:
-            context = generar_datos_sinteticos(tipo_documento=cfg.get("formato_fisico", "ticket"),
-                                              num_items=int(data.get("num_items", 4)))
-
-    return {
-        "ok": True,
-        "context": context,
-        "configuracion": cfg,
-    }
-
-
-@api.post("/templates/{template_id}/pdf")
-async def render_document_template_pdf(template_id: str, data: dict = Body(default={}), user: dict = Depends(get_current_user)):
-    from machotes import MachoteCompiler, generar_datos_sinteticos, cargar_datos_reales
-
-    cfg = data.get("configuracion")
-    async with transaction() as conn:
-        if not cfg:
-            row = (await conn.execute(
-                text("""
-                    SELECT v.configuracion
-                    FROM document_templates t
-                    JOIN document_template_versions v ON v.template_id = t.id AND v.version = t.version_actual
-                    WHERE t.id = :id
-                """),
-                {"id": template_id}
-            )).first()
-            if not row:
-                raise HTTPException(404, "Plantilla no encontrada")
-            cfg = dict(row[0])
-
-        doc_id = data.get("documento_id")
-        if doc_id:
-            context = await cargar_datos_reales(conn, doc_id)
-        else:
-            context = generar_datos_sinteticos(tipo_documento=cfg.get("formato_fisico", "ticket"),
-                                              num_items=int(data.get("num_items", 4)))
-
-    compiler = MachoteCompiler(cfg)
-    pdf_bytes = compiler.render_pdf(context)
-
-    from fastapi.responses import Response
-    return Response(content=pdf_bytes, media_type="application/pdf",
-                    headers={"Content-Disposition": f"inline; filename=machote-{template_id}.pdf"})
-
-
-# =========================================================================
 # STARTUP
 # =========================================================================
 @app.on_event("startup")
@@ -8098,6 +7897,9 @@ app.include_router(_legacymod.router)
 # Módulo AUTO-CARGA DE IMÁGENES DE CATÁLOGO (IA / Rollback)
 import catalog_images  # noqa: E402
 app.include_router(catalog_images.router)
+
+# Editor de formatos (machotes) v2: plantillas versionadas por tipo de documento.
+app.include_router(formatos_api.router)
 
 # Configuración dinámica de CORS
 env = os.environ.get("ENVIRONMENT", "development").lower()

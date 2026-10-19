@@ -56,6 +56,7 @@ const NAV = [
   { to: "/app/sucursales", label: "Sucursales", icon: LayoutDashboard, perm: "config", section: "SISTEMA" },
   { to: "/app/impresoras", label: "Impresoras", icon: Settings, perm: "config", section: "SISTEMA" },
   { to: "/app/configuracion", label: "Configuración", icon: Settings, perm: "config", section: "SISTEMA" },
+  { to: "/app/machotes", label: "Formatos de documentos", icon: FileText, perm: "config", section: "SISTEMA" },
   { to: "/app/cuentas-bancarias", label: "Cuentas bancarias", icon: Wallet, perm: "cuentas.ver", section: "SISTEMA" },
   { to: "/app/devtools", label: "Desarrollador", icon: Wrench, perm: "dev.errores", dev: true, section: "SISTEMA" },
 ];

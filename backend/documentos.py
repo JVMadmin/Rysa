@@ -11,11 +11,15 @@ Garantías:
   compartida creaba un PDF nuevo con UUID → WhatsApp recibía otro documento).
 - La venta guarda las URLs (doc_ticket_pdf / doc_carta_pdf) para auditoría.
 - Los tres formatos leen los MISMOS datos de la venta; solo cambia presentación.
+- Si en el Editor de formatos hay una plantilla ACTIVA para el tipo, se usa
+  esa (doc_engine); si no, o si falla, el predeterminado de storage.py.
 """
 import hashlib
 import uuid
 from datetime import timedelta
 
+import doc_engine
+import formatos_api
 import storage
 from deps import db, iso_now, now_utc
 
@@ -102,10 +106,14 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
                                         (d.get("banco") or "").lower()))
 
         if fmt == "ticket":
-            pdf_bytes = storage.build_ticket_pdf(sale, settings)
+            pdf_bytes = await formatos_api.pdf_personalizado(
+                "ticket", doc_engine.contexto_venta(sale, settings), settings) \
+                or storage.build_ticket_pdf(sale, settings)
             filename = f"ticket-{sale.get('folio')}.pdf"
         elif fmt == "carta":
-            pdf_bytes = storage.build_letter_pdf(sale, settings, cliente)
+            pdf_bytes = await formatos_api.pdf_personalizado(
+                "carta_venta", doc_engine.contexto_venta(sale, settings, cliente), settings) \
+                or storage.build_letter_pdf(sale, settings, cliente)
             filename = f"carta-{sale.get('folio')}.pdf"
         elif fmt == "cotizacion":
             # QR de comprobante de pago (§17-18): enlace/token PERSISTENTE por
@@ -133,8 +141,9 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
                     pago_url = _pq.armar_url(base_url, link["token"])
             except Exception:
                 pago_url = ""
-            pdf_bytes = storage.build_cotizacion_pdf(sale, settings, cliente, cuentas,
-                                                     pago_url=pago_url)
+            pdf_bytes = await formatos_api.pdf_personalizado(
+                "cotizacion", doc_engine.contexto_venta(sale, settings, cliente, cuentas, pago_url), settings) \
+                or storage.build_cotizacion_pdf(sale, settings, cliente, cuentas, pago_url=pago_url)
             filename = f"cotizacion-{sale.get('folio')}.pdf"
         else:
             continue

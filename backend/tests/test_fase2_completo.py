@@ -1,7 +1,7 @@
 """Pruebas E2E de Fase 2 para Grupo RYSA ERP.
 
 Cubre:
-- Machotes documentales y compilador ReportLab (Ticket 80mm y Carta)
+- Editor de formatos v2 (catálogo y vista previa PDF)
 - CxC con segregación activa estricta (saldo > 0) y recálculo
 - Presentaciones de producto y conversión canónica a unidad base
 - Reemplazo total de datos con análisis delta preview
@@ -13,8 +13,9 @@ import requests
 BASE_URL = os.environ.get("BACKEND_INTERNAL_URL") or "http://127.0.0.1:8000"
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "jesusvelazquezmay.89@gmail.com")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "Mujdkpelsk73")
+# Credenciales SOLO por entorno: nunca valores reales en el repositorio.
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 
 
 @pytest.fixture(scope="session")
@@ -37,39 +38,23 @@ def client(admin_token):
 
 
 class TestFase2Completo:
-    def test_machotes_list_and_versions(self, client):
-        """Verifica listar plantillas de documentos y sus versiones activas."""
-        r = client.get(f"{API}/templates")
+    def test_formatos_catalogo(self, client):
+        """Catálogo del editor de formatos: los 6 tipos con su predeterminado."""
+        r = client.get(f"{API}/formatos")
         assert r.status_code == 200, r.text
-        templates = r.json()
-        assert len(templates) >= 2
-        tipos = [t["tipo"] for t in templates]
-        assert "ticket" in tipos
-        assert "carta_venta" in tipos
+        tipos = {t["tipo"] for t in r.json()["tipos"]}
+        assert {"ticket", "carta_venta", "cotizacion", "abono", "compra", "entrega"} <= tipos
+        pre = client.get(f"{API}/formatos/ticket/predeterminado")
+        assert pre.status_code == 200
+        assert pre.json()["configuracion"]["esquema"] == 2
 
-    def test_machotes_simulation_and_pdf(self, client):
-        """Verifica simulación dual y renderizado de PDFs oficiales."""
-        # 1. Ticket 80mm
-        sim_res = client.post(f"{API}/templates/tpl_ticket_default/simulate", json={"num_items": 3})
-        assert sim_res.status_code == 200, sim_res.text
-        sim_data = sim_res.json()
-        assert sim_data["ok"] is True
-        assert len(sim_data["context"]["doc"]["items"]) == 3
-        assert sim_data["context"]["doc"]["total"] > 0
-
-        # PDF Ticket
-        pdf_res = client.post(f"{API}/templates/tpl_ticket_default/pdf", json={"num_items": 3})
-        assert pdf_res.status_code == 200
-        assert pdf_res.headers["content-type"] == "application/pdf"
-        assert pdf_res.content.startswith(b"%PDF")
-        assert len(pdf_res.content) > 1000
-
-        # 2. Carta de Venta
-        pdf_carta = client.post(f"{API}/templates/tpl_carta_default/pdf", json={"num_items": 4})
-        assert pdf_carta.status_code == 200
-        assert pdf_carta.headers["content-type"] == "application/pdf"
-        assert pdf_carta.content.startswith(b"%PDF")
-        assert len(pdf_carta.content) > 1000
+    def test_formatos_vista_previa_pdf(self, client):
+        """Vista previa (sin guardar) del predeterminado de ticket y cotización."""
+        for tipo in ("ticket", "cotizacion"):
+            r = client.post(f"{API}/formatos/vista-previa", json={"tipo": tipo, "predeterminado": True})
+            assert r.status_code == 200, r.text
+            assert r.headers["content-type"] == "application/pdf"
+            assert r.content.startswith(b"%PDF") and len(r.content) > 1000
 
     def test_cxc_activo_segregacion(self, client):
         """Verifica que el modo activo solo reporte cuentas con saldo > 0."""
