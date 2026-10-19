@@ -1,0 +1,11 @@
+# Archivos que se ejecutan o leen dentro de contenedores Linux: siempre LF,
+# aunque se haga checkout en Windows (core.autocrlf=true los convertía a
+# CRLF y el init de PostgreSQL / los scripts de despliegue fallaban).
+*.sh            text eol=lf
+*.conf          text eol=lf
+Dockerfile      text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.py            text eol=lf
+*.ini           text eol=lf
+*.mako          text eol=lf
