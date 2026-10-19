@@ -12,7 +12,7 @@
 set -euo pipefail
 
 RYSA_HOME="${RYSA_HOME:-/opt/rysa}"
-RYSA_REPO="${RYSA_HOME}/repo"
+RYSA_REPO="${RYSA_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"  # carpeta del repo que contiene este script
 REL_DIR="${RYSA_HOME}/backups/releases"
 DB_DIR="${RYSA_HOME}/backups/db"
 # BD objetivo desde .env.docker (soporta DATABASE_URL o BACKEND_DATABASE_URL).

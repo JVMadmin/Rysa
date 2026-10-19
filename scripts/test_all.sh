@@ -9,7 +9,7 @@
 set -uo pipefail
 
 RYSA_HOME="${RYSA_HOME:-/opt/rysa}"
-RYSA_REPO="${RYSA_HOME}/repo"
+RYSA_REPO="${RYSA_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"  # carpeta del repo que contiene este script
 BACKEND_URL="${BACKEND_URL:-http://localhost:8000}"
 DOMAIN="${DOMAIN:-}"
 PUBLIC_URL="${PUBLIC_URL:-${DOMAIN:+https://$DOMAIN}}"

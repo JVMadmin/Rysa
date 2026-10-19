@@ -7,7 +7,7 @@ a la UI. Comprueba:
 
   - Variables de entorno críticas
   - PostgreSQL alcanzable
-  - Alembic al día (revision head coincide con 0012_legacy_staging)
+  - Alembic al día (head de la BD == head de las migraciones del código)
   - Tablas productivas y legacy_* presentes
   - Catálogo de productos y al menos un usuario
   - Directorio legacy_data y permisos
@@ -121,16 +121,29 @@ async def check_postgres() -> None:
         return
 
 
+def _alembic_heads() -> set:
+    """Heads declarados por las migraciones del código desplegado (no un valor fijo
+    que se queda viejo con cada migración nueva)."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    ini = Path(__file__).resolve().parent.parent / "alembic.ini"
+    cfg = Config(str(ini))
+    cfg.set_main_option("script_location", str(ini.parent / "alembic"))
+    return set(ScriptDirectory.from_config(cfg).get_heads())
+
+
 async def check_alembic() -> None:
-    r = await _fetch_all(
-        "SELECT version_num FROM alembic_version ORDER BY version_num DESC LIMIT 1")
-    head = r[0]["version_num"] if r else None
-    if head == "0012_legacy_staging":
-        add("Alembic", True, f"head={head}")
-    else:
-        add("Alembic", head == "0012_legacy_staging",
-            f"head actual={head} (se esperaba 0012_legacy_staging). "
-            "Corre: docker compose exec backend alembic upgrade head")
+    r = await _fetch_all("SELECT version_num FROM alembic_version")
+    actual = {row["version_num"] for row in r}
+    try:
+        esperado = _alembic_heads()
+    except Exception as e:
+        add("Alembic", False, f"no se pudieron leer las migraciones: {str(e)[:120]}")
+        return
+    add("Alembic", actual == esperado,
+        f"head={', '.join(sorted(actual)) or 'ninguno'}" if actual == esperado else
+        f"head actual={', '.join(sorted(actual)) or 'ninguno'} (se esperaba "
+        f"{', '.join(sorted(esperado))}). Corre: docker compose exec backend alembic upgrade head")
 
 
 async def check_tables() -> None:
@@ -149,7 +162,8 @@ async def check_data() -> None:
     u = await _fetch_one("SELECT count(*) AS n FROM users")
     add("Users", (u["n"] or 0) > 0, f"{u['n']} usuarios")
     p = await _fetch_one("SELECT count(*) AS n FROM products")
-    add("Products", (p["n"] or 0) > 0, f"{p['n']} productos")
+    # Informativo: una instalación nueva arranca con catálogo vacío.
+    add("Products", True, f"{p['n']} productos" + (" (catálogo vacío)" if not p["n"] else ""))
     s = await _fetch_one("SELECT count(*) AS n FROM sales")
     add("Sales", True, f"{s['n']} ventas (puede ser 0)")
     s_legacy = await _fetch_one(
@@ -169,7 +183,9 @@ async def check_legacy_data_dir() -> None:
 
 async def check_health() -> None:
     import urllib.request
-    base = os.environ.get("PUBLIC_BASE_URL") or "http://127.0.0.1:8000"
+    # Siempre el backend local del contenedor: PUBLIC_BASE_URL es la URL pública
+    # (dominio/puerto del host) y no es alcanzable desde dentro del contenedor.
+    base = "http://127.0.0.1:8000"
     try:
         req = urllib.request.urlopen(f"{base}/health", timeout=3)
         add("Health API", req.status == 200, f"GET /health -> {req.status}")

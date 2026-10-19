@@ -25,7 +25,7 @@ EMAIL="${EMAIL:-}"
 NGINX_PORT="${NGINX_PORT:-${NGINX_HTTP_PORT:-8080}}"
 SKIP_DNS="${SKIP_DNS:-}"
 RYSA_HOME="${RYSA_HOME:-/opt/rysa}"
-RYSA_REPO="${RYSA_HOME}/repo"
+RYSA_REPO="${RYSA_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"  # carpeta del repo que contiene este script
 RYSA_LOG="/var/log/rysa_setup.log"
 
 log()  { printf "\033[1;34m[setup_ssl]\033[0m %s\n" "$*"; echo "[$(date -Iseconds)] $*" >> "$RYSA_LOG"; }

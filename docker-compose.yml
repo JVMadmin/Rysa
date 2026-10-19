@@ -4,6 +4,10 @@
 # HOST del VPS como nginx nativo o equivalente — ver scripts/setup_nginx_host.sh
 # y DEPLOY_VPS.md sección 5.
 
+# Nombre de proyecto fijo: el stack es el mismo sin importar desde qué
+# carpeta se ejecute `docker compose` (/opt/rysa/repo, /opt/rysa/Rysa, ...).
+name: rysa
+
 services:
   postgres:
     image: postgres:17
@@ -23,6 +27,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      # La primera inicialización del volumen (initdb + init scripts) tarda más.
+      start_period: 60s
     # Sin puertos publicados: solo accesible dentro de la red interna.
 
   backend:
@@ -31,18 +37,15 @@ services:
       dockerfile: Dockerfile
     container_name: rysa_backend
     restart: unless-stopped
+    # .env.docker es la ÚNICA fuente de configuración del backend
+    # (ENVIRONMENT, DATABASE_URL, JWT_SECRET, ADMIN_*, DEVELOPER_MODE...).
+    # No se re-declaran aquí con `${VAR:-default}`: esa interpolación solo lee
+    # el shell, y un `docker compose up` manual sin exportar variables
+    # arrancaba el backend en development con la contraseña por defecto.
     env_file:
       - ./.env.docker
     environment:
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      # DATABASE_URL es la variable canónica para la aplicación
-      # (backend, alembic, scripts/bootstrap_admin.py).
-      # .env.docker debe definirla apuntando a rysa_dev (dev) o rysa_prod (prod).
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://rysa:rysa_dev_only_change_me@postgres:5432/rysa_dev}
       UPLOAD_DIR: /app/uploads
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-      ADMIN_NAME: ${ADMIN_NAME:-Admin}
     volumes:
       - uploads:/app/uploads
       # Migración Legacy: código de las fases + datos DBF desplegables por
@@ -91,9 +94,10 @@ services:
     container_name: rysa_nginx
     restart: unless-stopped
     ports:
-      # Puerto interno del contenedor: el nginx del host hace proxy_pass
-      # a este puerto del host. No publicar a internet.
-      - "${NGINX_HTTP_PORT:-8080}:80"
+      # Solo loopback: el nginx del host (TLS) hace proxy_pass a 127.0.0.1.
+      # Docker publica puertos por encima de UFW, así que publicar en 0.0.0.0
+      # dejaría la app accesible por HTTP plano desde internet.
+      - "${NGINX_BIND:-127.0.0.1}:${NGINX_HTTP_PORT:-8080}:80"
     depends_on:
       backend:
         condition: service_healthy

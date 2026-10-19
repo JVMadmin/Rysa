@@ -133,3 +133,12 @@ legacy_data_v7_probe/
 legacy_reports/
 HANDOFF.md
 Handoff/
+
+# Certificados/llaves CSD y FIEL del SAT
+*.cer
+*.pfx
+*.p12
+*.pem
+
+# Marca de despliegue escrita por scripts/deploy.sh en el VPS
+.deployed

@@ -2,6 +2,12 @@
 const path = require("path");
 require("dotenv").config();
 
+// Sin source maps en el build: publicarlos expone el código fuente completo
+// del frontend. Se puede reactivar puntualmente con GENERATE_SOURCEMAP=true.
+if (process.env.GENERATE_SOURCEMAP === undefined) {
+  process.env.GENERATE_SOURCEMAP = "false";
+}
+
 // Environment variable overrides
 const config = {
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",

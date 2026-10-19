@@ -6,7 +6,7 @@
 set -uo pipefail
 
 RYSA_HOME="${RYSA_HOME:-/opt/rysa}"
-RYSA_REPO="${RYSA_HOME}/repo"
+RYSA_REPO="${RYSA_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"  # carpeta del repo que contiene este script
 
 GREEN="\033[92m"; YELLOW="\033[93m"; RED="\033[91m"; CYAN="\033[1;36m"; NC="\033[0m"
 hr()  { printf "${CYAN}──────────────────────────────────────────────────────${NC}\n"; }
