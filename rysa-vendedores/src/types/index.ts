@@ -97,6 +97,8 @@ export interface Client {
   ult_fecha_compra?: string;
   proxima_visita?: string;
   en_cartera?: boolean;
+  tipo?: string;
+  estado?: string;
 }
 
 export interface Product {

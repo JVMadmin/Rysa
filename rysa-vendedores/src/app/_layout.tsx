@@ -10,6 +10,13 @@ import { AuthProvider, useAuth } from '@/auth/AuthContext';
 import { LoginScreen } from '@/components/LoginScreen';
 import AppTabs from '@/components/app-tabs';
 
+// IMPORTANTE: trackingService se importa para que su código de limpieza
+// (nivel de módulo) se ejecute al arrancar la app y detenga cualquier
+// LocationTaskService residual de versiones anteriores.
+// El tracking GPS NO se inicia aquí — solo se inicia desde la pantalla
+// de Visitas, que es el único contexto seguro para Android 12+.
+import '@/services/trackingService';
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function MainContent() {

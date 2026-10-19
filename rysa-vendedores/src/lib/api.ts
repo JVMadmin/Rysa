@@ -14,6 +14,10 @@ export async function getBaseUrl(): Promise<string> {
   return DEFAULT_PROD_URL;
 }
 
+export function getBackendUrl(): string {
+  return "https://gruporysa.com";
+}
+
 export async function setBaseUrl(_url: string): Promise<void> {
   // Bloqueado estrictamente al backend oficial https://gruporysa.com/api
 }

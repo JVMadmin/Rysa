@@ -10,7 +10,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Loader2, Stamp, FileText, Download, Ban, Send, Settings2, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-react";
 
-const API = process.env.REACT_APP_BACKEND_URL + "/api";
+const API = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
 const REGIMENES = [["601", "601 General de Ley Personas Morales"], ["612", "612 PF Actividad Empresarial"], ["616", "616 Sin obligaciones fiscales"], ["621", "621 Incorporación Fiscal"], ["626", "626 RESICO"]];
 const MOTIVOS = [["02", "02 - Comprobante con errores sin relación"], ["01", "01 - Con errores con relación (requiere UUID)"], ["03", "03 - No se llevó a cabo la operación"], ["04", "04 - Operación nominativa (factura global)"]];
 

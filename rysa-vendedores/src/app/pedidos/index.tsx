@@ -18,8 +18,10 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/auth/AuthContext';
 import { ConnectivityBar } from '@/components/ConnectivityBar';
-import { getFullCatalog, getSellerClients, createOrder, createVentaDirecta, VentaDirectaPayload } from '@/services/salesService';
+import { getFullCatalog, getSellerClients, createOrder, createVentaDirecta, createClient, VentaDirectaPayload } from '@/services/salesService';
 import { getCatalogCache, getClientsCache, saveClientsCache, saveOfflineSale, queueOfflineAction } from '@/services/offlineCache';
+import { getCajaActual, abrirCaja, cerrarCaja, CajaInfo, CajaResumen, CajaCierreResult, getCajaReportePdfUrl } from '@/services/cajaService';
+import { getBackendUrl } from '@/lib/api';
 import { Client, Product, PedidoInput, PedidoCreatedResponse } from '@/types';
 import { shareTicketPdf, generateTicketPdf } from '@/lib/ticketPdf';
 
@@ -65,6 +67,30 @@ export default function PedidosScreen() {
   const [confirmedOrder, setConfirmedOrder] = useState<PedidoCreatedResponse | null>(null);
   const [sharingPdf, setSharingPdf] = useState(false);
 
+  // Estado de Caja / Turno Móvil
+  const [cajaActual, setCajaActual] = useState<CajaInfo | null>(null);
+  const [cajaResumen, setCajaResumen] = useState<CajaResumen | null>(null);
+  const [loadingCaja, setLoadingCaja] = useState(false);
+  const [cajaModalVisible, setCajaModalVisible] = useState(false);
+  const [fondoInicialInput, setFondoInicialInput] = useState('0');
+  const [turnoNombreInput, setTurnoNombreInput] = useState('');
+  const [efectivoContadoInput, setEfectivoContadoInput] = useState('');
+  const [submittingCaja, setSubmittingCaja] = useState(false);
+  const [cierreResult, setCierreResult] = useState<CajaCierreResult | null>(null);
+  const [cierreModalVisible, setCierreModalVisible] = useState(false);
+
+  // Registro de Nuevo Cliente Express
+  const [newClientModalVisible, setNewClientModalVisible] = useState(false);
+  const [newClientForm, setNewClientForm] = useState({
+    nombre: '',
+    telefono: '',
+    direccion: '',
+    ciudad: 'Palenque',
+    rfc: '',
+    condicion_pago: 'contado' as 'contado' | 'credito',
+  });
+  const [savingClient, setSavingClient] = useState(false);
+
   // Cliente Virtual: Público en General
   const publicoGeneralClient: Client = useMemo(
     () => ({
@@ -83,8 +109,22 @@ export default function PedidosScreen() {
     []
   );
 
-  // 1. Cargar catálogo completo (2,244 productos) y clientes
+  const refreshCaja = useCallback(async () => {
+    try {
+      setLoadingCaja(true);
+      const res = await getCajaActual();
+      setCajaActual(res.caja);
+      setCajaResumen(res.resumen || null);
+    } catch (err) {
+      console.warn('[pedidos] Error consultando caja actual:', err);
+    } finally {
+      setLoadingCaja(false);
+    }
+  }, []);
+
+  // 1. Cargar catálogo completo (2,244 productos), clientes y estado de caja
   useEffect(() => {
+    refreshCaja();
     Promise.all([getCatalogCache(), getClientsCache()]).then(([cachedCat, cachedCli]) => {
       if (cachedCat.products.length > 0) {
         setAllProducts(cachedCat.products);
@@ -109,7 +149,7 @@ export default function PedidosScreen() {
         })
         .catch(() => {});
     });
-  }, []);
+  }, [refreshCaja]);
 
   // 2. Obtener precio neto base según lista de precios del cliente (1 a 5)
   const getProductPriceForClient = useCallback(
@@ -148,21 +188,18 @@ export default function PedidosScreen() {
       .slice(0, 40);
   }, [allProducts, productSearch]);
 
-  // 4. Filtrado reactivo de clientes (Público General primero, luego Cartera Asignada, luego el resto)
+  // 4. Filtrado reactivo de clientes (ESTRICTAMENTE Público General y Cartera Asignada)
   const filteredClients = useMemo(() => {
     const q = clientSearch.toLowerCase().trim();
 
-    const sortedDbClients = [...clients].sort((a, b) => {
-      const aMine = a.en_cartera ? 1 : 0;
-      const bMine = b.en_cartera ? 1 : 0;
-      if (aMine !== bMine) return bMine - aMine;
-      return (a.nombre || '').localeCompare(b.nombre || '');
-    });
+    // En Vender solo se permiten clientes asignados en cartera o público en general
+    const portfolioClients = clients.filter((c) => c.en_cartera === true);
+    portfolioClients.sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
 
     if (!q) {
-      return [publicoGeneralClient, ...sortedDbClients];
+      return [publicoGeneralClient, ...portfolioClients];
     }
-    const matching = sortedDbClients.filter(
+    const matching = portfolioClients.filter(
       (c) =>
         c.nombre?.toLowerCase().includes(q) ||
         c.codigo?.toLowerCase().includes(q) ||
@@ -263,6 +300,21 @@ export default function PedidosScreen() {
       return;
     }
 
+    // Validación estricta: Se requiere turno de caja abierto para vender directo
+    if (tipoOperacion === 'venta_directa') {
+      if (!cajaActual || cajaActual.estado !== 'abierta') {
+        Alert.alert(
+          'Caja Cerrada / Turno Inactivo',
+          'Para realizar ventas directas y registrar cobros en efectivo o transferencias, es obligatorio tener un turno de caja abierto.',
+          [
+            { text: 'Abrir Caja Ahora', onPress: () => setCajaModalVisible(true) },
+            { text: 'Cancelar', style: 'cancel' },
+          ]
+        );
+        return;
+      }
+    }
+
     setSubmitting(true);
     const opKey = `idem_${tipoOperacion === 'venta_directa' ? 'vta' : 'cot'}_${user?.id || 'movil'}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
     const fechaHoy = new Date().toISOString().slice(0, 10);
@@ -294,6 +346,7 @@ export default function PedidosScreen() {
           const result = await createVentaDirecta(ventaPayload);
           setConfirmedOrder(result.venta || result);
           setTicketModalVisible(true);
+          refreshCaja();
         } catch (netErr: any) {
           // En caso de estar fuera de cobertura celular / offline:
           // Guardar venta localmente con clave idempotente para asignación atómica al reconectar
@@ -320,6 +373,7 @@ export default function PedidosScreen() {
           });
           setConfirmedOrder(offlineDoc);
           setTicketModalVisible(true);
+          refreshCaja();
           Alert.alert(
             'Venta Guardada Fuera de Línea',
             'Sin señal de internet en este momento. La venta quedó registrada de forma segura en tu teléfono con clave única. En cuanto el dispositivo detecte red de datos se le asignará automáticamente su folio fiscal consecutivo único sin duplicarse.'
@@ -358,6 +412,144 @@ export default function PedidosScreen() {
   const formatCurrency = (val?: number) => {
     const num = Number(val || 0);
     return `$${num.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
+  // 8. Handlers de Apertura y Cierre de Caja en Campo
+  const handleAbrirCaja = async () => {
+    const fondo = parseFloat(fondoInicialInput) || 0;
+    if (fondo < 0) {
+      Alert.alert('Monto Inválido', 'El fondo inicial no puede ser negativo.');
+      return;
+    }
+    setSubmittingCaja(true);
+    try {
+      await abrirCaja(fondo, turnoNombreInput.trim() || undefined);
+      await refreshCaja();
+      setCajaModalVisible(false);
+      setFondoInicialInput('0');
+      setTurnoNombreInput('');
+      Alert.alert('Caja Abierta', `Se ha iniciado el turno de caja exitosamente con fondo de ${formatCurrency(fondo)}.`);
+    } catch (err: any) {
+      Alert.alert('Error al abrir caja', err.message || 'No se pudo abrir la caja.');
+    } finally {
+      setSubmittingCaja(false);
+    }
+  };
+
+  const handleCerrarCaja = async () => {
+    const contado = parseFloat(efectivoContadoInput);
+    if (isNaN(contado) || contado < 0) {
+      Alert.alert('Monto Requerido', 'Por favor ingresa la cantidad exacta de efectivo en mano contada.');
+      return;
+    }
+
+    Alert.alert(
+      'Confirmar Cierre de Turno',
+      `¿Deseas realizar el corte de caja con un conteo de ${formatCurrency(contado)}? Esta acción cerrará el turno actual.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar Corte',
+          onPress: async () => {
+            setSubmittingCaja(true);
+            try {
+              const res = await cerrarCaja(contado);
+              setCierreResult(res);
+              setCajaModalVisible(false);
+              setCierreModalVisible(true);
+              setEfectivoContadoInput('');
+              await refreshCaja();
+            } catch (err: any) {
+              Alert.alert('Error en Cierre de Caja', err.message || 'No se pudo procesar el corte de caja.');
+            } finally {
+              setSubmittingCaja(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSendCorteWhatsApp = (cierreData: CajaCierreResult) => {
+    const backendUrl = getBackendUrl();
+    const pdfUrl = cierreData.reporte_pdf_url.startsWith('http')
+      ? cierreData.reporte_pdf_url
+      : `${backendUrl}${cierreData.reporte_pdf_url}`;
+
+    const diff = Number(cierreData.cierre.diferencia || 0);
+    const diffSign = diff > 0 ? `+${formatCurrency(diff)} (Sobrante)` : diff < 0 ? `-${formatCurrency(Math.abs(diff))} (Faltante)` : '$0.00 (Exacto)';
+
+    const msg =
+      `*CORTE DE CAJA - GRUPO RYSA*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `👤 *Asesor:* ${user?.name || 'Vendedor'}\n` +
+      `📅 *Fecha:* ${new Date().toLocaleDateString('es-MX')} ${new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}\n` +
+      `📦 *Turno ID:* #${cierreData.caja_id.slice(-6).toUpperCase()}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `💵 *Fondo Inicial:* ${formatCurrency(cierreData.cierre.fondo_inicial)}\n` +
+      `🛍️ *Total Ventas:* ${formatCurrency(cierreData.cierre.total_ventas)} (${cierreData.cierre.num_ventas} ventas)\n` +
+      `💰 *Ventas Efectivo:* ${formatCurrency(cierreData.cierre.ventas_efectivo)}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🎯 *Efectivo Esperado:* ${formatCurrency(cierreData.cierre.efectivo_esperado)}\n` +
+      `✋ *Efectivo Contado:* ${formatCurrency(cierreData.cierre.efectivo_contado)}\n` +
+      `⚖️ *Diferencia:* ${diffSign}\n` +
+      `━━━━━━━━━━━━━━━━━━━━━\n` +
+      `📄 *Reporte PDF Oficial:*\n${pdfUrl}\n`;
+
+    const encoded = encodeURIComponent(msg);
+    Linking.openURL(`https://wa.me/?text=${encoded}`).catch(() => {
+      Linking.openURL(`whatsapp://send?text=${encoded}`).catch(() => {
+        Alert.alert('Error', 'No se pudo abrir WhatsApp en el dispositivo.');
+      });
+    });
+  };
+
+  // 9. Registro Exprés de Cliente Nuevo
+  const handleCreateNewClient = async () => {
+    if (!newClientForm.nombre.trim()) {
+      Alert.alert('Campo Requerido', 'Por favor ingresa el nombre del nuevo cliente.');
+      return;
+    }
+    setSavingClient(true);
+    try {
+      const created = await createClient({
+        nombre: newClientForm.nombre.trim(),
+        telefono: newClientForm.telefono.trim() || undefined,
+        whatsapp: newClientForm.telefono.trim() || undefined,
+        direccion: newClientForm.direccion.trim() || undefined,
+        ciudad: newClientForm.ciudad.trim() || 'Palenque',
+        rfc: newClientForm.rfc.trim() || 'XAXX010101000',
+        condicion_pago: newClientForm.condicion_pago,
+        tipo: 'publico',
+        estado: 'activo',
+      });
+
+      const fullClient: Client = {
+        ...created,
+        en_cartera: true,
+        saldo: 0,
+        limite_credito: 0,
+      };
+
+      setClients((prev) => [fullClient, ...prev]);
+      await saveClientsCache([fullClient, ...clients]);
+      setSelectedClient(fullClient);
+      setNewClientModalVisible(false);
+      setClientModalVisible(false);
+      setNewClientForm({
+        nombre: '',
+        telefono: '',
+        direccion: '',
+        ciudad: 'Palenque',
+        rfc: '',
+        condicion_pago: 'contado',
+      });
+      showToast(`✅ Cliente ${fullClient.nombre} registrado y asignado.`);
+    } catch (err: any) {
+      Alert.alert('Error al registrar cliente', err.message || 'No se pudo crear el cliente.');
+    } finally {
+      setSavingClient(false);
+    }
   };
 
   // 8. Compartir Comprobante Oficial en formato PDF
@@ -440,6 +632,62 @@ export default function PedidosScreen() {
           <Text style={styles.headerTitle}>Nueva Venta en Campo</Text>
           <Text style={styles.headerSubtitle}>Sucursal Matriz (Palenque) • Pedido Oficial</Text>
         </View>
+
+        {/* Barra de Estado y Control de Caja / Turno */}
+        <TouchableOpacity
+          style={[
+            styles.cajaStatusBar,
+            cajaActual?.estado === 'abierta' ? styles.cajaStatusBarOpen : styles.cajaStatusBarClosed,
+          ]}
+          onPress={() => setCajaModalVisible(true)}
+          activeOpacity={0.8}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
+            <View
+              style={[
+                styles.cajaStatusDot,
+                cajaActual?.estado === 'abierta' ? styles.cajaStatusDotOpen : styles.cajaStatusDotClosed,
+              ]}
+            />
+            <View style={{ flex: 1 }}>
+              <Text
+                style={[
+                  styles.cajaStatusTitle,
+                  cajaActual?.estado === 'abierta' ? styles.cajaStatusTitleOpen : styles.cajaStatusTitleClosed,
+                ]}
+              >
+                {cajaActual?.estado === 'abierta'
+                  ? `Turno #${cajaActual.caja_numero || 1} Abierto (${cajaActual.caja_nombre || 'Caja Móvil'})`
+                  : 'Caja Cerrada (Turno Inactivo)'}
+              </Text>
+              <Text style={styles.cajaStatusSub}>
+                {cajaActual?.estado === 'abierta'
+                  ? `Fondo: ${formatCurrency(cajaActual.fondo_inicial)} • Ventas: ${formatCurrency(cajaResumen?.total_ventas || 0)}`
+                  : 'Requerido para venta directa • Toca para abrir'}
+              </Text>
+            </View>
+          </View>
+          <View
+            style={[
+              styles.cajaActionBadge,
+              cajaActual?.estado === 'abierta' ? styles.cajaActionBadgeOpen : styles.cajaActionBadgeClosed,
+            ]}
+          >
+            <MaterialIcons
+              name={cajaActual?.estado === 'abierta' ? 'account-balance-wallet' : 'lock-open'}
+              size={14}
+              color={cajaActual?.estado === 'abierta' ? '#2E7D32' : '#C53030'}
+            />
+            <Text
+              style={[
+                styles.cajaActionText,
+                cajaActual?.estado === 'abierta' ? styles.cajaActionTextOpen : styles.cajaActionTextClosed,
+              ]}
+            >
+              {cajaActual?.estado === 'abierta' ? 'Turno' : 'Abrir'}
+            </Text>
+          </View>
+        </TouchableOpacity>
 
         {/* Selector de Tipo de Operación: Venta Directa vs Cotización */}
         <View style={styles.operationTypeCard}>
@@ -802,9 +1050,19 @@ export default function PedidosScreen() {
         <SafeAreaView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
           <View style={styles.clientModalHeader}>
             <Text style={styles.clientModalTitle}>Seleccionar Cliente</Text>
-            <TouchableOpacity onPress={() => setClientModalVisible(false)}>
-              <MaterialIcons name="close" size={24} color="#718096" />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <TouchableOpacity
+                style={styles.addClientHeaderBtn}
+                onPress={() => setNewClientModalVisible(true)}
+                activeOpacity={0.8}
+              >
+                <MaterialIcons name="person-add" size={16} color="#FFFFFF" />
+                <Text style={styles.addClientHeaderBtnText}>+ Nuevo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setClientModalVisible(false)}>
+                <MaterialIcons name="close" size={24} color="#718096" />
+              </TouchableOpacity>
+            </View>
           </View>
           <View style={styles.clientSearchBox}>
             <MaterialIcons name="search" size={20} color="#718096" />
@@ -837,26 +1095,440 @@ export default function PedidosScreen() {
                       <View style={styles.badgePublico}>
                         <Text style={styles.badgePublicoText}>Mostrador</Text>
                       </View>
-                    ) : item.en_cartera ? (
+                    ) : (
                       <View style={styles.badgeCartera}>
                         <Text style={styles.badgeCarteraText}>⭐ Cliente en cartera</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.badgeGeneral}>
-                        <Text style={styles.badgeGeneralText}>Directorio general</Text>
                       </View>
                     )}
                   </View>
                   <Text style={styles.pickerClientInfo}>
                     {item.codigo ? `${item.codigo} • ` : ''}
                     {item.ciudad || item.colonia || 'Palenque'}
-                    {item.en_cartera ? ` • Saldo: ${formatCurrency(item.saldo)}` : ' • Saldo confidencial'}
+                    {item.en_cartera ? ` • Saldo: ${formatCurrency(item.saldo)}` : ''}
                   </Text>
                 </TouchableOpacity>
               );
             }}
           />
         </SafeAreaView>
+      </Modal>
+
+      {/* Modal: Alta Rápida de Cliente en Campo */}
+      <Modal
+        visible={newClientModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setNewClientModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <MaterialIcons name="person-add" size={22} color="#D32F2F" />
+                <Text style={styles.modalHeaderTitle}>Nuevo Cliente en Campo</Text>
+              </View>
+              <TouchableOpacity onPress={() => setNewClientModalVisible(false)}>
+                <MaterialIcons name="close" size={22} color="#718096" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
+              <Text style={styles.inputFieldLabel}>Nombre Completo / Razón Social *</Text>
+              <TextInput
+                style={styles.modalTextInput}
+                placeholder="Ej. Taller Mecánico San Juan / Juan Pérez"
+                placeholderTextColor="#A0AEC0"
+                value={newClientForm.nombre}
+                onChangeText={(t) => setNewClientForm((p) => ({ ...p, nombre: t }))}
+              />
+
+              <Text style={styles.inputFieldLabel}>Teléfono / WhatsApp</Text>
+              <TextInput
+                style={styles.modalTextInput}
+                placeholder="10 dígitos (ej. 9161234567)"
+                placeholderTextColor="#A0AEC0"
+                keyboardType="phone-pad"
+                value={newClientForm.telefono}
+                onChangeText={(t) => setNewClientForm((p) => ({ ...p, telefono: t }))}
+              />
+
+              <Text style={styles.inputFieldLabel}>Dirección (Calle y No.)</Text>
+              <TextInput
+                style={styles.modalTextInput}
+                placeholder="Calle, No. Exterior, Colonia"
+                placeholderTextColor="#A0AEC0"
+                value={newClientForm.direccion}
+                onChangeText={(t) => setNewClientForm((p) => ({ ...p, direccion: t }))}
+              />
+
+              <Text style={styles.inputFieldLabel}>Ciudad / Municipio</Text>
+              <TextInput
+                style={styles.modalTextInput}
+                placeholder="Palenque"
+                placeholderTextColor="#A0AEC0"
+                value={newClientForm.ciudad}
+                onChangeText={(t) => setNewClientForm((p) => ({ ...p, ciudad: t }))}
+              />
+
+              <Text style={styles.inputFieldLabel}>RFC (Opcional)</Text>
+              <TextInput
+                style={styles.modalTextInput}
+                placeholder="XAXX010101000"
+                placeholderTextColor="#A0AEC0"
+                autoCapitalize="characters"
+                value={newClientForm.rfc}
+                onChangeText={(t) => setNewClientForm((p) => ({ ...p, rfc: t }))}
+              />
+
+              <Text style={styles.inputFieldLabel}>Condición Comercial Inicial</Text>
+              <View style={styles.condicionRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.condicionBtn,
+                    newClientForm.condicion_pago === 'contado' && styles.condicionBtnActive,
+                  ]}
+                  onPress={() => setNewClientForm((p) => ({ ...p, condicion_pago: 'contado' }))}
+                >
+                  <Text
+                    style={[
+                      styles.condicionText,
+                      newClientForm.condicion_pago === 'contado' && styles.condicionTextActive,
+                    ]}
+                  >
+                    Contado (Recomendado)
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.condicionBtn,
+                    newClientForm.condicion_pago === 'credito' && styles.condicionBtnActive,
+                  ]}
+                  onPress={() => setNewClientForm((p) => ({ ...p, condicion_pago: 'credito' }))}
+                >
+                  <Text
+                    style={[
+                      styles.condicionText,
+                      newClientForm.condicion_pago === 'credito' && styles.condicionTextActive,
+                    ]}
+                  >
+                    Crédito
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, savingClient && { opacity: 0.6 }]}
+                onPress={handleCreateNewClient}
+                disabled={savingClient}
+                activeOpacity={0.8}
+              >
+                {savingClient ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <MaterialIcons name="check" size={18} color="#FFFFFF" />
+                    <Text style={styles.modalSubmitBtnText}>Registrar y Seleccionar para Venta</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: Control y Gestión de Turno de Caja */}
+      <Modal
+        visible={cajaModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setCajaModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <MaterialIcons
+                  name="point-of-sale"
+                  size={24}
+                  color={cajaActual?.estado === 'abierta' ? '#2E7D32' : '#D32F2F'}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalHeaderTitle}>
+                    {cajaActual?.estado === 'abierta' ? 'Caja / Turno en Operación' : 'Apertura de Caja'}
+                  </Text>
+                  <Text style={styles.modalHeaderSubtitle}>
+                    {cajaActual?.estado === 'abierta'
+                      ? `Turno #${cajaActual.caja_numero || 1} • Asesor: ${user?.name || 'Vendedor'}`
+                      : 'Inicia tu turno de venta para poder cobrar en ruta'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setCajaModalVisible(false)}>
+                <MaterialIcons name="close" size={22} color="#718096" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
+              {cajaActual?.estado === 'abierta' ? (
+                <>
+                  {/* Resumen del Turno Abierto */}
+                  <View style={styles.cajaSummaryBox}>
+                    <View style={styles.cajaSummaryRow}>
+                      <Text style={styles.cajaSummaryLabel}>Fondo Inicial:</Text>
+                      <Text style={styles.cajaSummaryVal}>{formatCurrency(cajaActual.fondo_inicial)}</Text>
+                    </View>
+                    <View style={styles.cajaSummaryRow}>
+                      <Text style={styles.cajaSummaryLabel}>Ventas en Efectivo:</Text>
+                      <Text style={[styles.cajaSummaryVal, { color: '#2E7D32' }]}>
+                        +{formatCurrency(cajaResumen?.ventas_efectivo || 0)}
+                      </Text>
+                    </View>
+                    <View style={styles.cajaSummaryRow}>
+                      <Text style={styles.cajaSummaryLabel}>Ventas Otros (Transf/Tarjeta):</Text>
+                      <Text style={styles.cajaSummaryVal}>{formatCurrency(cajaResumen?.ventas_otros || 0)}</Text>
+                    </View>
+                    <View style={styles.cajaSummaryRow}>
+                      <Text style={styles.cajaSummaryLabel}>Total Ventas del Turno:</Text>
+                      <Text style={[styles.cajaSummaryVal, { fontWeight: '700' }]}>
+                        {formatCurrency(cajaResumen?.total_ventas || 0)}
+                      </Text>
+                    </View>
+                    <View style={styles.cajaSummaryDivider} />
+                    <View style={styles.cajaSummaryRow}>
+                      <Text style={[styles.cajaSummaryLabel, { fontWeight: '800', color: '#1A202C' }]}>
+                        EFECTIVO ESPERADO EN MANO:
+                      </Text>
+                      <Text style={[styles.cajaSummaryVal, { fontWeight: '800', color: '#1976D2', fontSize: 16 }]}>
+                        {formatCurrency(cajaResumen?.efectivo_esperado || cajaActual.fondo_inicial)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Arqueo para Cierre de Caja */}
+                  <View style={styles.cierreSection}>
+                    <Text style={styles.cierreTitle}>Cierre de Turno (Arqueo de Efectivo)</Text>
+                    <Text style={styles.cierreSubtitle}>
+                      Cuenta el dinero físico que tienes en mano e ingresa el monto total para realizar el corte:
+                    </Text>
+
+                    <Text style={styles.inputFieldLabel}>Efectivo Físico Contado ($) *</Text>
+                    <TextInput
+                      style={[styles.modalTextInput, { fontSize: 18, fontWeight: '700', textAlign: 'center' }]}
+                      placeholder="0.00"
+                      placeholderTextColor="#A0AEC0"
+                      keyboardType="numeric"
+                      value={efectivoContadoInput}
+                      onChangeText={setEfectivoContadoInput}
+                    />
+
+                    {efectivoContadoInput.trim() !== '' && (
+                      <View style={styles.diffBox}>
+                        <Text style={styles.diffLabel}>Diferencia de Arqueo:</Text>
+                        {(() => {
+                          const contado = parseFloat(efectivoContadoInput) || 0;
+                          const esperado = Number(cajaResumen?.efectivo_esperado ?? cajaActual.fondo_inicial);
+                          const diff = contado - esperado;
+                          const isOk = Math.abs(diff) < 0.01;
+                          const isSurplus = diff > 0;
+                          return (
+                            <Text
+                              style={[
+                                styles.diffValue,
+                                isOk ? styles.diffExact : isSurplus ? styles.diffSurplus : styles.diffShort,
+                              ]}
+                            >
+                              {isSurplus ? '+' : ''}
+                              {formatCurrency(diff)} ({isOk ? 'Cuadrado' : isSurplus ? 'Sobrante' : 'Faltante'})
+                            </Text>
+                          );
+                        })()}
+                      </View>
+                    )}
+
+                    <TouchableOpacity
+                      style={[styles.closeTurnoBtn, submittingCaja && { opacity: 0.6 }]}
+                      onPress={handleCerrarCaja}
+                      disabled={submittingCaja}
+                      activeOpacity={0.8}
+                    >
+                      {submittingCaja ? (
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                      ) : (
+                        <>
+                          <MaterialIcons name="lock" size={18} color="#FFFFFF" />
+                          <Text style={styles.closeTurnoBtnText}>Cerrar Caja (Corte de Turno)</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : (
+                <>
+                  {/* Formulario de Apertura */}
+                  <View style={styles.aperturaNotice}>
+                    <MaterialIcons name="info" size={20} color="#E65100" />
+                    <Text style={styles.aperturaNoticeText}>
+                      Al abrir tu turno podrás realizar ventas directas, cobros en efectivo y transferencias desde el punto de venta.
+                    </Text>
+                  </View>
+
+                  <Text style={styles.inputFieldLabel}>Fondo Inicial de Caja ($ Efectivo)</Text>
+                  <TextInput
+                    style={[styles.modalTextInput, { fontSize: 18, fontWeight: '700', textAlign: 'center' }]}
+                    placeholder="0.00"
+                    placeholderTextColor="#A0AEC0"
+                    keyboardType="numeric"
+                    value={fondoInicialInput}
+                    onChangeText={setFondoInicialInput}
+                  />
+
+                  <Text style={styles.inputFieldLabel}>Nombre o Identificador del Turno (Opcional)</Text>
+                  <TextInput
+                    style={styles.modalTextInput}
+                    placeholder="Ej. Ruta Centro Palenque / Turno Mañana"
+                    placeholderTextColor="#A0AEC0"
+                    value={turnoNombreInput}
+                    onChangeText={setTurnoNombreInput}
+                  />
+
+                  <TouchableOpacity
+                    style={[styles.openTurnoBtn, submittingCaja && { opacity: 0.6 }]}
+                    onPress={handleAbrirCaja}
+                    disabled={submittingCaja}
+                    activeOpacity={0.8}
+                  >
+                    {submittingCaja ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <MaterialIcons name="lock-open" size={18} color="#FFFFFF" />
+                        <Text style={styles.openTurnoBtnText}>Abrir Caja e Iniciar Turno</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal: Resultado del Corte de Caja con Reporte PDF y WhatsApp */}
+      <Modal
+        visible={cierreModalVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => setCierreModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { maxHeight: '90%' }]}>
+            <View style={{ alignItems: 'center', marginBottom: 12 }}>
+              <View style={styles.cierreSuccessBadge}>
+                <MaterialIcons name="check-circle" size={42} color="#2E7D32" />
+              </View>
+              <Text style={styles.cierreSuccessTitle}>¡Corte de Caja Exitoso!</Text>
+              <Text style={styles.cierreSuccessSubtitle}>
+                El turno se cerró correctamente y el reporte oficial ha sido generado.
+              </Text>
+            </View>
+
+            {cierreResult && (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 10 }}>
+                <View style={styles.corteDataCard}>
+                  <View style={styles.corteDataRow}>
+                    <Text style={styles.corteDataLabel}>Turno ID:</Text>
+                    <Text style={styles.corteDataVal}>#{cierreResult.caja_id.slice(-6).toUpperCase()}</Text>
+                  </View>
+                  <View style={styles.corteDataRow}>
+                    <Text style={styles.corteDataLabel}>Fondo Inicial:</Text>
+                    <Text style={styles.corteDataVal}>{formatCurrency(cierreResult.cierre.fondo_inicial)}</Text>
+                  </View>
+                  <View style={styles.corteDataRow}>
+                    <Text style={styles.corteDataLabel}>Total Ventas ({cierreResult.cierre.num_ventas} vtas):</Text>
+                    <Text style={[styles.corteDataVal, { fontWeight: '700' }]}>
+                      {formatCurrency(cierreResult.cierre.total_ventas)}
+                    </Text>
+                  </View>
+                  <View style={styles.corteDataRow}>
+                    <Text style={styles.corteDataLabel}>Ventas en Efectivo:</Text>
+                    <Text style={[styles.corteDataVal, { color: '#2E7D32' }]}>
+                      {formatCurrency(cierreResult.cierre.ventas_efectivo)}
+                    </Text>
+                  </View>
+                  <View style={styles.corteDataRow}>
+                    <Text style={styles.corteDataLabel}>Efectivo Esperado:</Text>
+                    <Text style={styles.corteDataVal}>{formatCurrency(cierreResult.cierre.efectivo_esperado)}</Text>
+                  </View>
+                  <View style={styles.corteDataRow}>
+                    <Text style={styles.corteDataLabel}>Efectivo Contado:</Text>
+                    <Text style={[styles.corteDataVal, { fontWeight: '700' }]}>
+                      {formatCurrency(cierreResult.cierre.efectivo_contado)}
+                    </Text>
+                  </View>
+                  <View style={styles.corteDataDivider} />
+                  <View style={styles.corteDataRow}>
+                    <Text style={[styles.corteDataLabel, { fontWeight: '800' }]}>Diferencia:</Text>
+                    <Text
+                      style={[
+                        styles.corteDataVal,
+                        {
+                          fontWeight: '800',
+                          color:
+                            cierreResult.cierre.diferencia > 0
+                              ? '#2E7D32'
+                              : cierreResult.cierre.diferencia < 0
+                              ? '#D32F2F'
+                              : '#1A202C',
+                        },
+                      ]}
+                    >
+                      {cierreResult.cierre.diferencia > 0 ? '+' : ''}
+                      {formatCurrency(cierreResult.cierre.diferencia)}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Botón Destacado: Enviar por WhatsApp */}
+                <TouchableOpacity
+                  style={styles.whatsappShareBtn}
+                  onPress={() => handleSendCorteWhatsApp(cierreResult)}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="send" size={20} color="#FFFFFF" />
+                  <Text style={styles.whatsappShareBtnText}>Enviar Corte por WhatsApp</Text>
+                </TouchableOpacity>
+
+                {/* Ver PDF */}
+                <TouchableOpacity
+                  style={styles.pdfReportBtn}
+                  onPress={() => {
+                    const fullPdf = cierreResult.reporte_pdf_url.startsWith('http')
+                      ? cierreResult.reporte_pdf_url
+                      : `${getBackendUrl()}${cierreResult.reporte_pdf_url}`;
+                    Linking.openURL(fullPdf).catch(() => {
+                      Alert.alert('PDF', 'No se pudo abrir el visor de PDF.');
+                    });
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <MaterialIcons name="picture-as-pdf" size={18} color="#D32F2F" />
+                  <Text style={styles.pdfReportBtnText}>Descargar / Ver PDF Oficial</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.closeCierreModalBtn}
+                  onPress={() => {
+                    setCierreModalVisible(false);
+                    setCierreResult(null);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.closeCierreModalBtnText}>Terminar</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+          </View>
+        </View>
       </Modal>
 
       {/* MODAL: Ticket / Comprobante Oficial con Logo y Exportación PDF */}
@@ -1668,5 +2340,366 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  // Barra de Estado de Caja
+  cajaStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+  },
+  cajaStatusBarOpen: {
+    backgroundColor: '#F0FFF4',
+    borderColor: '#C6F6D5',
+  },
+  cajaStatusBarClosed: {
+    backgroundColor: '#FFF5F5',
+    borderColor: '#FEB2B2',
+  },
+  cajaStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  cajaStatusDotOpen: {
+    backgroundColor: '#38A169',
+  },
+  cajaStatusDotClosed: {
+    backgroundColor: '#E53E3E',
+  },
+  cajaStatusTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  cajaStatusTitleOpen: {
+    color: '#22543D',
+  },
+  cajaStatusTitleClosed: {
+    color: '#9B2C2C',
+  },
+  cajaStatusSub: {
+    fontSize: 11,
+    color: '#718096',
+    marginTop: 1,
+  },
+  cajaActionBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    gap: 4,
+  },
+  cajaActionBadgeOpen: {
+    backgroundColor: '#C6F6D5',
+  },
+  cajaActionBadgeClosed: {
+    backgroundColor: '#FED7D7',
+  },
+  cajaActionText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cajaActionTextOpen: {
+    color: '#22543D',
+  },
+  cajaActionTextClosed: {
+    color: '#9B2C2C',
+  },
+  addClientHeaderBtn: {
+    backgroundColor: '#D32F2F',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    gap: 4,
+  },
+  addClientHeaderBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    width: '100%',
+    maxHeight: '85%',
+    padding: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDF2F7',
+    marginBottom: 14,
+  },
+  modalHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1A202C',
+  },
+  modalHeaderSubtitle: {
+    fontSize: 11,
+    color: '#718096',
+    marginTop: 2,
+  },
+  inputFieldLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4A5568',
+    marginBottom: 4,
+    marginTop: 10,
+  },
+  modalTextInput: {
+    backgroundColor: '#EDF2F7',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: '#1A202C',
+  },
+  modalSubmitBtn: {
+    backgroundColor: '#D32F2F',
+    borderRadius: 10,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 16,
+  },
+  modalSubmitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  cajaSummaryBox: {
+    backgroundColor: '#F7FAFC',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 14,
+  },
+  cajaSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 3,
+  },
+  cajaSummaryLabel: {
+    fontSize: 12,
+    color: '#4A5568',
+  },
+  cajaSummaryVal: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1A202C',
+  },
+  cajaSummaryDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 8,
+  },
+  cierreSection: {
+    marginTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#EDF2F7',
+    paddingTop: 12,
+  },
+  cierreTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1A202C',
+  },
+  cierreSubtitle: {
+    fontSize: 11,
+    color: '#718096',
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  diffBox: {
+    backgroundColor: '#EDF2F7',
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  diffLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4A5568',
+  },
+  diffValue: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  diffExact: {
+    color: '#2E7D32',
+  },
+  diffSurplus: {
+    color: '#1976D2',
+  },
+  diffShort: {
+    color: '#D32F2F',
+  },
+  closeTurnoBtn: {
+    backgroundColor: '#C53030',
+    borderRadius: 10,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  closeTurnoBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  aperturaNotice: {
+    backgroundColor: '#FFF8E1',
+    borderColor: '#FFE082',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  aperturaNoticeText: {
+    fontSize: 11,
+    color: '#E65100',
+    flex: 1,
+    fontWeight: '500',
+  },
+  openTurnoBtn: {
+    backgroundColor: '#2E7D32',
+    borderRadius: 10,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 18,
+  },
+  openTurnoBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  cierreSuccessBadge: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#E8F5E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  cierreSuccessTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1A202C',
+  },
+  cierreSuccessSubtitle: {
+    fontSize: 12,
+    color: '#718096',
+    textAlign: 'center',
+    marginTop: 2,
+    paddingHorizontal: 12,
+  },
+  corteDataCard: {
+    backgroundColor: '#F7FAFC',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginVertical: 12,
+  },
+  corteDataRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 3,
+  },
+  corteDataLabel: {
+    fontSize: 12,
+    color: '#4A5568',
+  },
+  corteDataVal: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1A202C',
+  },
+  corteDataDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 8,
+  },
+  whatsappShareBtn: {
+    backgroundColor: '#25D366',
+    borderRadius: 10,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  whatsappShareBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  pdfReportBtn: {
+    backgroundColor: '#FFF5F5',
+    borderWidth: 1,
+    borderColor: '#FEB2B2',
+    borderRadius: 10,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  pdfReportBtnText: {
+    color: '#D32F2F',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  closeCierreModalBtn: {
+    backgroundColor: '#EDF2F7',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeCierreModalBtnText: {
+    color: '#4A5568',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

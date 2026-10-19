@@ -1,12 +1,33 @@
 import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { registerSellerLocation } from './salesService';
 import { queueOfflineAction, saveLastGpsCache, getLastGpsCache } from './offlineCache';
 import { syncManager } from './syncManager';
 
+export const LOCATION_BACKGROUND_TASK = 'RYSA_BACKGROUND_LOCATION_TASK';
 const TRACKING_STORAGE_KEY = 'rysa_tracking_active';
 const INTERVAL_MS = 15000;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIMPIEZA AL NIVEL DE MÓDULO
+// Al importar este módulo, detener inmediatamente cualquier LocationTaskService
+// residual de versiones anteriores. Si la app fue actualizada y tenía un
+// Foreground Service corriendo, Android lo intentará reiniciar automáticamente
+// causando ForegroundServiceStartNotAllowedException antes de que nuestro
+// código de JS pueda hacer nada.
+// ─────────────────────────────────────────────────────────────────────────────
+if (Platform.OS === 'android') {
+  Location.hasStartedLocationUpdatesAsync(LOCATION_BACKGROUND_TASK)
+    .then((running) => {
+      if (running) {
+        console.log('[trackingService] Deteniendo LocationTaskService residual de sesión anterior...');
+        return Location.stopLocationUpdatesAsync(LOCATION_BACKGROUND_TASK).catch(() => {});
+      }
+    })
+    .catch(() => {});
+}
 
 export interface TrackingLocation {
   latitud: number;
@@ -19,16 +40,13 @@ export type TrackingListener = (active: boolean, location?: TrackingLocation) =>
 
 class TrackingService {
   private active = false;
+  private isStarting = false;
   private watchSubscription: Location.LocationSubscription | null = null;
   private intervalTimer: any = null;
   private listeners: Set<TrackingListener> = new Set();
   private lastLocation: TrackingLocation | null = null;
 
   constructor() {
-    this.init();
-  }
-
-  async init() {
     try {
       syncManager.subscribeReconnect(() => {
         if (this.active) {
@@ -36,14 +54,11 @@ class TrackingService {
           this.transmitCurrentPosition(true).catch(() => {});
         }
       });
+    } catch {}
+  }
 
-      const stored = await AsyncStorage.getItem(TRACKING_STORAGE_KEY);
-      if (stored === 'true') {
-        await this.startTracking(true);
-      }
-    } catch (e) {
-      console.warn('[trackingService] Error al inicializar:', e);
-    }
+  async init(): Promise<void> {
+    // No-op defensivo para compatibilidad hacia atrás
   }
 
   isTracking(): boolean {
@@ -61,28 +76,43 @@ class TrackingService {
   }
 
   private notify() {
-    this.listeners.forEach((l) => l(this.active, this.lastLocation || undefined));
+    this.listeners.forEach((l) => {
+      try {
+        l(this.active, this.lastLocation || undefined);
+      } catch {}
+    });
   }
 
   async startTracking(silent = false): Promise<boolean> {
     if (this.active) return true;
+    if (this.isStarting) return false;
+    this.isStarting = true;
 
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.warn('[trackingService] Permisos de ubicación denegados');
+      // 1. VERIFICAR permisos en primer plano — NUNCA solicitarlos aquí.
+      // Los permisos son gestionados exclusivamente por useForegroundPermissions()
+      // en _layout.tsx. Llamar requestForegroundPermissionsAsync() desde aquí
+      // puede generar solicitudes concurrentes que crashean la app en Android 12+.
+      const { status: fgStatus } = await Location.getForegroundPermissionsAsync().catch(() => ({ status: 'denied' as const }));
+      if (fgStatus !== 'granted') {
+        console.warn('[trackingService] Permisos de ubicación en primer plano no concedidos aún');
+        this.isStarting = false;
         return false;
       }
 
       this.active = true;
-      await AsyncStorage.setItem(TRACKING_STORAGE_KEY, 'true');
+      await AsyncStorage.setItem(TRACKING_STORAGE_KEY, 'true').catch(() => {});
 
-      // 1. Envío inmediato inicial
-      await this.transmitCurrentPosition(silent);
+      // 2. Envío inmediato inicial no bloqueante
+      this.transmitCurrentPosition(silent).catch(() => {});
 
-      // 2. watchPositionAsync nativo continuo (se activa con movimiento o tiempo)
+      // 3. Listener en primer plano (watchPositionAsync) 100% seguro y estable
       if (Platform.OS !== 'web') {
         try {
+          if (this.watchSubscription) {
+            this.watchSubscription.remove();
+            this.watchSubscription = null;
+          }
           this.watchSubscription = await Location.watchPositionAsync(
             {
               accuracy: Location.Accuracy.High,
@@ -90,39 +120,120 @@ class TrackingService {
               distanceInterval: 10,
             },
             async (loc) => {
-              await this.processCoords({
-                latitud: loc.coords.latitude,
-                longitud: loc.coords.longitude,
-                precision: loc.coords.accuracy ? Math.round(loc.coords.accuracy) : 5,
-              });
+              try {
+                await this.processCoords({
+                  latitud: loc.coords.latitude,
+                  longitud: loc.coords.longitude,
+                  precision: loc.coords.accuracy ? Math.round(loc.coords.accuracy) : 5,
+                }, 'gps_app_vendedores_live');
+              } catch {}
             }
           );
         } catch (watchErr) {
-          console.warn('[trackingService] watchPositionAsync no disponible, usando interval:', watchErr);
+          console.warn('[trackingService] watchPositionAsync complementario no disponible:', watchErr);
         }
-      }
 
-      // 3. Intervalo de respaldo periódico por si el dispositivo está estático
-      this.intervalTimer = setInterval(async () => {
-        if (this.active) {
-          await this.transmitCurrentPosition(true);
-        }
-      }, INTERVAL_MS);
+        // NOTA: startLocationUpdatesAsync (Foreground Service) NO se llama automáticamente aquí.
+        // Se llama SOLO cuando el usuario presiona explícitamente el botón "Activar Ruta" en la
+        // pantalla de Visitas (toggleContinuousTracking → activateBackgroundService()).
+        // Esto garantiza que siempre hay una interacción directa del usuario como contexto,
+        // lo que Android requiere para permitir startForegroundService() en Android 12+.
+      }
 
       this.notify();
       return true;
     } catch (err) {
       console.warn('[trackingService] Error al iniciar tracking:', err);
       this.active = false;
-      await AsyncStorage.removeItem(TRACKING_STORAGE_KEY);
+      await AsyncStorage.removeItem(TRACKING_STORAGE_KEY).catch(() => {});
       this.notify();
       return false;
+    } finally {
+      this.isStarting = false;
+    }
+  }
+
+  /**
+   * Solicita el permiso de ubicación en segundo plano de forma segura.
+   * Debe llamarse desde un contexto de UI visible (no desde startup).
+   * En Android 11+ esto navega al usuario a los Ajustes del sistema.
+   * Una vez que el usuario regresa a la app, el Foreground Service se activará
+   * automáticamente gracias al listener de AppState.
+   */
+  async requestBackgroundPermission(): Promise<boolean> {
+    if (Platform.OS !== 'android') return false;
+    try {
+      const { status } = await Location.requestBackgroundPermissionsAsync();
+      console.log('[trackingService] Permiso background solicitado manualmente, resultado:', status);
+      // Si ya fue concedido y el tracking está activo, iniciar Foreground Service ahora
+      if (status === 'granted' && this.active && AppState.currentState === 'active') {
+        await this.tryStartForegroundService();
+      }
+      return status === 'granted';
+    } catch (err) {
+      console.warn('[trackingService] Error solicitando permiso background:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Verifica el permiso background actual sin solicitarlo.
+   */
+  async getBackgroundPermissionStatus(): Promise<string> {
+    try {
+      const perm = await Location.getBackgroundPermissionsAsync();
+      return perm.status;
+    } catch {
+      return 'undetermined';
+    }
+  }
+
+  /**
+   * Intenta activar el Foreground Service de fondo si el permiso ya fue concedido.
+   * Se llama automáticamente cuando la app vuelve al primer plano.
+   */
+  async tryStartForegroundService(): Promise<void> {
+    if (!this.active || Platform.OS !== 'android') return;
+    try {
+      const bgPerm = await Location.getBackgroundPermissionsAsync().catch(() => null);
+      if (bgPerm?.status !== 'granted') return;
+
+      const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_BACKGROUND_TASK).catch(() => false);
+      if (!hasStarted) {
+        await Location.startLocationUpdatesAsync(LOCATION_BACKGROUND_TASK, {
+          accuracy: Location.Accuracy.High,
+          timeInterval: INTERVAL_MS,
+          distanceInterval: 10,
+          deferredUpdatesInterval: INTERVAL_MS,
+          foregroundService: {
+            notificationTitle: 'RYSA Vendedores en Ruta',
+            notificationBody: 'Transmitiendo telemetría GPS continua en campo',
+            notificationColor: '#D32F2F',
+          },
+          pausesUpdatesAutomatically: false,
+          showsBackgroundLocationIndicator: true,
+        });
+        console.log('[trackingService] Foreground Service activado tras regreso de Ajustes');
+      }
+    } catch (err) {
+      console.warn('[trackingService] tryStartForegroundService omitido:', err);
     }
   }
 
   async stopTracking(): Promise<void> {
     this.active = false;
     await AsyncStorage.removeItem(TRACKING_STORAGE_KEY);
+
+    if (Platform.OS !== 'web') {
+      try {
+        const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_BACKGROUND_TASK).catch(() => false);
+        if (hasStarted) {
+          await Location.stopLocationUpdatesAsync(LOCATION_BACKGROUND_TASK).catch(() => {});
+        }
+      } catch (e) {
+        console.warn('[trackingService] Error deteniendo updates de fondo:', e);
+      }
+    }
 
     if (this.watchSubscription) {
       this.watchSubscription.remove();
@@ -135,7 +246,16 @@ class TrackingService {
     this.notify();
   }
 
-  private async processCoords(coords: { latitud: number; longitud: number; precision: number }) {
+  private lastProcessedTime = 0;
+
+  async processCoords(coords: { latitud: number; longitud: number; precision: number }, fuente = 'gps_app_vendedores_live') {
+    const now = Date.now();
+    // Limitar transmisiones a maximo una cada 8 segundos para no saturar hilo JS ni red
+    if (now - this.lastProcessedTime < 8000) {
+      return;
+    }
+    this.lastProcessedTime = now;
+
     const loc: TrackingLocation = {
       ...coords,
       timestamp: new Date().toISOString(),
@@ -153,18 +273,11 @@ class TrackingService {
         latitud: coords.latitud,
         longitud: coords.longitud,
         precision: coords.precision,
-        fuente: 'gps_app_vendedores_live',
+        fuente,
       });
     } catch {
-      await queueOfflineAction({
-        type: 'location_ping',
-        payload: {
-          latitud: coords.latitud,
-          longitud: coords.longitud,
-          precision: coords.precision,
-          fuente: 'gps_app_vendedores_offline',
-        },
-      });
+      // Telemetria efimera: no saturar la cola de salida con cientos de pings.
+      // La posicion queda registrada en saveLastGpsCache y se enviara al reconectar.
     }
     this.notify();
   }
@@ -175,11 +288,11 @@ class TrackingService {
         accuracy: Location.Accuracy.Balanced,
       });
       const coords = {
-        latitud: loc.coords.latitude,
-        longitud: loc.coords.longitude,
+        latitud: Number(loc.coords.latitude.toFixed(6)),
+        longitud: Number(loc.coords.longitude.toFixed(6)),
         precision: loc.coords.accuracy ? Math.round(loc.coords.accuracy) : 5,
       };
-      await this.processCoords(coords);
+      await this.processCoords(coords, 'gps_app_vendedores_ping');
       return this.lastLocation;
     } catch {
       const cached = await getLastGpsCache();
@@ -197,3 +310,34 @@ class TrackingService {
 }
 
 export const trackingService = new TrackingService();
+
+// Registro de la tarea global en segundo plano con TaskManager (se ejecuta a nivel de módulo)
+if (Platform.OS !== 'web') {
+  try {
+    if (!TaskManager.isTaskDefined(LOCATION_BACKGROUND_TASK)) {
+      TaskManager.defineTask(LOCATION_BACKGROUND_TASK, async ({ data, error }) => {
+        if (error) {
+          console.warn('[trackingService:BackgroundTask] Error en tarea de fondo:', error.message);
+          return;
+        }
+        if (data) {
+          const { locations } = data as { locations: Location.LocationObject[] };
+          if (locations && locations.length > 0) {
+            const latest = locations[locations.length - 1];
+            if (latest && latest.coords) {
+              const coords = {
+                latitud: Number(latest.coords.latitude.toFixed(6)),
+                longitud: Number(latest.coords.longitude.toFixed(6)),
+                precision: latest.coords.accuracy ? Math.round(latest.coords.accuracy) : 5,
+              };
+              await trackingService.processCoords(coords, 'gps_app_vendedores_background');
+            }
+          }
+        }
+      });
+      console.log(`[trackingService] Tarea de fondo "${LOCATION_BACKGROUND_TASK}" registrada en TaskManager`);
+    }
+  } catch (tmErr) {
+    console.warn('[trackingService] Error definiendo tarea en TaskManager:', tmErr);
+  }
+}

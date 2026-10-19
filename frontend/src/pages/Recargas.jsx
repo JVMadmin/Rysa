@@ -317,7 +317,7 @@ export default function Recargas() {
               <div className="border-t border-dashed border-black my-1" />
               {ticket.id && (
                 <div className="text-center">
-                  <img src={`${process.env.REACT_APP_BACKEND_URL}/api/sales/${ticket.id}/qr?destino=${encodeURIComponent(`${window.location.origin}/verificar/${ticket.id}`)}`} alt="QR de verificación"
+                  <img src={`${process.env.REACT_APP_BACKEND_URL || ""}/api/sales/${ticket.id}/qr?destino=${encodeURIComponent(`${window.location.origin}/verificar/${ticket.id}`)}`} alt="QR de verificación"
                     className="mx-auto w-24 h-24" />
                   <div className="text-[9px] text-slate-500">{window.location.origin}/verificar/{ticket.id}</div>
                 </div>

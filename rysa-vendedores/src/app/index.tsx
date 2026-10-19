@@ -61,10 +61,12 @@ export default function HomeScreen() {
       fetchDashboard(Boolean(cached.dashboard));
     });
 
-    // 2. Disparar precarga integral en segundo plano de cartera, catálogo y visitas
-    syncManager.preloadAllData().then((counts) => {
-      console.log(`[Dashboard] Preload offline completado: ${counts.clientsCount} clientes, ${counts.catalogCount} productos.`);
-    });
+    // 2. Disparar precarga integral en segundo plano diferida (2.5s) para evitar contención de SQLite en el arranque
+    const preloadTimer = setTimeout(() => {
+      syncManager.preloadAllData().then((counts) => {
+        console.log(`[Dashboard] Preload offline completado: ${counts.clientsCount} clientes, ${counts.catalogCount} productos.`);
+      }).catch(() => {});
+    }, 2500);
 
     // 3. Suscribirse a reconexión de red
     const unsubReconnect = syncManager.subscribeReconnect(() => {
@@ -77,6 +79,7 @@ export default function HomeScreen() {
     });
 
     return () => {
+      clearTimeout(preloadTimer);
       unsubReconnect();
       unsubStatus();
     };

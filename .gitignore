@@ -123,7 +123,7 @@ backend/uploads/
 *.xlsx.tmp
 
 
-# Artefactos de build sueltos en raíz
+# Artefactos de build sueltos en raï¿½z
 main-docker.js.map
 
 # Datos Legacy del negocio (NUNCA subir a GitHub)
@@ -131,3 +131,5 @@ legacy_data/
 legacy_data_v7_test/
 legacy_data_v7_probe/
 legacy_reports/
+HANDOFF.md
+Handoff/

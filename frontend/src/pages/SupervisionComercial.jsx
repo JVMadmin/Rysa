@@ -13,6 +13,7 @@ import {
   Clock3, ChevronRight, Filter, Radio, Pencil, RefreshCw, Search, Store,
   Crosshair, UserCog, ReceiptText, MapPin, Radar, ShoppingCart, ShoppingBag,
   ClipboardList, Route as RouteIcon, Camera, Phone, Mail, FileText, Check,
+  Target, Award, Calendar, DollarSign,
 } from "lucide-react";
 
 import SelectorVendedor from "@/components/campo/SelectorVendedor";
@@ -25,6 +26,7 @@ import MiActividadCampo from "@/pages/MiActividadCampo";
 const TABS = [
   { id: "resumen", label: "Resumen" },
   { id: "vendedores", label: "Vendedores" },
+  { id: "metas", label: "Metas de Venta" },
   { id: "mapa", label: "Mapa en vivo" },
   { id: "clientes", label: "Clientes" },
 ];
@@ -107,6 +109,83 @@ export default function SupervisionComercial() {
   // Trazado de recorrido con temperatura
   const [mostrarRutaId, setMostrarRutaId] = useState(null);
   const [rutaGps, setRutaGps] = useState([]);
+
+  // Metas de Venta por Vendedor / Periodo
+  const [metasPeriodo, setMetasPeriodo] = useState(() => new Date().toISOString().slice(0, 7));
+  const [metasData, setMetasData] = useState(null);
+  const [loadingMetas, setLoadingMetas] = useState(false);
+  const [modalMetaOpen, setModalMetaOpen] = useState(false);
+  const [editMetaVendedor, setEditMetaVendedor] = useState("");
+  const [editMetaVentas, setEditMetaVentas] = useState("");
+  const [editMetaCobranza, setEditMetaCobranza] = useState("");
+  const [editMetaVisitas, setEditMetaVisitas] = useState("");
+  const [editMetaNotas, setEditMetaNotas] = useState("");
+  const [savingMeta, setSavingMeta] = useState(false);
+
+  const loadMetas = useCallback(async (periodo) => {
+    const p = periodo || metasPeriodo;
+    setLoadingMetas(true);
+    try {
+      const { data } = await api.get(`/supervision/goals?periodo=${p}${sucursal ? `&sucursal_id=${sucursal}` : ""}`);
+      if (data?.ok) {
+        setMetasData(data);
+      }
+    } catch {
+      toast.error("No se pudieron cargar las metas de venta.");
+    } finally {
+      setLoadingMetas(false);
+    }
+  }, [metasPeriodo, sucursal]);
+
+  useEffect(() => {
+    if (tab === "metas") {
+      loadMetas();
+    }
+  }, [tab, metasPeriodo, loadMetas]);
+
+  const handleAbrirConfigMeta = (ven = null) => {
+    if (ven) {
+      setEditMetaVendedor(ven.vendedor_id || ven.id);
+      setEditMetaVentas(String(ven.meta_ventas || ""));
+      setEditMetaCobranza(String(ven.meta_cobranza || ""));
+      setEditMetaVisitas(String(ven.meta_visitas || ""));
+      setEditMetaNotas(ven.notas || "");
+    } else {
+      setEditMetaVendedor(vendedores[0]?.id || metasData?.vendedores?.[0]?.vendedor_id || "");
+      setEditMetaVentas("150000");
+      setEditMetaCobranza("50000");
+      setEditMetaVisitas("40");
+      setEditMetaNotas("");
+    }
+    setModalMetaOpen(true);
+  };
+
+  const handleGuardarMeta = async () => {
+    if (!editMetaVendedor) {
+      toast.error("Selecciona un vendedor.");
+      return;
+    }
+    setSavingMeta(true);
+    try {
+      const { data } = await api.post("/supervision/goals", {
+        vendedor_id: editMetaVendedor,
+        periodo: metasPeriodo,
+        meta_ventas: parseFloat(editMetaVentas) || 0,
+        meta_cobranza: parseFloat(editMetaCobranza) || 0,
+        meta_visitas: parseInt(editMetaVisitas, 10) || 0,
+        notas: editMetaNotas,
+      });
+      if (data?.ok) {
+        toast.success("Meta configurada y guardada correctamente.");
+        setModalMetaOpen(false);
+        loadMetas();
+      }
+    } catch (err) {
+      toast.error(formatApiError(err?.response?.data?.detail) || "Error al guardar meta.");
+    } finally {
+      setSavingMeta(false);
+    }
+  };
 
   /* ------------------------------- carga -------------------------------- */
   const loadBase = useCallback(async () => {
@@ -564,6 +643,274 @@ export default function SupervisionComercial() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ============================ METAS DE VENTA =========================== */}
+          {tab === "metas" && (
+            <div className="space-y-4" data-testid="sc-metas">
+              {/* Barra superior de periodo y acciones */}
+              <div className="flex flex-wrap items-center justify-between gap-3 card-soft p-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Target className="w-5 h-5 text-[#C1401E]" />
+                    <span className="font-display font-bold text-slate-900 text-base">Metas Comerciales</span>
+                  </div>
+                  <div className="flex items-center gap-2 border-l border-slate-200 pl-3">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    <span className="text-xs text-slate-500 font-medium">Periodo:</span>
+                    <Input
+                      type="month"
+                      value={metasPeriodo}
+                      onChange={(e) => setMetasPeriodo(e.target.value)}
+                      className="h-8 w-40 text-xs font-semibold"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => loadMetas()}
+                    disabled={loadingMetas}
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${loadingMetas ? "animate-spin" : ""}`} />
+                    Actualizar
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs bg-[#C1401E] hover:bg-[#A03215] text-white"
+                    onClick={() => handleAbrirConfigMeta()}
+                  >
+                    <Pencil className="w-3.5 h-3.5 mr-1.5" />
+                    Asignar / Configurar Meta
+                  </Button>
+                </div>
+              </div>
+
+              {loadingMetas ? (
+                <div className="flex justify-center py-20">
+                  <Loader2 className="w-8 h-8 animate-spin text-[#C1401E]" />
+                </div>
+              ) : metasData ? (
+                <>
+                  {/* Tarjetas KPI de Metas Globales */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* KPI Ventas */}
+                    <div className="card-soft p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wider text-slate-400 font-medium">Meta Ventas Global</span>
+                        <TrendingUp className="w-4 h-4 text-emerald-600" />
+                      </div>
+                      <div className="font-display font-black text-2xl text-slate-900">
+                        {money(metasData.totales?.ventas_reales || 0)}
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span>Obj: {money(metasData.totales?.meta_ventas || 0)}</span>
+                        <span className="font-bold text-emerald-600">
+                          {metasData.totales?.avance_ventas_pct || 0}%
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+                          style={{ width: `${Math.min(100, metasData.totales?.avance_ventas_pct || 0)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* KPI Cobranza */}
+                    <div className="card-soft p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wider text-slate-400 font-medium">Meta Cobranza Global</span>
+                        <Wallet className="w-4 h-4 text-sky-600" />
+                      </div>
+                      <div className="font-display font-black text-2xl text-slate-900">
+                        {money(metasData.totales?.cobranza_real || 0)}
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span>Obj: {money(metasData.totales?.meta_cobranza || 0)}</span>
+                        <span className="font-bold text-sky-600">
+                          {metasData.totales?.avance_cobranza_pct || 0}%
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-sky-500 rounded-full transition-all duration-500"
+                          style={{ width: `${Math.min(100, metasData.totales?.avance_cobranza_pct || 0)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* KPI Visitas */}
+                    <div className="card-soft p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wider text-slate-400 font-medium">Visitas en Campo</span>
+                        <CheckCircle2 className="w-4 h-4 text-indigo-600" />
+                      </div>
+                      <div className="font-display font-black text-2xl text-slate-900">
+                        {metasData.totales?.visitas_reales || 0}
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span>Obj: {metasData.totales?.meta_visitas || 0} visitas</span>
+                        <span className="font-bold text-indigo-600">
+                          {metasData.totales?.avance_visitas_pct || 0}%
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                          style={{ width: `${Math.min(100, metasData.totales?.avance_visitas_pct || 0)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* KPI Asesores en Meta */}
+                    <div className="card-soft p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-wider text-slate-400 font-medium">Asesores en Meta</span>
+                        <Award className="w-4 h-4 text-amber-500" />
+                      </div>
+                      <div className="font-display font-black text-2xl text-slate-900">
+                        {metasData.totales?.vendedores_en_meta || 0} / {metasData.totales?.total_vendedores || 0}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Cumplimiento del equipo comercial en el periodo activo.
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber-500 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${
+                              metasData.totales?.total_vendedores
+                                ? Math.min(100, (metasData.totales.vendedores_en_meta / metasData.totales.total_vendedores) * 100)
+                                : 0
+                            }%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tabla de Metas por Vendedor */}
+                  <div className="card-soft overflow-x-auto">
+                    <div className="p-3 border-b border-slate-100 flex items-center justify-between">
+                      <span className="text-xs uppercase tracking-wider text-slate-500 font-bold">
+                        Desempeño y Metas por Asesor Comercial ({metasPeriodo})
+                      </span>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50">
+                        <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
+                          <th className="p-3">Asesor</th>
+                          <th className="p-3">Meta Ventas ($)</th>
+                          <th className="p-3">Avance Ventas</th>
+                          <th className="p-3">Meta Cobro ($)</th>
+                          <th className="p-3">Avance Cobro</th>
+                          <th className="p-3 text-center">Visitas</th>
+                          <th className="p-3 text-center">Estatus</th>
+                          <th className="p-3 text-right">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(!metasData.vendedores || metasData.vendedores.length === 0) && (
+                          <tr>
+                            <td colSpan={8} className="p-8 text-center text-slate-400">
+                              No hay asesores configurados para este periodo.
+                            </td>
+                          </tr>
+                        )}
+                        {metasData.vendedores?.map((v) => (
+                          <tr key={v.vendedor_id} className="border-t border-slate-100 hover:bg-slate-50/80 transition-colors">
+                            <td className="p-3">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-8 h-8 rounded-full bg-[#C1401E]/10 flex items-center justify-center overflow-hidden shrink-0">
+                                  {v.foto_url ? (
+                                    <img src={fileUrl(v.foto_url)} alt={v.vendedor_nombre} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <UserCog className="w-4 h-4 text-[#C1401E]" />
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-slate-900">{v.vendedor_nombre}</div>
+                                  <div className="text-[11px] text-slate-400">{v.email || v.telefono || "Asesor Comercial"}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div className="font-medium text-slate-800">{money(v.ventas_reales)}</div>
+                              <div className="text-[11px] text-slate-400">Meta: {money(v.meta_ventas)}</div>
+                            </td>
+                            <td className="p-3 w-40">
+                              <div className="flex items-center justify-between text-xs mb-1">
+                                <span className={`font-bold ${v.avance_ventas_pct >= 100 ? "text-emerald-600" : "text-slate-700"}`}>
+                                  {v.avance_ventas_pct}%
+                                </span>
+                              </div>
+                              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-300 ${
+                                    v.avance_ventas_pct >= 100 ? "bg-emerald-500" : v.avance_ventas_pct >= 60 ? "bg-amber-500" : "bg-red-400"
+                                  }`}
+                                  style={{ width: `${Math.min(100, v.avance_ventas_pct)}%` }}
+                                />
+                              </div>
+                            </td>
+                            <td className="p-3">
+                              <div className="font-medium text-slate-800">{money(v.cobranza_real)}</div>
+                              <div className="text-[11px] text-slate-400">Meta: {money(v.meta_cobranza)}</div>
+                            </td>
+                            <td className="p-3 w-40">
+                              <div className="flex items-center justify-between text-xs mb-1">
+                                <span className={`font-bold ${v.avance_cobranza_pct >= 100 ? "text-sky-600" : "text-slate-700"}`}>
+                                  {v.avance_cobranza_pct}%
+                                </span>
+                              </div>
+                              <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-300 ${
+                                    v.avance_cobranza_pct >= 100 ? "bg-sky-500" : "bg-slate-400"
+                                  }`}
+                                  style={{ width: `${Math.min(100, v.avance_cobranza_pct)}%` }}
+                                />
+                              </div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <div className="font-semibold text-slate-800">{v.visitas_reales} / {v.meta_visitas}</div>
+                              <div className="text-[11px] text-slate-400">{v.avance_visitas_pct}%</div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <Badge
+                                className={
+                                  v.avance_ventas_pct >= 100
+                                    ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-100"
+                                    : v.avance_ventas_pct >= 60
+                                    ? "bg-amber-100 text-amber-800 hover:bg-amber-100"
+                                    : "bg-red-100 text-red-800 hover:bg-red-100"
+                                }
+                              >
+                                {v.avance_ventas_pct >= 100 ? "En Meta" : v.avance_ventas_pct >= 60 ? "En Avance" : "Bajo Avance"}
+                              </Badge>
+                            </td>
+                            <td className="p-3 text-right">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs"
+                                onClick={() => handleAbrirConfigMeta(v)}
+                              >
+                                <Pencil className="w-3 h-3 mr-1" /> Configurar
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
             </div>
           )}
 
@@ -1171,6 +1518,106 @@ export default function SupervisionComercial() {
             </div>
           )}
           <DialogFooter><Button variant="outline" size="sm" onClick={() => setModalVentas((prev) => ({ ...prev, open: false }))}>Cerrar</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL 3: ASIGNAR Y CONFIGURAR META COMERCIAL */}
+      <Dialog open={modalMetaOpen} onOpenChange={setModalMetaOpen}>
+        <DialogContent className="max-w-md flex flex-col p-5">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Target className="w-5 h-5 text-[#C1401E]" />
+              Configurar Meta Comercial
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 text-sm">
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-1">Asesor Comercial</label>
+              <Select value={editMetaVendedor} onValueChange={setEditMetaVendedor}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Seleccionar asesor" /></SelectTrigger>
+                <SelectContent>
+                  {(vendedores.length > 0 ? vendedores : metasData?.vendedores || []).map((v) => (
+                    <SelectItem key={v.id || v.vendedor_id} value={v.id || v.vendedor_id}>
+                      {v.name || v.vendedor_nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-1">Periodo (Mes/Año)</label>
+              <Input
+                type="month"
+                value={metasPeriodo}
+                onChange={(e) => setMetasPeriodo(e.target.value)}
+                className="h-9"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">Meta Ventas ($)</label>
+                <Input
+                  type="number"
+                  step="1000"
+                  value={editMetaVentas}
+                  onChange={(e) => setEditMetaVentas(e.target.value)}
+                  placeholder="Ej. 150000"
+                  className="h-9 font-semibold"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">Meta Cobranza ($)</label>
+                <Input
+                  type="number"
+                  step="1000"
+                  value={editMetaCobranza}
+                  onChange={(e) => setEditMetaCobranza(e.target.value)}
+                  placeholder="Ej. 50000"
+                  className="h-9 font-semibold"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-1">Meta de Visitas a Clientes</label>
+              <Input
+                type="number"
+                step="1"
+                value={editMetaVisitas}
+                onChange={(e) => setEditMetaVisitas(e.target.value)}
+                placeholder="Ej. 40"
+                className="h-9"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-slate-600 block mb-1">Notas / Directriz Comercial (Opcional)</label>
+              <Input
+                value={editMetaNotas}
+                onChange={(e) => setEditMetaNotas(e.target.value)}
+                placeholder="Ej. Enfoque en líneas prioritarias y recuperación de cartera."
+                className="h-9 text-xs"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" size="sm" onClick={() => setModalMetaOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              className="bg-[#C1401E] hover:bg-[#A03215] text-white"
+              onClick={handleGuardarMeta}
+              disabled={savingMeta}
+            >
+              {savingMeta ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Check className="w-4 h-4 mr-1" />}
+              Guardar Meta
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -44,7 +44,7 @@ def bruto_de_precio(precio: float, iva_tasa: float, incluye_iva: bool) -> float:
 
 
 def calcular_venta(items: list, descuento_global: float = 0.0,
-                   precios_incluyen_iva: bool = True) -> dict:
+                   precios_incluyen_iva: bool = False) -> dict:
     """Calcula los totales de una venta (subtotal neto, IVA, descuento, total).
 
     `items`: lista de líneas con {cantidad, precio, iva_tasa, descuento}.

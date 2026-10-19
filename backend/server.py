@@ -811,8 +811,8 @@ class SaleInput(BaseModel):
     vendedor_id: Optional[str] = None
     # Convención de precios: True = los precios enviados ya incluyen IVA (brutos,
     # se extrae el neto); False = los precios son netos (se suma el IVA). El total
-    # siempre es el bruto. Default True mantiene compatibilidad con clientes antiguos.
-    precios_incluyen_iva: bool = True
+    # siempre es el bruto. Default False: los precios de catálogo son netos y se suma IVA.
+    precios_incluyen_iva: bool = False
     idempotency_key: Optional[str] = None  # evita ventas duplicadas en POS
     # Override de inventario negativo (solo roles autorizados, con auditoría).
     allow_negative_inventory: bool = False
@@ -888,7 +888,7 @@ class SettingsInput(BaseModel):
     pais: Optional[str] = "México"
     iva_tasa: float = 8.0
     moneda: str = "MXN"
-    precios_incluyen_iva: bool = True
+    precios_incluyen_iva: bool = False
     listas_precios_nombres: List[str] = Field(default_factory=lambda: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"])
     listas_precios_pct: List[float] = Field(default_factory=lambda: [40, 30, 20, 15, 10])
     unidades_medida: List[str] = Field(default_factory=lambda: list(UNIDADES_DEFAULT))
@@ -1443,6 +1443,12 @@ async def update_product_presentation(product_id: str, pres_id: str, data: dict,
     activo = bool(data.get("activo", True))
 
     async with transaction() as conn:
+        conflict = (await conn.execute(
+            text("SELECT id FROM product_presentations WHERE product_id = :pid AND nombre = :nombre AND id != :id"),
+            {"pid": product_id, "nombre": nombre, "id": pres_id}
+        )).first()
+        if conflict:
+            raise HTTPException(400, f"Ya existe otra presentación con el nombre '{nombre}' para este producto")
         await conn.execute(
             text("""
                 UPDATE product_presentations
@@ -2244,7 +2250,7 @@ async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = 
             "precio2": float(d.get("precio2") or precio),
             "existencia": round(float(d.get("existencia") or 0), 3),
             "unidad_medida": d.get("unidad_medida") or d.get("unimedida") or "PZA",
-            "iva_tasa": float(d.get("iva_tasa") or d.get("impuesto") or 16.0),
+            "iva_tasa": float(d.get("iva_tasa") or d.get("impuesto") or 8.0),
             "precios": d.get("precios") or [],
         })
     return out
@@ -2623,7 +2629,7 @@ async def caja_reporte_pdf(caja_id: str, user: dict = Depends(require_permission
 # =========================================================================
 # VENTAS / POS
 # =========================================================================
-def calcular_venta(items: List[dict], descuento_global: float, precios_incluyen_iva: bool = True):
+def calcular_venta(items: List[dict], descuento_global: float, precios_incluyen_iva: bool = False):
     # Convención (ver moneycalc): True = los precios enviados incluyen IVA (brutos,
     # se extrae el neto); False = precios netos (se suma el IVA). El TOTAL siempre
     # es el bruto. Devuelve además `detalle` con las líneas enriquecidas
@@ -2851,7 +2857,7 @@ async def _crear_venta(user: dict, data: SaleInput):
         "items": items, **totales, "tipo_venta": data.tipo_venta, "condicion": data.condicion,
         "pagos": pagos, "cambio": cambio, "saldo": saldo, "estado": estado,
         "factura": False, "caja_id": caja["id"] if (caja and not es_cotizacion) else None,
-        "sucursal_id": (caja or {}).get("sucursal_id") or user.get("sucursal_id"),
+        "sucursal_id": (caja or {}).get("sucursal_id") or user.get("sucursal_id") or await _default_sucursal_id(),
         "lista_precios": data.lista_precios,
         "fecha_vencimiento": fecha_vencimiento,
     }
@@ -2930,7 +2936,7 @@ async def cotizacion_convertir(cot_id: str, data: CotizacionConvertInput,
             product_id=it.get("product_id"), codigo=it.get("codigo") or "",
             descripcion=it.get("descripcion") or "", cantidad=float(it.get("cantidad") or 0),
             unidad=it.get("unidad") or "PZA",
-            precio=float(it.get("precio") or it.get("precio_bruto") or 0),
+            precio=float(it.get("precio_neto") or it.get("precio") or 0),
             iva_tasa=float(it.get("iva_tasa") or 8), descuento=float(it.get("descuento") or 0),
             comentario=it.get("comentario") or ""))
     payload = SaleInput(
@@ -2938,7 +2944,7 @@ async def cotizacion_convertir(cot_id: str, data: CotizacionConvertInput,
         descuento_global=float(cot.get("descuento_global") or 0),
         condicion=data.condicion, pagos=data.pagos,
         lista_precios=int(cot.get("lista_precios") or 1),
-        tipo_venta="directa", vendedor_id=data.vendedor_id, precios_incluyen_iva=True)
+        tipo_venta="directa", vendedor_id=data.vendedor_id, precios_incluyen_iva=False)
     sale = await _crear_venta(user, payload)
     await db.sales.update_one({"id": cot_id}, {"$set": {
         "estado": "convertida", "convertida_a": sale["id"], "convertida_folio": sale["folio"],
@@ -3418,7 +3424,7 @@ async def pedido_convertir(ped_id: str, data: PedidoConvertInput,
         cliente_id=ped.get("cliente_id"), items=items, descuento_global=0.0,
         condicion=data.condicion, pagos=data.pagos, lista_precios=1,
         tipo_venta="directa", vendedor_id=data.vendedor_id or ped.get("vendedor_id"),
-        precios_incluyen_iva=True)
+        precios_incluyen_iva=False)
     sale = await _crear_venta(user, payload)
     await db.pedidos.update_one({"id": ped_id}, {"$set": {
         "estado": "convertido", "convertida_a": sale["id"], "convertida_folio": sale["folio"],
@@ -5282,26 +5288,44 @@ def _tabla_pdf_bytes(titulo: str, meta: str, columns, rows, extra_sections=None)
 # DASHBOARD
 # =========================================================================
 @api.get("/dashboard")
-async def dashboard(user: dict = Depends(get_current_user)):
+async def dashboard(sucursal_id: Optional[str] = None, user: dict = Depends(get_current_user)):
     now = now_utc()
     hoy = now.date().isoformat()
     mes = now.strftime("%Y-%m")
     # Modo: admin/propietario/dev ven el negocio completo; el resto solo su operación
     es_global = "*" in effective_permissions(user)
+    
+    # Sucursales registradas en el sistema
+    sucs = await db.sucursales.find({}, {"_id": 0}).to_list(100)
+    sucs.sort(key=lambda s: s.get("nombre") or s.get("codigo") or "")
+    
+    # Si el usuario no es global, forzar su sucursal asignada
+    if not es_global:
+        user_suc = user.get("sucursal_id")
+        if user_suc:
+            sucursal_id = user_suc
+
     mq = {"estado": "confirmada", "source": {"$ne": "LEGACY"}}
     if not es_global:
         mq["usuario_id"] = user["id"]
-    sales = await db.sales.find(mq, {"_id": 0}).to_list(5000)
-    ventas_hoy = [s for s in sales if s["fecha"][:10] == hoy]
-    ventas_mes = [s for s in sales if s["fecha"][:7] == mes]
-    total_hoy = round(sum(s["total"] for s in ventas_hoy), 2)
-    total_mes = round(sum(s["total"] for s in ventas_mes), 2)
-    # Caja: la propia (operador) o el consolidado de todas las cajas abiertas (admin)
+    if sucursal_id and sucursal_id != "todas":
+        mq["sucursal_id"] = sucursal_id
+
+    sales = await db.sales.find(mq, {"_id": 0}).to_list(10000)
+    ventas_hoy = [s for s in sales if s.get("fecha", "")[:10] == hoy]
+    ventas_mes = [s for s in sales if s.get("fecha", "")[:7] == mes]
+    total_hoy = round(sum(float(s.get("total", 0)) for s in ventas_hoy), 2)
+    total_mes = round(sum(float(s.get("total", 0)) for s in ventas_mes), 2)
+
+    # Caja: la propia (operador) o el consolidado de cajas abiertas filtradas por sucursal (admin)
     caja = await caja_abierta_de(user["id"])
     total_caja = 0.0
     caja_info = None
     if es_global:
-        cajas_abiertas = await db.cajas.find({"estado": "abierta"}, {"_id": 0}).to_list(500)
+        cajas_flt = {"estado": "abierta"}
+        if sucursal_id and sucursal_id != "todas":
+            cajas_flt["sucursal_id"] = sucursal_id
+        cajas_abiertas = await db.cajas.find(cajas_flt, {"_id": 0}).to_list(500)
         for c in cajas_abiertas:
             movs = await db.caja_movimientos.find({"caja_id": c["id"]}, {"_id": 0}).to_list(1000)
             total_caja = round(total_caja + resumen_caja(c, movs)["efectivo_esperado"], 2)
@@ -5313,7 +5337,6 @@ async def dashboard(user: dict = Depends(get_current_user)):
             caja_info = {"id": caja["id"], "caja_nombre": caja.get("caja_nombre") or "Caja 1",
                          "fondo_inicial": caja.get("fondo_inicial"), "resumen": res}
         else:
-            # Sin caja abierta: mostrar el último corte cerrado del usuario
             ultima = await db.cajas.find({"usuario_id": user["id"], "estado": "cerrada"},
                                          {"_id": 0}).sort("fecha_cierre", -1).to_list(1)
             if ultima:
@@ -5322,18 +5345,46 @@ async def dashboard(user: dict = Depends(get_current_user)):
                 caja_info = {"id": ultima[0]["id"], "caja_nombre": ultima[0].get("caja_nombre") or "Caja 1",
                              "fondo_inicial": ultima[0].get("fondo_inicial"), "cerrada": True,
                              "resumen": cierre}
+
+    # Desglose de ventas por sucursal (para consolidado global o comparativo)
+    suc_map = {s["id"]: s.get("nombre") or s.get("codigo") or "Sucursal" for s in sucs}
+    all_sales_for_breakdown = sales if (sucursal_id and sucursal_id != "todas") else await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}}, {"_id": 0, "sucursal_id": 1, "total": 1, "fecha": 1}).to_list(20000)
+    por_sucursal_dict = {}
+    for s in all_sales_for_breakdown:
+        sid = s.get("sucursal_id") or "sin_sucursal"
+        sname = suc_map.get(sid, "Matriz" if sid == "sin_sucursal" else "Otra")
+        entry = por_sucursal_dict.setdefault(sid, {
+            "sucursal_id": sid, "nombre": sname, "num_ventas": 0,
+            "total": 0.0, "ventas_hoy": 0.0
+        })
+        entry["num_ventas"] += 1
+        entry["total"] = round(entry["total"] + float(s.get("total", 0)), 2)
+        if (s.get("fecha") or "")[:10] == hoy:
+            entry["ventas_hoy"] = round(entry["ventas_hoy"] + float(s.get("total", 0)), 2)
+
+    for s in sucs:
+        if s["id"] not in por_sucursal_dict:
+            por_sucursal_dict[s["id"]] = {
+                "sucursal_id": s["id"],
+                "nombre": s.get("nombre") or s.get("codigo") or "Sucursal",
+                "num_ventas": 0, "total": 0.0, "ventas_hoy": 0.0
+            }
+    por_sucursal = sorted(por_sucursal_dict.values(), key=lambda x: -x["total"])
+
     # Productos (datos compartidos del negocio)
     products = await db.products.find({"estado": "activo"}, {"_id": 0}).to_list(5000)
     bajo_stock = [p for p in products if 0 < float(p.get("existencia", 0)) <= float(p.get("stock_minimo", 0))]
     sin_existencia = [p for p in products if float(p.get("existencia", 0)) <= 0]
     clientes = await db.clients.count_documents({})
-    # ventas por dia ultimos 7 (alcance del dashboard)
+
+    # Ventas por día últimos 7 días
     serie = []
     for i in range(6, -1, -1):
         d = (now - __import__("datetime").timedelta(days=i)).date().isoformat()
-        tot = round(sum(s["total"] for s in sales if s["fecha"][:10] == d), 2)
+        tot = round(sum(float(s.get("total", 0)) for s in sales if (s.get("fecha") or "")[:10] == d), 2)
         serie.append({"dia": d[5:], "total": tot})
-    recientes = sorted(sales, key=lambda s: s["fecha"], reverse=True)[:8]
+
+    recientes = sorted(sales, key=lambda s: s.get("fecha") or "", reverse=True)[:8]
     base = {
         "ventas_hoy": total_hoy, "ventas_mes": total_mes,
         "num_ventas_hoy": len(ventas_hoy), "total_caja": total_caja,
@@ -5341,8 +5392,12 @@ async def dashboard(user: dict = Depends(get_current_user)):
         "clientes": clientes, "productos": len(products),
         "serie_ventas": serie, "mode": "global" if es_global else "propio",
         "caja_info": caja_info,
-        "ventas_recientes": [{"folio": s["folio"], "cliente": s["cliente_nombre"],
-                              "total": s["total"], "fecha": s["fecha"], "estado": s["estado"]} for s in recientes],
+        "sucursales": [{"id": s["id"], "nombre": s.get("nombre") or s.get("codigo") or "Sucursal",
+                        "codigo": s.get("codigo"), "activa": s.get("activa", True)} for s in sucs],
+        "sucursal_seleccionada": sucursal_id or "todas",
+        "por_sucursal": por_sucursal,
+        "ventas_recientes": [{"folio": s.get("folio"), "cliente": s.get("cliente_nombre"),
+                              "total": s.get("total"), "fecha": s.get("fecha"), "estado": s.get("estado")} for s in recientes],
         "alertas_stock": [{"codigo": p["codigo"], "descripcion": p["descripcion"],
                            "existencia": p.get("existencia", 0), "stock_minimo": p.get("stock_minimo", 0)}
                           for p in (bajo_stock + sin_existencia)[:10]],
@@ -6695,7 +6750,7 @@ async def sale_qr_png(sale_id: str, size: int = 240, destino: Optional[str] = No
                         headers={"Cache-Control": "no-store"})
 
 @api.post("/sales/{sale_id}/ticket-pdf")
-async def sale_ticket_pdf(sale_id: str, regenerar: bool = False,
+async def sale_ticket_pdf(sale_id: str, regenerar: bool = True,
                           user: dict = Depends(get_current_user)):
     """PDF del ticket. Generador ÚNICO (documentos.py): la primera llamada
     crea el archivo y las siguientes devuelven EXACTAMENTE el mismo PDF —

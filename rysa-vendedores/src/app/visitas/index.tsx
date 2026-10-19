@@ -70,6 +70,34 @@ export default function VisitasScreen() {
   const [continuousTracking, setContinuousTracking] = useState(false);
   const trackingIntervalRef = useRef<any>(null);
 
+  // ── Control de permisos GPS ────────────────────────────────────────────────
+  // useForegroundPermissions() es la forma correcta de solicitar permisos en
+  // React Native. Se gestiona desde aquí (pantalla montada y visible) en lugar
+  // de _layout.tsx, para que Android siempre tenga una Activity en RESUMED
+  // cuando se solicita el permiso — eliminando ForegroundServiceStartNotAllowedException.
+  const [locationPermission, requestLocationPermission] = Location.useForegroundPermissions();
+  const gpsPermissionGranted = locationPermission?.granted === true;
+  const trackingStartedRef = useRef(false);
+
+  // Solicitar permiso en primer plano cuando la pantalla esté montada y visible
+  useEffect(() => {
+    if (!locationPermission || locationPermission.status === 'undetermined') {
+      // Delay para garantizar que la pantalla esté completamente en RESUMED
+      const t = setTimeout(() => {
+        requestLocationPermission().catch(() => {});
+      }, 1000);
+      return () => clearTimeout(t);
+    }
+  }, [locationPermission?.status]);
+
+  // Iniciar tracking cuando el permiso esté confirmado, solo una vez por sesión
+  useEffect(() => {
+    if (gpsPermissionGranted && !trackingStartedRef.current) {
+      trackingStartedRef.current = true;
+      trackingService.startTracking(true).catch(() => {});
+    }
+  }, [gpsPermissionGranted]);
+
   // Modal Nueva Visita In-Situ
   const [newVisitModalVisible, setNewVisitModalVisible] = useState(false);
   const [selectedClientForVisit, setSelectedClientForVisit] = useState<Client | null>(null);
@@ -101,7 +129,10 @@ export default function VisitasScreen() {
     };
 
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      // Solo VERIFICAR si el permiso está concedido — NUNCA solicitarlo aquí.
+      // Los permisos se gestionan desde _layout.tsx con useForegroundPermissions().
+      // Solicitar desde aquí generaría permisos concurrentes → crash en Android 12+.
+      const { status } = await Location.getForegroundPermissionsAsync();
       if (status === 'granted') {
         const pos = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.High,
@@ -323,7 +354,6 @@ export default function VisitasScreen() {
 
   // Suscripción al servicio global de tracking (persiste entre pantallas y en segundo plano)
   useEffect(() => {
-    trackingService.init();
     const unsub = trackingService.addListener((isActive, lastLoc) => {
       setContinuousTracking(isActive);
       if (lastLoc) {
@@ -345,14 +375,51 @@ export default function VisitasScreen() {
       await trackingService.stopTracking();
       Alert.alert('Ruta en Pausa', 'Se detuvo la transmisión continua de ubicación.');
     } else {
+      // Paso 1: Iniciar watchPositionAsync (GPS en primer plano - no crashea)
       const ok = await trackingService.startTracking();
-      if (ok) {
+      if (!ok) {
+        Alert.alert('Permiso Requerido', 'No se pudo activar el GPS. Verifica los permisos de ubicación en los ajustes de tu dispositivo.');
+        return;
+      }
+
+      // Paso 2: Verificar si ya tiene permiso background para activar Foreground Service
+      const bgStatus = await trackingService.getBackgroundPermissionStatus();
+
+      if (bgStatus === 'granted') {
+        // Ya tiene permiso, activar Foreground Service directamente (desde interacción de usuario)
+        await trackingService.tryStartForegroundService();
         Alert.alert(
           'Ruta Activa',
-          'Se activó el rastreo en vivo y continuo. Tu supervisor verá tu avance en tiempo real en el ERP aunque navegues a otras pantallas.'
+          'GPS activo con rastreo en segundo plano. Tu supervisor te verá en tiempo real aunque bloquees el celular o cambies de pantalla.'
         );
       } else {
-        Alert.alert('Permiso Requerido', 'No se pudo activar el GPS. Verifica los permisos de ubicación en los ajustes de tu dispositivo.');
+        // No tiene permiso background: primero avisar que funciona en primer plano,
+        // luego ofrecer activar el rastreo con pantalla bloqueada
+        Alert.alert(
+          'Ruta Activa',
+          'GPS activo mientras la pantalla esté encendida.\n\n¿Deseas activar también el rastreo cuando bloquees el celular?',
+          [
+            { text: 'Ahora no', style: 'cancel' },
+            {
+              text: 'Sí, activar rastreo total',
+              onPress: async () => {
+                // requestBackgroundPermissionsAsync() se llama AQUÍ, desde presión de botón
+                // → Android lo permite porque es interacción directa del usuario
+                const granted = await trackingService.requestBackgroundPermission();
+                if (granted) {
+                  // El usuario regresó de Ajustes, ahora activar Foreground Service
+                  // con delay para que el Activity esté completamente RESUMED
+                  setTimeout(async () => {
+                    await trackingService.tryStartForegroundService().catch(() => {});
+                  }, 2000);
+                  Alert.alert('Rastreo Completo Activo', 'GPS activo también con pantalla bloqueada. 🗺️');
+                } else {
+                  Alert.alert('Sin permiso de fondo', 'El rastreo solo funcionará mientras la app esté visible.');
+                }
+              },
+            },
+          ]
+        );
       }
     }
   };

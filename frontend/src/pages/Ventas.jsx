@@ -187,7 +187,7 @@ export default function Ventas() {
 
   const reimprimir = async (s) => {
     try {
-      const { data } = await api.post(`/sales/${s.id}/ticket-pdf`);
+      const { data } = await api.post(`/sales/${s.id}/ticket-pdf?regenerar=true`);
       // Iframe oculto: carga el PDF y dispara el diálogo de impresión
       // automáticamente (1 copia por defecto; el usuario puede cambiarla
       // desde el diálogo del navegador). Evita que tenga que abrir el

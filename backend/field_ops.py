@@ -186,6 +186,15 @@ class CarteraAsignacion(BaseModel):
     reemplazar: bool = True   # True: quita la asignación a clientes que estaban y no vienen en la lista
 
 
+class SalesGoalInput(BaseModel):
+    vendedor_id: str
+    periodo: str = ""  # "YYYY-MM", ej: "2026-09"
+    meta_ventas: float = 0.0
+    meta_cobranza: float = 0.0
+    meta_visitas: int = 0
+    notas: Optional[str] = ""
+
+
 # ==========================================================================
 # VENDEDOR — dashboard, mapa, ubicación, cartera
 # ==========================================================================
@@ -485,8 +494,8 @@ async def seller_clients(q: Optional[str] = None, scope: Optional[str] = "carter
         
         # Asignación directa de cartera: solo coincide por id o nombre exacto del vendedor
         es_asignado = bool((c_vid and c_vid == u_id) or (c_vname and c_vname == u_name))
-        # Para administradores generales en módulo web se respeta _vende_todo solo si no es scope móvil
-        es_mio = es_asignado or (_vende_todo(user) and scope != "all")
+        # En la vista de vendedores, los saldos solo son visibles para clientes asignados directamente
+        es_mio = es_asignado
 
         if es_mio:
             sal = round(float(c.get("saldo", 0) or 0), 2)
@@ -506,24 +515,28 @@ async def seller_clients(q: Optional[str] = None, scope: Optional[str] = "carter
 
         out.append({
             "id": cid, "codigo": c.get("codigo"), "nombre": c.get("nombre"),
-            "telefono": c.get("telefono") or c.get("celular"), "whatsapp": c.get("whatsapp"),
-            "correo": c.get("correo"), "direccion": c.get("direccion"),
+            "telefono": (c.get("telefono") or c.get("celular")) if es_mio else None,
+            "whatsapp": c.get("whatsapp") if es_mio else None,
+            "correo": c.get("correo") if es_mio else None,
+            "direccion": c.get("direccion") if es_mio else None,
             "ciudad": c.get("ciudad"), "estado_geo": c.get("estado_geo"),
-            "rfc": c.get("rfc"), "saldo": sal,
+            "rfc": c.get("rfc") if es_mio else None,
+            "saldo": sal,
             "vencido": venc,
             "semaforo": semaforo,
             "en_cartera": es_asignado,
-            "documentos": c.get("documentos") or {},
+            "documentos": c.get("documentos") or {} if es_mio else {},
             "limite_credito": limite,
             "credito_autorizado": autorizado,
             "dias_credito": c.get("dias_credito", 0) if es_mio else 0,
-            "latitud": c.get("latitud"), "longitud": c.get("longitud"),
-            "proxima_visita": c.get("proxima_visita") or "",
-            "ult_fecha_compra": c.get("ult_fecha_compra") or "",
+            "latitud": c.get("latitud") if es_mio else None,
+            "longitud": c.get("longitud") if es_mio else None,
+            "proxima_visita": (c.get("proxima_visita") or "") if es_mio else "",
+            "ult_fecha_compra": (c.get("ult_fecha_compra") or "") if es_mio else "",
             "vendedor_id": c.get("vendedor_id"),
             "vendedor_nombre": c.get("vendedor") or "",
             "condicion_pago": c.get("condicion_pago", "contado"),
-            "foto_fachada": c.get("foto_fachada") or "",
+            "foto_fachada": (c.get("foto_fachada") or "") if es_mio else "",
         })
     return out
 
@@ -736,6 +749,11 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
     if not data.items:
         raise HTTPException(400, "La venta no tiene productos")
 
+    # 1.1 Validar que el vendedor cuente con turno de caja abierto
+    caja_abierta = await db.cajas.find_one({"usuario_id": user["id"], "estado": "abierta"}, {"_id": 0})
+    if not caja_abierta:
+        raise HTTPException(400, "Debes abrir tu turno de caja antes de registrar ventas.")
+
     # 2. Obtener cliente
     cliente = None
     if data.cliente_id:
@@ -743,6 +761,13 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
     cliente_nombre = (cliente.get("nombre") if cliente else "") or data.cliente_nombre or "Público General"
 
     # 3. Calcular importes e impuestos
+    # Obtener los productos de la BD para usar el iva_tasa real (política RYSA: todos al 8%)
+    product_ids = [it.product_id for it in data.items if it.product_id]
+    products_map: dict = {}
+    if product_ids:
+        async for prod in db.products.find({"id": {"$in": product_ids}}, {"id": 1, "iva_tasa": 1, "_id": 0}):
+            products_map[prod["id"]] = prod
+
     subtotal = 0.0
     iva_total = 0.0
     items_out = []
@@ -750,7 +775,10 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
         if it.cantidad <= 0:
             continue
         imp = round(it.cantidad * it.precio, 2)
-        iva_lin = round(imp * (it.iva_tasa / 100.0), 2) if it.iva_tasa else 0.0
+        # Usar iva_tasa de la BD como fuente de verdad; fallback 8% (política RYSA)
+        prod_doc = products_map.get(it.product_id, {})
+        tasa = float(prod_doc.get("iva_tasa") or it.iva_tasa or 8)
+        iva_lin = round(imp * (tasa / 100.0), 2) if tasa else 0.0
         subtotal += imp
         iva_total += iva_lin
         items_out.append({
@@ -760,7 +788,7 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
             "unidad": it.unidad or "PZA",
             "cantidad": it.cantidad,
             "precio": it.precio,
-            "iva_tasa": it.iva_tasa or 0.0,
+            "iva_tasa": tasa,
             "subtotal": imp,
             "iva": iva_lin,
             "total": imp + iva_lin,
@@ -781,6 +809,7 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
     doc = {
         "id": sale_id,
         "folio": folio,
+        "caja_id": caja_abierta["id"],
         "fecha": data.fecha or iso_now()[:10],
         "hora": now_dt.strftime("%H:%M"),
         "origen": "movil_campo",
@@ -804,12 +833,28 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
         "notas": data.notas or "",
         "latitud": data.latitud,
         "longitud": data.longitud,
+        "sucursal_id": user.get("sucursal_id") or (caja_abierta or {}).get("sucursal_id") or "68d1facf41b44260bc2365613ff3f392",
         "idempotency_key": key,
         "created_at": iso_now(),
     }
 
     # 6. Insertar en db.sales
     await db.sales.insert_one(doc)
+
+    # 6.1 Si es contado en efectivo, registrar movimiento en caja
+    if (data.condicion or "contado") == "contado" and (data.forma_pago or "efectivo") == "efectivo":
+        mov_doc = {
+            "id": _uid(),
+            "caja_id": caja_abierta["id"],
+            "usuario_id": user["id"],
+            "usuario_nombre": user.get("name", "Vendedor"),
+            "tipo": "venta",
+            "concepto": f"Venta directa {folio} - {cliente_nombre}",
+            "referencia": folio,
+            "monto": total,
+            "fecha": iso_now(),
+        }
+        await db.caja_movimientos.insert_one(mov_doc)
 
     # 7. Actualizar saldo del cliente si es venta a crédito
     if data.condicion == "credito" and data.cliente_id:
@@ -836,6 +881,121 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
         "folio": folio,
         "total": total,
         "mensaje": f"Venta directa {folio} registrada exitosamente.",
+    }
+
+
+class SellerCajaAbrirInput(BaseModel):
+    fondo_inicial: float = 0.0
+    caja_nombre: Optional[str] = ""
+
+
+class SellerCajaCerrarInput(BaseModel):
+    efectivo_contado: float
+
+
+@router.get("/seller/caja/actual")
+async def seller_caja_actual(user: dict = Depends(get_current_user)):
+    """Consulta la caja / turno activo del vendedor en campo con su arqueo en tiempo real."""
+    caja = await db.cajas.find_one({"usuario_id": user["id"], "estado": "abierta"}, {"_id": 0})
+    if not caja:
+        return {"caja": None}
+    movs = await db.caja_movimientos.find({"caja_id": caja["id"]}, {"_id": 0}).sort("fecha", 1).to_list(1000)
+
+    ventas_efectivo = sum(float(m.get("monto", 0)) for m in movs if m.get("tipo") == "venta")
+    entradas = sum(float(m.get("monto", 0)) for m in movs if m.get("tipo") == "entrada")
+    retiros = sum(float(m.get("monto", 0)) for m in movs if m.get("tipo") in ("retiro", "gasto"))
+    fondo = float(caja.get("fondo_inicial", 0) or 0)
+    esperado = round(fondo + ventas_efectivo + entradas - retiros, 2)
+
+    otras_ventas = await db.sales.find({
+        "caja_id": caja["id"],
+        "estado": "confirmada",
+        "$or": [{"forma_pago": {"$ne": "efectivo"}}, {"condicion": "credito"}]
+    }, {"_id": 0, "total": 1}).to_list(2000)
+    ventas_otros = round(sum(float(v.get("total", 0) or 0) for v in otras_ventas), 2)
+    total_ventas = round(ventas_efectivo + ventas_otros, 2)
+
+    return {
+        "caja": caja,
+        "resumen": {
+            "fondo_inicial": fondo,
+            "ventas_efectivo": round(ventas_efectivo, 2),
+            "ventas_otros": ventas_otros,
+            "total_ventas": total_ventas,
+            "entradas": round(entradas, 2),
+            "retiros": round(retiros, 2),
+            "efectivo_esperado": esperado,
+        },
+        "movimientos": movs,
+    }
+
+
+@router.post("/seller/caja/abrir")
+async def seller_caja_abrir(data: SellerCajaAbrirInput, user: dict = Depends(get_current_user)):
+    """Abre el turno de caja del vendedor en campo."""
+    caja_existente = await db.cajas.find_one({"usuario_id": user["id"], "estado": "abierta"})
+    if caja_existente:
+        raise HTTPException(400, "Ya cuentas con un turno de caja abierto.")
+
+    caja_id = _uid()
+    nombre = data.caja_nombre.strip() if data.caja_nombre and data.caja_nombre.strip() else f"Caja Móvil - {user.get('name', 'Vendedor')}"
+    doc = {
+        "id": caja_id,
+        "usuario_id": user["id"],
+        "usuario_nombre": user.get("name", "Vendedor"),
+        "caja_nombre": nombre,
+        "caja_numero": 1,
+        "fondo_inicial": round(float(data.fondo_inicial or 0), 2),
+        "sucursal_id": user.get("sucursal_id") or "suc_matriz",
+        "estado": "abierta",
+        "fecha_apertura": iso_now(),
+        "fecha_cierre": None,
+    }
+    await db.cajas.insert_one(doc)
+    await log_audit(user, "ABRIR_CAJA_MOVIL", "caja", caja_id, f"Fondo inicial: ${data.fondo_inicial:,.2f}")
+    return {"ok": True, "caja": await db.cajas.find_one({"id": caja_id}, {"_id": 0})}
+
+
+@router.post("/seller/caja/cerrar")
+async def seller_caja_cerrar(data: SellerCajaCerrarInput, user: dict = Depends(get_current_user)):
+    """Realiza el arqueo y cierre del turno de caja del vendedor en campo."""
+    caja = await db.cajas.find_one({"usuario_id": user["id"], "estado": "abierta"})
+    if not caja:
+        raise HTTPException(400, "No tienes un turno de caja abierto.")
+
+    movs = await db.caja_movimientos.find({"caja_id": caja["id"]}, {"_id": 0}).to_list(2000)
+    ventas_efectivo = sum(float(m.get("monto", 0)) for m in movs if m.get("tipo") == "venta")
+    entradas = sum(float(m.get("monto", 0)) for m in movs if m.get("tipo") == "entrada")
+    retiros = sum(float(m.get("monto", 0)) for m in movs if m.get("tipo") in ("retiro", "gasto"))
+    fondo = float(caja.get("fondo_inicial", 0) or 0)
+    esperado = round(fondo + ventas_efectivo + entradas - retiros, 2)
+    contado = round(float(data.efectivo_contado or 0), 2)
+    diferencia = round(contado - esperado, 2)
+
+    vsales = await db.sales.find({"caja_id": caja["id"], "estado": "confirmada"}, {"_id": 0, "total": 1, "forma_pago": 1, "condicion": 1}).to_list(5000)
+    total_ventas = round(sum(float(v.get("total", 0) or 0) for v in vsales), 2)
+
+    cierre = {
+        "fondo_inicial": fondo,
+        "ventas_efectivo": round(ventas_efectivo, 2),
+        "total_ventas": total_ventas,
+        "efectivo_esperado": esperado,
+        "efectivo_contado": contado,
+        "diferencia": diferencia,
+        "num_ventas": len(vsales),
+    }
+
+    await db.cajas.update_one(
+        {"id": caja["id"]},
+        {"$set": {"estado": "cerrada", "fecha_cierre": iso_now(), "cierre": cierre}}
+    )
+    await log_audit(user, "CERRAR_CAJA_MOVIL", "caja", caja["id"], f"Esperado: ${esperado:,.2f} | Contado: ${contado:,.2f} | Dif: ${diferencia:,.2f}")
+
+    return {
+        "ok": True,
+        "caja_id": caja["id"],
+        "cierre": cierre,
+        "reporte_pdf_url": f"/api/caja/{caja['id']}/reporte.pdf",
     }
 
 
@@ -2057,4 +2217,174 @@ async def supervision_asignar_ruta_vendedor(
     }
     await db.sales_routes.replace_one({"id": ruta_id}, doc, upsert=True)
     return {"ok": True, "ruta": doc}
+
+
+# ==========================================================================
+# METAS DE VENTA COMERCIALES (Supervisión y Seguimiento de Objetivos)
+# ==========================================================================
+@router.get("/supervision/goals")
+async def supervision_get_goals(
+    periodo: Optional[str] = None,
+    sucursal_id: Optional[str] = None,
+    user: dict = Depends(require_permission("supervision.ver"))
+):
+    """Consulta consolidada de metas de venta, cobranza y visitas vs avance real por vendedor."""
+    now = now_utc()
+    per = (periodo or now.strftime("%Y-%m"))[:7]
+    vendedores = await _vendedores_con_datos(sucursal_id)
+    vids = [v["id"] for v in vendedores]
+
+    # Metas guardadas para este periodo
+    metas_cursor = await db.sales_goals.find({"periodo": per, "vendedor_id": {"$in": vids}}, {"_id": 0}).to_list(1000)
+    metas_map = {m["vendedor_id"]: m for m in metas_cursor}
+
+    # Ventas reales del periodo
+    ventas_cursor = await db.sales.find(
+        {"vendedor_id": {"$in": vids}, "estado": "confirmada", "fecha": {"$regex": "^" + per}},
+        {"_id": 0, "vendedor_id": 1, "total": 1}
+    ).to_list(200000)
+    ventas_map = {}
+    for s in ventas_cursor:
+        vid = s.get("vendedor_id")
+        ventas_map[vid] = ventas_map.get(vid, 0.0) + float(s.get("total", 0) or 0)
+
+    # Cobranza real del periodo (abonos)
+    abonos_cursor = await db.abonos.find(
+        {"usuario_id": {"$in": vids}, "fecha": {"$regex": "^" + per}},
+        {"_id": 0, "usuario_id": 1, "monto": 1}
+    ).to_list(100000)
+    abonos_map = {}
+    for a in abonos_cursor:
+        uid = a.get("usuario_id")
+        abonos_map[uid] = abonos_map.get(uid, 0.0) + float(a.get("monto", 0) or 0)
+
+    # Visitas realizadas del periodo
+    visitas_cursor = await db.visits.find(
+        {"vendedor_id": {"$in": vids}, "estado": "realizada", "fecha": {"$regex": "^" + per}},
+        {"_id": 0, "vendedor_id": 1}
+    ).to_list(100000)
+    visitas_map = {}
+    for v in visitas_cursor:
+        vid = v.get("vendedor_id")
+        visitas_map[vid] = visitas_map.get(vid, 0) + 1
+
+    filas = []
+    t_meta_v = 0.0
+    t_real_v = 0.0
+    t_meta_c = 0.0
+    t_real_c = 0.0
+    t_meta_vis = 0
+    t_real_vis = 0
+
+    for v in vendedores:
+        vid = v["id"]
+        saved = metas_map.get(vid, {})
+        meta_v = float(saved.get("meta_ventas") or v.get("meta_mensual") or 150000.0)
+        meta_c = float(saved.get("meta_cobranza") or 50000.0)
+        meta_vis = int(saved.get("meta_visitas") or 40)
+
+        real_v = round(ventas_map.get(vid, 0.0), 2)
+        real_c = round(abonos_map.get(vid, 0.0), 2)
+        real_vis = int(visitas_map.get(vid, 0))
+
+        pct_v = round((real_v / meta_v) * 100, 1) if meta_v > 0 else 0.0
+        pct_c = round((real_c / meta_c) * 100, 1) if meta_c > 0 else 0.0
+        pct_vis = round((real_vis / meta_vis) * 100, 1) if meta_vis > 0 else 0.0
+
+        t_meta_v += meta_v
+        t_real_v += real_v
+        t_meta_c += meta_c
+        t_real_c += real_c
+        t_meta_vis += meta_vis
+        t_real_vis += real_vis
+
+        filas.append({
+            "vendedor_id": vid,
+            "vendedor_nombre": v.get("name", "Vendedor"),
+            "email": v.get("email", ""),
+            "telefono": v.get("telefono", ""),
+            "foto_url": v.get("foto_url") or v.get("foto") or "",
+            "periodo": per,
+            "meta_ventas": meta_v,
+            "ventas_reales": real_v,
+            "avance_ventas_pct": pct_v,
+            "meta_cobranza": meta_c,
+            "cobranza_real": real_c,
+            "avance_cobranza_pct": pct_c,
+            "meta_visitas": meta_vis,
+            "visitas_reales": real_vis,
+            "avance_visitas_pct": pct_vis,
+            "notas": saved.get("notas", ""),
+            "en_meta": pct_v >= 100.0,
+            "updated_at": saved.get("updated_at", ""),
+        })
+
+    filas.sort(key=lambda x: x["ventas_reales"], reverse=True)
+
+    t_pct_v = round((t_real_v / t_meta_v) * 100, 1) if t_meta_v > 0 else 0.0
+    t_pct_c = round((t_real_c / t_meta_c) * 100, 1) if t_meta_c > 0 else 0.0
+    t_pct_vis = round((t_real_vis / t_meta_vis) * 100, 1) if t_meta_vis > 0 else 0.0
+
+    return {
+        "ok": True,
+        "periodo": per,
+        "vendedores": filas,
+        "totales": {
+            "meta_ventas": round(t_meta_v, 2),
+            "ventas_reales": round(t_real_v, 2),
+            "avance_ventas_pct": t_pct_v,
+            "meta_cobranza": round(t_meta_c, 2),
+            "cobranza_real": round(t_real_c, 2),
+            "avance_cobranza_pct": t_pct_c,
+            "meta_visitas": t_meta_vis,
+            "visitas_reales": t_real_vis,
+            "avance_visitas_pct": t_pct_vis,
+            "total_vendedores": len(filas),
+            "vendedores_en_meta": sum(1 for f in filas if f["en_meta"]),
+        }
+    }
+
+
+@router.post("/supervision/goals")
+async def supervision_set_goal(
+    data: SalesGoalInput,
+    user: dict = Depends(require_permission("supervision.cartera"))
+):
+    """Guarda o actualiza la meta mensual de ventas, cobranza y visitas de un asesor."""
+    now = iso_now()
+    per = (data.periodo.strip() or now_utc().strftime("%Y-%m"))[:7]
+
+    seller = await db.users.find_one({"id": data.vendedor_id})
+    if not seller:
+        raise HTTPException(404, "Vendedor no encontrado")
+
+    doc = {
+        "vendedor_id": data.vendedor_id,
+        "vendedor_nombre": seller.get("name", ""),
+        "periodo": per,
+        "meta_ventas": float(data.meta_ventas or 0),
+        "meta_cobranza": float(data.meta_cobranza or 0),
+        "meta_visitas": int(data.meta_visitas or 0),
+        "notas": (data.notas or "").strip(),
+        "actualizado_por": user.get("id"),
+        "actualizado_por_nombre": user.get("name"),
+        "updated_at": now,
+    }
+
+    await db.sales_goals.update_one(
+        {"vendedor_id": data.vendedor_id, "periodo": per},
+        {"$set": doc, "$setOnInsert": {"id": _uid(), "created_at": now}},
+        upsert=True
+    )
+
+    # Sincronizar meta en perfil de usuario para cálculo dinámico en app móvil
+    await db.users.update_one(
+        {"id": data.vendedor_id},
+        {"$set": {"meta_mensual": float(data.meta_ventas or 0)}}
+    )
+
+    await log_audit(user, "configurar_meta", "vendedor", data.vendedor_id,
+                    f"Meta {per}: ${data.meta_ventas:,.2f} ventas, ${data.meta_cobranza:,.2f} cobro, {data.meta_visitas} visitas")
+
+    return {"ok": True, "goal": doc}
 

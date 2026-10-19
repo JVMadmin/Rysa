@@ -2,7 +2,7 @@
   "expo": {
     "name": "RYSA Vendedores",
     "slug": "rysa-vendedores",
-    "version": "1.3.0",
+    "version": "1.4.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "rysavendedores",
@@ -12,7 +12,7 @@
     },
     "android": {
       "package": "com.gruporysa.vendedores",
-      "versionCode": 8,
+      "versionCode": 15,
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -24,6 +24,11 @@
         "INTERNET",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "WAKE_LOCK",
+        "POST_NOTIFICATIONS",
         "CALL_PHONE",
         "CAMERA"
       ]
@@ -41,6 +46,16 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 180,
           "resizeMode": "contain"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "RYSA Vendedores necesita acceso a la ubicación en todo momento para registrar la ruta del asesor en campo aún con la pantalla bloqueada o la app minimizada.",
+          "locationAlwaysPermission": "Permite transmitir la telemetría GPS comercial de forma continua durante la jornada laboral.",
+          "locationWhenInUsePermission": "Permite registrar visitas a clientes y ventas en tu ubicación actual.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-sharing"

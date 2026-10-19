@@ -176,12 +176,10 @@ export default function ClientesCarteraScreen() {
   const isAssignedToMe = useCallback(
     (c: Client): boolean => {
       if (!user) return false;
-      const urole = (user.role || '').toLowerCase();
-      if (urole.includes('admin') || urole.includes('supervisor')) {
-        return true;
-      }
-      if (c.en_cartera !== undefined) {
-        return Boolean(c.en_cartera);
+      // En la app móvil del vendedor se evalúa estricta asignación de cartera individual
+      // sin excepciones de rol para garantizar que en la pestaña General los saldos ajenos permanezcan bloqueados.
+      if (c.en_cartera !== undefined && typeof c.en_cartera === 'boolean') {
+        return c.en_cartera;
       }
       const uid = String(user.id || '');
       const uname = (user.name || '').trim().toLowerCase();
@@ -207,7 +205,8 @@ export default function ClientesCarteraScreen() {
 
   const baseClients = useMemo(() => {
     if (activeTab === 'con_saldo') return debtClients;
-    return myClients.length > 0 ? myClients : clients;
+    if (activeTab === 'todos') return clients;
+    return myClients;
   }, [activeTab, myClients, debtClients, clients]);
 
   const filtered = useMemo(() => {
@@ -632,16 +631,21 @@ export default function ClientesCarteraScreen() {
 
             {assigned && hasSaldo && (
               <TouchableOpacity
-                style={styles.quickAbonoBtn}
-                onPress={() => handleOpenAbono(item)}
-                activeOpacity={0.8}
+                style={[styles.quickAbonoBtn, { backgroundColor: '#94A3B8', borderColor: '#94A3B8' }]}
+                onPress={() => {
+                  Alert.alert(
+                    'Abonos Desactivados',
+                    'La recepción de abonos en campo está temporalmente desactivada en esta versión de la aplicación.'
+                  );
+                }}
+                activeOpacity={0.7}
               >
                 <MaterialIcons name="payments" size={14} color="#FFFFFF" />
                 <Text style={styles.quickAbonoText}>Abonar</Text>
               </TouchableOpacity>
             )}
 
-            {item.telefono ? (
+            {assigned && item.telefono ? (
               <TouchableOpacity
                 style={styles.quickCallBtn}
                 onPress={() => handleCall(item.telefono)}
@@ -862,89 +866,93 @@ export default function ClientesCarteraScreen() {
                 </View>
               )}
 
-              {/* Historial de Compras / Ventas y Pedidos */}
-              <View style={styles.modalSectionCard}>
-                <Text style={styles.modalSectionTitle}>Historial de Compras / Pedidos</Text>
-                {loadingHistory ? (
-                  <ActivityIndicator size="small" color="#D32F2F" style={{ marginVertical: 8 }} />
-                ) : orderHistory.length === 0 ? (
-                  <Text style={styles.frecuenteEmpty}>Sin compras ni pedidos registrados.</Text>
-                ) : (
-                  orderHistory.map((h, hIdx) => (
-                    <View key={h.id || hIdx} style={styles.historyRow}>
-                      <View style={{ flex: 1, marginRight: 8 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <Text style={styles.historyFolio}>{h.folio}</Text>
-                          <Text style={styles.historyFecha}>{(h.fecha || '').slice(0, 10)}</Text>
-                          {h.vendido_por_mi ? (
-                            <View style={styles.badgeVendidoPorMi}>
-                              <Text style={styles.badgeVendidoPorMiText}>⭐ Vendido por ti</Text>
+              {isSelectedAssigned ? (
+                <>
+                  {/* Historial de Compras / Ventas y Pedidos */}
+                  <View style={styles.modalSectionCard}>
+                    <Text style={styles.modalSectionTitle}>Historial de Compras / Pedidos</Text>
+                    {loadingHistory ? (
+                      <ActivityIndicator size="small" color="#D32F2F" style={{ marginVertical: 8 }} />
+                    ) : orderHistory.length === 0 ? (
+                      <Text style={styles.frecuenteEmpty}>Sin compras ni pedidos registrados.</Text>
+                    ) : (
+                      orderHistory.map((h, hIdx) => (
+                        <View key={h.id || hIdx} style={styles.historyRow}>
+                          <View style={{ flex: 1, marginRight: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <Text style={styles.historyFolio}>{h.folio}</Text>
+                              <Text style={styles.historyFecha}>{(h.fecha || '').slice(0, 10)}</Text>
+                              {h.vendido_por_mi ? (
+                                <View style={styles.badgeVendidoPorMi}>
+                                  <Text style={styles.badgeVendidoPorMiText}>⭐ Vendido por ti</Text>
+                                </View>
+                              ) : (
+                                <View style={styles.badgeVendidoPorOtro}>
+                                  <Text style={styles.badgeVendidoPorOtroText}>Vendido por: {h.vendedor_nombre || 'Asesor'}</Text>
+                                </View>
+                              )}
                             </View>
-                          ) : (
-                            <View style={styles.badgeVendidoPorOtro}>
-                              <Text style={styles.badgeVendidoPorOtroText}>Vendido por: {h.vendedor_nombre || 'Asesor'}</Text>
-                            </View>
-                          )}
+                            {h.resumen_items ? (
+                              <Text style={styles.historyItems} numberOfLines={1}>
+                                {h.resumen_items}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <View style={{ alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
+                            <Text style={styles.historyTotal}>{formatCurrency(h.total)}</Text>
+                            <TouchableOpacity
+                              style={styles.facturarBtn}
+                              onPress={() => handleFacturar(h)}
+                              activeOpacity={0.7}
+                            >
+                              <MaterialIcons name="receipt-long" size={12} color="#FFFFFF" />
+                              <Text style={styles.facturarBtnText}>Facturar</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
-                        {h.resumen_items ? (
-                          <Text style={styles.historyItems} numberOfLines={1}>
-                            {h.resumen_items}
-                          </Text>
-                        ) : null}
-                      </View>
-                      <View style={{ alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
-                        <Text style={styles.historyTotal}>{formatCurrency(h.total)}</Text>
-                        <TouchableOpacity
-                          style={styles.facturarBtn}
-                          onPress={() => handleFacturar(h)}
-                          activeOpacity={0.7}
-                        >
-                          <MaterialIcons name="receipt-long" size={12} color="#FFFFFF" />
-                          <Text style={styles.facturarBtnText}>Facturar</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  ))
-                )}
-              </View>
+                      ))
+                    )}
+                  </View>
 
-              {/* Productos Frecuentes */}
-              <View style={styles.modalSectionCard}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <Text style={styles.modalSectionTitle}>Productos Frecuentes</Text>
-                  <MaterialIcons name="repeat" size={16} color="#718096" />
-                </View>
-
-                {loadingFrecuentes ? (
-                  <ActivityIndicator size="small" color="#D32F2F" style={{ marginVertical: 8 }} />
-                ) : frecuentes.length === 0 ? (
-                  <Text style={styles.emptyFrecuentesText}>
-                    No hay compras frecuentes registradas aún.
-                  </Text>
-                ) : (
-                  frecuentes.map((f, i) => (
-                    <View key={i} style={styles.frecuenteRow}>
-                      <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={styles.frecuenteName} numberOfLines={1}>
-                          {f.nombre}
-                        </Text>
-                        <Text style={styles.frecuenteSub}>
-                          {f.veces_comprado} compras • {formatCurrency(f.ultimo_precio)}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={styles.addFrecuenteBtn}
-                        onPress={() => {
-                          setSelectedClient(null);
-                          router.push('/pedidos' as any);
-                        }}
-                      >
-                        <MaterialIcons name="add" size={16} color="#FFFFFF" />
-                      </TouchableOpacity>
+                  {/* Productos Frecuentes */}
+                  <View style={styles.modalSectionCard}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <Text style={styles.modalSectionTitle}>Productos Frecuentes</Text>
+                      <MaterialIcons name="repeat" size={16} color="#718096" />
                     </View>
-                  ))
-                )}
-              </View>
+
+                    {loadingFrecuentes ? (
+                      <ActivityIndicator size="small" color="#D32F2F" style={{ marginVertical: 8 }} />
+                    ) : frecuentes.length === 0 ? (
+                      <Text style={styles.emptyFrecuentesText}>
+                        No hay compras frecuentes registradas aún.
+                      </Text>
+                    ) : (
+                      frecuentes.map((f, i) => (
+                        <View key={i} style={styles.frecuenteRow}>
+                          <View style={{ flex: 1, marginRight: 8 }}>
+                            <Text style={styles.frecuenteName} numberOfLines={1}>
+                              {f.nombre}
+                            </Text>
+                            <Text style={styles.frecuenteSub}>
+                              {f.veces_comprado} compras • {formatCurrency(f.ultimo_precio)}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            style={styles.addFrecuenteBtn}
+                            onPress={() => {
+                              setSelectedClient(null);
+                              router.push('/pedidos' as any);
+                            }}
+                          >
+                            <MaterialIcons name="add" size={16} color="#FFFFFF" />
+                          </TouchableOpacity>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                </>
+              ) : null}
 
               {isSelectedAssigned && (
                 <>
@@ -1007,8 +1015,9 @@ export default function ClientesCarteraScreen() {
               <TouchableOpacity
                 style={[styles.actionBtn, { backgroundColor: '#D32F2F' }]}
                 onPress={() => {
+                  const c = selectedClient;
                   setSelectedClient(null);
-                  router.push('/pedidos' as any);
+                  router.push({ pathname: '/pedidos', params: { cliente_id: c?.id } } as any);
                 }}
               >
                 <MaterialIcons name="shopping-cart" size={18} color="#FFFFFF" />
@@ -1017,15 +1026,21 @@ export default function ClientesCarteraScreen() {
 
               {isSelectedAssigned && (selectedClient?.saldo || 0) > 0 && (
                 <TouchableOpacity
-                  style={[styles.actionBtn, { backgroundColor: '#2E7D32' }]}
-                  onPress={() => setAbonoModalVisible(true)}
+                  style={[styles.actionBtn, { backgroundColor: '#94A3B8' }]}
+                  onPress={() => {
+                    Alert.alert(
+                      'Abonos Desactivados',
+                      'La recepción de abonos en campo está temporalmente desactivada en esta versión de la aplicación.'
+                    );
+                  }}
+                  activeOpacity={0.7}
                 >
                   <MaterialIcons name="payments" size={18} color="#FFFFFF" />
                   <Text style={styles.actionBtnText}>Abonar</Text>
                 </TouchableOpacity>
               )}
 
-              {selectedClient?.telefono && (
+              {isSelectedAssigned && selectedClient?.telefono && (
                 <TouchableOpacity
                   style={[styles.actionBtn, { backgroundColor: '#25D366' }]}
                   onPress={() => handleWhatsApp(selectedClient.whatsapp || selectedClient.telefono)}

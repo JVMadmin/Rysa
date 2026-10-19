@@ -63,7 +63,9 @@ export async function getClientsCache(): Promise<{ clients: Client[]; meta: Cach
       return { clients, meta };
     }
   } catch (err) {
-    console.warn('[OfflineCache] Error reading clients cache:', err);
+    console.warn('[OfflineCache] Error reading clients cache, auto-clearing:', err);
+    AsyncStorage.removeItem(CACHE_KEYS.CLIENTS).catch(() => {});
+    AsyncStorage.removeItem(CACHE_KEYS.CLIENTS_META).catch(() => {});
   }
   return { clients: [], meta: null };
 }
@@ -94,7 +96,9 @@ export async function getCatalogCache(): Promise<{ products: Product[]; meta: Ca
       return { products, meta };
     }
   } catch (err) {
-    console.warn('[OfflineCache] Error reading catalog cache:', err);
+    console.warn('[OfflineCache] Error reading catalog cache, auto-clearing:', err);
+    AsyncStorage.removeItem(CACHE_KEYS.CATALOG).catch(() => {});
+    AsyncStorage.removeItem(CACHE_KEYS.CATALOG_META).catch(() => {});
   }
   return { products: [], meta: null };
 }
@@ -125,7 +129,9 @@ export async function getVisitsCache(): Promise<{ visits: Visit[]; meta: CacheMe
       return { visits, meta };
     }
   } catch (err) {
-    console.warn('[OfflineCache] Error reading visits cache:', err);
+    console.warn('[OfflineCache] Error reading visits cache, auto-clearing:', err);
+    AsyncStorage.removeItem(CACHE_KEYS.VISITS).catch(() => {});
+    AsyncStorage.removeItem(CACHE_KEYS.VISITS_META).catch(() => {});
   }
   return { visits: [], meta: null };
 }
@@ -156,7 +162,9 @@ export async function getDashboardCache(): Promise<{ dashboard: SellerDashboardD
       return { dashboard, meta };
     }
   } catch (err) {
-    console.warn('[OfflineCache] Error reading dashboard cache:', err);
+    console.warn('[OfflineCache] Error reading dashboard cache, auto-clearing:', err);
+    AsyncStorage.removeItem(CACHE_KEYS.DASHBOARD).catch(() => {});
+    AsyncStorage.removeItem(CACHE_KEYS.DASHBOARD_META).catch(() => {});
   }
   return { dashboard: null, meta: null };
 }
@@ -187,9 +195,23 @@ export async function getLastGpsCache(): Promise<CachedGpsPosition | null> {
 export async function getOfflineOutbox(): Promise<OfflineAction[]> {
   try {
     const raw = await AsyncStorage.getItem(CACHE_KEYS.OFFLINE_OUTBOX);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
+    if (!raw) return [];
+    const parsed: OfflineAction[] = JSON.parse(raw);
+    // Excluir pings de ubicacion que no deben estar en la cola transaccional
+    return parsed.filter((a) => a.type !== 'location_ping');
+  } catch (err) {
+    console.warn('[OfflineCache] Error reading outbox, resetting corrupt data:', err);
+    AsyncStorage.removeItem(CACHE_KEYS.OFFLINE_OUTBOX).catch(() => {});
     return [];
+  }
+}
+
+export async function saveOfflineOutbox(actions: OfflineAction[]): Promise<void> {
+  try {
+    const sanitized = actions.filter((a) => a.type !== 'location_ping');
+    await AsyncStorage.setItem(CACHE_KEYS.OFFLINE_OUTBOX, JSON.stringify(sanitized));
+  } catch (err) {
+    console.warn('[OfflineCache] Error saving outbox:', err);
   }
 }
 
@@ -200,10 +222,13 @@ export async function queueOfflineAction(action: Omit<OfflineAction, 'id' | 'cre
     createdAt: new Date().toISOString(),
     attempts: 0,
   };
+  if (action.type === 'location_ping') {
+    return fullAction;
+  }
   try {
     const current = await getOfflineOutbox();
     current.push(fullAction);
-    await AsyncStorage.setItem(CACHE_KEYS.OFFLINE_OUTBOX, JSON.stringify(current));
+    await saveOfflineOutbox(current);
   } catch (err) {
     console.warn('[OfflineCache] Error queueing action:', err);
   }
@@ -268,7 +293,9 @@ export async function getCategoriesCache(): Promise<any[]> {
   try {
     const raw = await AsyncStorage.getItem(CACHE_KEYS.CATEGORIES);
     return raw ? JSON.parse(raw) : [];
-  } catch {
+  } catch (err) {
+    console.warn('[OfflineCache] Error reading categories cache, resetting:', err);
+    AsyncStorage.removeItem(CACHE_KEYS.CATEGORIES).catch(() => {});
     return [];
   }
 }
@@ -291,7 +318,9 @@ export async function getOfflineSales(): Promise<any[]> {
   try {
     const raw = await AsyncStorage.getItem(CACHE_KEYS.OFFLINE_SALES);
     return raw ? JSON.parse(raw) : [];
-  } catch {
+  } catch (err) {
+    console.warn('[OfflineCache] Error reading offline sales, resetting:', err);
+    AsyncStorage.removeItem(CACHE_KEYS.OFFLINE_SALES).catch(() => {});
     return [];
   }
 }

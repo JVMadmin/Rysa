@@ -4,6 +4,7 @@ import {
   saveVisitsCache,
   saveDashboardCache,
   getOfflineOutbox,
+  saveOfflineOutbox,
   removeOfflineAction,
   OfflineAction,
   removeOfflineSale,
@@ -34,6 +35,7 @@ type SyncStatusCallback = (status: {
 class SyncManager {
   private isOnline = true;
   private isSyncing = false;
+  private isPreloading = false;
   private lastSyncAt: Date | null = null;
   private reconnectListeners: Set<ReconnectCallback> = new Set();
   private statusListeners: Set<SyncStatusCallback> = new Set();
@@ -134,25 +136,43 @@ class SyncManager {
    * Procesa la cola outbox enviando las acciones registradas offline
    */
   public async drainOutbox(): Promise<{ processed: number; failed: number }> {
-    const outbox = await getOfflineOutbox();
-    if (outbox.length === 0) return { processed: 0, failed: 0 };
+    const rawOutbox = await getOfflineOutbox();
+    // Limpiar de forma definitiva cualquier ping de ubicacion
+    const outbox = rawOutbox.filter((a) => a.type !== 'location_ping');
+    if (outbox.length !== rawOutbox.length) {
+      await saveOfflineOutbox(outbox);
+    }
+
+    if (outbox.length === 0) {
+      this.emitStatus();
+      return { processed: 0, failed: 0 };
+    }
 
     let processed = 0;
     let failed = 0;
+    const remainingOutbox: OfflineAction[] = [];
 
     for (const action of outbox) {
       try {
         await this.executeOfflineAction(action);
-        await removeOfflineAction(action.id);
         processed++;
-      } catch (err) {
-        console.warn(`[SyncManager] Failed to sync action ${action.id}:`, err);
+      } catch (err: any) {
+        console.warn(`[SyncManager] Error sincronizando acción ${action.id} (${action.type}):`, err);
         failed++;
-        // Si falló por red, no continuar con el resto
-        break;
+        const attempts = (action.attempts || 0) + 1;
+        const msg = String(err?.message || err || '');
+        const isClientError = msg.includes('400') || msg.includes('404') || msg.includes('422');
+
+        // Si es un error irrecuperable de validación o supera 3 intentos, no bloquear la cola
+        if (attempts < 3 && !isClientError) {
+          remainingOutbox.push({ ...action, attempts });
+        } else {
+          console.warn(`[SyncManager] Descartando acción ${action.id} tras superar reintentos o error fatal.`);
+        }
       }
     }
 
+    await saveOfflineOutbox(remainingOutbox);
     this.emitStatus();
     return { processed, failed };
   }
@@ -195,51 +215,75 @@ class SyncManager {
     catalogCount: number;
     visitsCount: number;
   }> {
+    if (this.isPreloading) {
+      console.log('[SyncManager] preloadAllData ya en progreso, omitiendo...');
+      return { clientsCount: 0, catalogCount: 0, visitsCount: 0 };
+    }
+    this.isPreloading = true;
+
     let clientsCount = 0;
     let catalogCount = 0;
     let visitsCount = 0;
 
     try {
-      // 1. Clientes (Cartera y General)
-      const clients = await getSellerClients(undefined, 'all').catch(() => null);
-      if (clients && Array.isArray(clients)) {
-        await saveClientsCache(clients);
-        clientsCount = clients.length;
-
-        // 1.1 Precargar historial de los clientes en cartera (primeros 30)
-        const carteraClients = clients.filter((c: any) => c.en_cartera || (c.saldo || 0) > 0).slice(0, 30);
-        for (const c of carteraClients) {
-          if (c.id) {
-            getClientOrderHistory(c.id).catch(() => {});
-          }
+      // 1. Dashboard (rápido y liviano)
+      try {
+        const dashboard = await getSellerDashboard();
+        if (dashboard) {
+          await saveDashboardCache(dashboard);
         }
+      } catch (e) {
+        console.warn('[SyncManager] Error precargando dashboard:', e);
       }
 
-      // 2. Catálogo completo de productos y categorías activas
-      const [catalog, categories] = await Promise.all([
-        getFullCatalog().catch(() => []),
-        getCategoriesList().catch(() => []),
-      ]);
-      if (Array.isArray(catalog)) {
-        catalogCount = catalog.length;
+      // 2. Clientes (cartera y general)
+      try {
+        const clients = await getSellerClients(undefined, 'all');
+        if (clients && Array.isArray(clients)) {
+          await saveClientsCache(clients);
+          clientsCount = clients.length;
+        }
+      } catch (e) {
+        console.warn('[SyncManager] Error precargando clientes:', e);
       }
 
-      // 3. Visitas
-      const visits = await getVisits().catch(() => null);
-      if (visits && Array.isArray(visits)) {
-        await saveVisitsCache(visits);
-        visitsCount = visits.length;
+      // NOTA: Eliminamos la descarga masiva de 30 historiales individuales
+      // para evitar saturación de red y bloqueo de SQLite en Android.
+      // El historial se precarga bajo demanda al abrir cada cliente.
+
+      // 3. Catálogo completo de productos
+      try {
+        const catalog = await getFullCatalog();
+        if (Array.isArray(catalog)) {
+          catalogCount = catalog.length;
+        }
+      } catch (e) {
+        console.warn('[SyncManager] Error precargando catálogo:', e);
       }
 
-      // 4. Dashboard KPIs
-      const dashboard = await getSellerDashboard().catch(() => null);
-      if (dashboard) {
-        await saveDashboardCache(dashboard);
+      // 4. Categorías de productos
+      try {
+        await getCategoriesList();
+      } catch (e) {
+        console.warn('[SyncManager] Error precargando categorías:', e);
+      }
+
+      // 5. Visitas
+      try {
+        const visits = await getVisits();
+        if (visits && Array.isArray(visits)) {
+          await saveVisitsCache(visits);
+          visitsCount = visits.length;
+        }
+      } catch (e) {
+        console.warn('[SyncManager] Error precargando visitas:', e);
       }
 
       this.lastSyncAt = new Date();
     } catch (err) {
       console.warn('[SyncManager] Preload partial error:', err);
+    } finally {
+      this.isPreloading = false;
     }
 
     return { clientsCount, catalogCount, visitsCount };

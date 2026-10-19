@@ -137,7 +137,7 @@ export async function getFullCatalog(): Promise<Product[]> {
         categoria: p.categoria || '',
         foto: p.imagen || '',
         imagen: p.imagen || '',
-        iva_tasa: Number(p.iva_tasa ?? 16),
+        iva_tasa: Number(p.iva_tasa ?? 8),
       }));
       await saveCatalogCache(mapped);
       return mapped;

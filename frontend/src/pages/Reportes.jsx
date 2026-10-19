@@ -139,7 +139,7 @@ export default function Reportes() {
     if (cliente) params.append("cliente_id", cliente);
     if (sucursal) params.append("sucursal_id", sucursal);
     if (condicion) params.append("condicion", condicion);
-    window.open(`${process.env.REACT_APP_BACKEND_URL}/api/reports/ventas/export?${params.toString()}`, "_blank");
+    window.open(`${process.env.REACT_APP_BACKEND_URL || ""}/api/reports/ventas/export?${params.toString()}`, "_blank");
   };
 
   const toggleSeccion = (k) => setSecciones((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -178,7 +178,7 @@ export default function Reportes() {
   const exportarInventario = () => {
     const params = new URLSearchParams({ desde, hasta, estado: invEstado, fmt: "excel" });
     if (invQ) params.append("q", invQ);
-    window.open(`${process.env.REACT_APP_BACKEND_URL}/api/reports/inventario/export?${params.toString()}`, "_blank");
+    window.open(`${process.env.REACT_APP_BACKEND_URL || ""}/api/reports/inventario/export?${params.toString()}`, "_blank");
   };
 
   // --- Centro de reportes ---

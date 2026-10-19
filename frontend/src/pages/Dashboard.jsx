@@ -1,11 +1,11 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, money } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from "recharts";
 import {
   TrendingUp, ShoppingCart, Wallet, Users, AlertTriangle, PackageX, Package, Loader2,
-  Receipt, Settings, ArrowRight, ArrowUpRight, Boxes,
+  Receipt, Settings, ArrowRight, ArrowUpRight, Boxes, Building2, Store, Filter,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -34,21 +34,37 @@ const Kpi = ({ icon: Icon, label, value, color, testid, featured = false }) => (
 export default function Dashboard() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState("");
+  const [sucursalSel, setSucursalSel] = useState("todas");
+  const [loadingSucursal, setLoadingSucursal] = useState(false);
   const { can, isAdminOrOwner } = useAuth();
 
-  const load = () => {
+  const load = (sucId = sucursalSel) => {
     setErr("");
-    api.get("/dashboard")
-      .then((r) => setD(r.data))
-      .catch((e) => setErr(e?.response?.data?.detail || "No se pudo cargar el dashboard."));
+    setLoadingSucursal(true);
+    const params = sucId && sucId !== "todas" ? { sucursal_id: sucId } : {};
+    api.get("/dashboard", { params })
+      .then((r) => {
+        setD(r.data);
+        if (r.data?.sucursal_seleccionada) {
+          setSucursalSel(r.data.sucursal_seleccionada);
+        }
+      })
+      .catch((e) => setErr(e?.response?.data?.detail || "No se pudo cargar el dashboard."))
+      .finally(() => setLoadingSucursal(false));
   };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  useEffect(() => { load("todas"); /* eslint-disable-next-line */ }, []);
+
+  const handleCambiarSucursal = (newSucId) => {
+    setSucursalSel(newSucId);
+    load(newSucId);
+  };
 
   if (err) {
     return (
       <div className="card-soft p-8 text-center" data-testid="dashboard-error">
         <p className="text-red-600 mb-4">{err}</p>
-        <button className="px-4 py-2 rounded-xl bg-terracota text-white font-semibold" onClick={load}>Reintentar</button>
+        <button className="px-4 py-2 rounded-xl bg-terracota text-white font-semibold" onClick={() => load()}>Reintentar</button>
       </div>
     );
   }
@@ -56,6 +72,8 @@ export default function Dashboard() {
   if (!d) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-terracota" /></div>;
 
   const global = d.mode === "global" || isAdminOrOwner;
+  const sucursales = d.sucursales || [];
+  const sucursalActualObj = sucursales.find((s) => s.id === sucursalSel);
 
   const MODULES = [
     { to: "/app/pos", label: "Punto de Venta", desc: "Cobrar rápido", icon: ShoppingCart, color: "#C1401E", perm: "venta.crear" },
@@ -69,9 +87,41 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6" data-testid="dashboard-page">
-      <div>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
-        <p className="text-slate-500 text-sm">{global ? "Resumen general de la operación." : "Resumen de tu caja y ventas."}</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+            {loadingSucursal && <Loader2 className="w-4 h-4 animate-spin text-terracota" />}
+          </div>
+          <p className="text-slate-500 text-sm">
+            {global
+              ? sucursalSel === "todas"
+                ? "Resumen consolidado de todas las sucursales."
+                : `Operación de sucursal: ${sucursalActualObj?.nombre || sucursalSel}`
+              : "Resumen de tu caja y ventas."}
+          </p>
+        </div>
+
+        {/* Selector de Sucursal */}
+        {global && sucursales.length > 0 && (
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-sm">
+            <Store className="w-4 h-4 text-terracota flex-shrink-0" />
+            <span className="text-xs font-semibold text-slate-500 hidden md:inline">Sucursal:</span>
+            <select
+              value={sucursalSel}
+              onChange={(e) => handleCambiarSucursal(e.target.value)}
+              className="text-xs font-bold text-slate-800 bg-transparent border-0 focus:ring-0 cursor-pointer pr-4"
+              data-testid="select-sucursal-dashboard"
+            >
+              <option value="todas">🌐 Todas las sucursales (Consolidado)</option>
+              {sucursales.map((s) => (
+                <option key={s.id} value={s.id}>
+                  🏢 {s.nombre} {s.codigo ? `(${s.codigo})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Accesos rápidos */}
@@ -158,6 +208,78 @@ export default function Dashboard() {
               <Badge className="bg-terracota/10 text-terracota hover:bg-terracota/10"><Boxes className="w-3.5 h-3.5 mr-1" /> Global</Badge>
               <span className="text-slate-500">Ventas totales: <b className="text-slate-900">{money(d.totales_globales?.ventas)}</b> · {d.totales_globales?.num_ventas} ventas · {d.totales_globales?.cajas_abiertas} cajas abiertas</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Desglose de Ventas por Sucursal */}
+      {global && d.por_sucursal && d.por_sucursal.length > 0 && (
+        <div className="card-soft p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-display font-semibold text-lg text-slate-900 flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-terracota" /> Ventas por Sucursal
+            </h3>
+            {sucursalSel !== "todas" && (
+              <button
+                onClick={() => handleCambiarSucursal("todas")}
+                className="text-xs text-terracota hover:underline font-medium flex items-center gap-1"
+              >
+                Ver todas (quitar filtro)
+              </button>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                  <th className="py-2 pr-4 font-semibold">Sucursal</th>
+                  <th className="py-2 pr-4 text-right font-semibold">Ventas Hoy</th>
+                  <th className="py-2 pr-4 text-right font-semibold">Total Histórico</th>
+                  <th className="py-2 pr-4 text-right font-semibold">N° Ventas</th>
+                  <th className="py-2 text-right font-semibold">Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.por_sucursal.map((s) => {
+                  const activa = sucursalSel === s.sucursal_id;
+                  return (
+                    <tr
+                      key={s.sucursal_id}
+                      className={`border-b border-slate-100 transition-colors ${
+                        activa ? "bg-amber-50/60 font-medium" : "hover:bg-slate-50/70"
+                      }`}
+                    >
+                      <td className="py-3 pr-4">
+                        <div className="flex items-center gap-2">
+                          <Store className={`w-4 h-4 ${activa ? "text-terracota" : "text-slate-400"}`} />
+                          <span className="text-slate-900 font-semibold">{s.nombre}</span>
+                          {activa && (
+                            <Badge variant="outline" className="text-[10px] bg-terracota/10 text-terracota border-terracota/30 py-0">
+                              Filtrada
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 pr-4 text-right text-slate-700 font-semibold">{money(s.ventas_hoy)}</td>
+                      <td className="py-3 pr-4 text-right text-slate-900 font-bold">{money(s.total)}</td>
+                      <td className="py-3 pr-4 text-right text-slate-500">{s.num_ventas}</td>
+                      <td className="py-3 text-right">
+                        <button
+                          onClick={() => handleCambiarSucursal(activa ? "todas" : s.sucursal_id)}
+                          className={`text-xs px-2.5 py-1 rounded-lg font-medium transition ${
+                            activa
+                              ? "bg-slate-200 hover:bg-slate-300 text-slate-700"
+                              : "bg-terracota/10 hover:bg-terracota/20 text-terracota"
+                          }`}
+                        >
+                          {activa ? "Ver todas" : "Filtrar"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

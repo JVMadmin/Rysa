@@ -376,7 +376,13 @@ export default function POS({ windowId, windowLabel }) {
     });
     api.get("/vendedores").then((r) => setVendedores(r.data));
     api.get("/sucursales").then((r) => setSucursales(r.data || [])).catch(() => {});
-    api.get("/settings").then((r) => { setSettings(r.data || {}); if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres); if (r.data?.listas_precios_pct?.length) setListasPct(r.data.listas_precios_pct); if (r.data && r.data.precios_incluyen_iva !== undefined) { setIncluyeIva(!!r.data.precios_incluyen_iva); incluyeIvaDefault.current = !!r.data.precios_incluyen_iva; } });
+    api.get("/settings").then((r) => {
+      setSettings(r.data || {});
+      if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres);
+      if (r.data?.listas_precios_pct?.length) setListasPct(r.data.listas_precios_pct);
+      setIncluyeIva(true);
+      incluyeIvaDefault.current = true;
+    });
     loadSuspended();
     refreshFolio();
   }, []);
@@ -828,13 +834,13 @@ export default function POS({ windowId, windowLabel }) {
     try {
       const payload = {
         cliente_id: clienteId || null,
-        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", presentacion: i.presentacion || i.unidad || "PZA", factor: Number(i.factor || 1.0), precio: Number(i.precio) || 0, iva_tasa: Number(i.iva_tasa), descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
+        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", presentacion: i.presentacion || i.unidad || "PZA", factor: Number(i.factor || 1.0), precio: Number(i.precio) || 0, iva_tasa: incluyeIva ? Number(i.iva_tasa || 8) : 0, descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
         descuento_global: totals.descGlobalTotal,
         condicion,
         pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0), ...(p.metodo === "tarjeta" && p.card_type ? { card_type: p.card_type } : {}) })) : [],
         lista_precios: Number(lista),
         tipo_venta: tipoVenta,
-        precios_incluyen_iva: incluyeIva,
+        precios_incluyen_iva: false,
         // Operador: el backend fuerza vendedor_id = usuario autenticado salvo que el
         // rol tenga el permiso de cambiar operador. Solo se envía si el usuario lo tiene.
         vendedor_id: can("venta.cambiar_operador") ? (vendedorId || user.id) : null,
@@ -1202,7 +1208,7 @@ export default function POS({ windowId, windowLabel }) {
                 className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#C1401E] text-[#C1401E] bg-[#C1401E]/5" : "border-slate-200 text-slate-400"}`}
                 data-testid="pos-incluye-iva">
                 <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#C1401E] border-[#C1401E]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
-                Precios incluyen IVA
+                IVA (8%) aplicado
               </button>
             </div>
             {totals.descGlobalAmount > 0 && <div className="text-xs text-[#C1401E]">Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}: -{money(totals.descGlobalAmount)}</div>}
@@ -1574,7 +1580,7 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="border-t border-dashed border-black my-1" />
                 {ticket.id && (
                   <div className="text-center">
-                    <img src={`${process.env.REACT_APP_BACKEND_URL}/api/sales/${ticket.id}/qr?destino=${encodeURIComponent(`${window.location.origin}/verificar/${ticket.id}`)}`} alt="QR de verificación"
+                    <img src={`${process.env.REACT_APP_BACKEND_URL || ""}/api/sales/${ticket.id}/qr?destino=${encodeURIComponent(`${window.location.origin}/verificar/${ticket.id}`)}`} alt="QR de verificación"
                       className="mx-auto w-24 h-24" data-testid="ticket-qr" />
                     <div className="text-[9px] text-slate-500">{window.location.origin}/verificar/{ticket.id}</div>
                   </div>

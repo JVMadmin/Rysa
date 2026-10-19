@@ -35,12 +35,15 @@ KNOWN_COLLECTIONS = [
     "cot_pago_tokens", "payment_evidence",
     # Cargos por interés moratorio (CxC)
     "cxc_cargos",
+    # Metas de venta comerciales
+    "sales_goals",
     # Snapshots de asignación de imágenes de catálogo (Rollback)
     "catalog_image_snapshots",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.
 TYPED_COLUMNS = {
+    "sales_goals": ["meta_ventas", "meta_cobranza"],
     "sales": ["subtotal", "iva_total", "descuento_total", "total", "cambio", "saldo"],
     "clients": ["saldo", "limite_credito", "latitud", "longitud"],
     "products": ["costo", "existencia", "stock_minimo", "vendidas",

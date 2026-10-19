@@ -23,6 +23,13 @@ export async function login(email: string, password: string): Promise<User> {
     throw new Error('Respuesta de autenticación inválida');
   }
 
+  const allowedRoles = ['vendedor', 'vendedor_campo'];
+  const userRole = (data.user?.role || '').toLowerCase();
+  if (!allowedRoles.includes(userRole)) {
+    await logout();
+    throw new Error('Acceso restringido: Esta aplicación móvil es de uso exclusivo para Asesores y Vendedores en Campo.');
+  }
+
   await setAuthToken(data.token);
   await storeUserData(data.user);
   return data.user;
@@ -38,10 +45,21 @@ export async function getActiveUser(): Promise<User | null> {
   if (!token) return null;
 
   const stored = await getStoredUserData();
-  if (stored) return stored;
+  const allowedRoles = ['vendedor', 'vendedor_campo'];
+  if (stored) {
+    if (!allowedRoles.includes((stored.role || '').toLowerCase())) {
+      await logout();
+      return null;
+    }
+    return stored;
+  }
 
   try {
     const user = await apiFetch<User>('/auth/me');
+    if (!allowedRoles.includes((user.role || '').toLowerCase())) {
+      await logout();
+      return null;
+    }
     await storeUserData(user);
     return user;
   } catch {

@@ -232,7 +232,7 @@ def _build_default_elements(tc, settings, sale):
     # NO añadir "deschead" (antes salía duplicado).
     els.append({"tipo": "items"})
     els.append({"tipo": "separador"})
-    incluye_iva = (settings or {}).get("precios_incluyen_iva", True)
+    incluye_iva = float(sale.get("iva_total", 0) or 0) > 0 or (settings or {}).get("precios_incluyen_iva", True)
     if incluye_iva:
         els.append({"tipo": "subtotal"})
         els.append({"tipo": "iva"})
@@ -641,7 +641,7 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
     est_h = (40 + n_items_lines + 30) * mm
     probe_h = int(est_h + 120 * mm)
 
-    copias = max(1, int((tc or {}).get("copias", 2)))  # §3.4: cliente+comercio
+    copias = max(1, int((tc or {}).get("copias", 1)))
 
     c = canvas.Canvas(io.BytesIO(), pagesize=(width, probe_h))
     w, h = width, probe_h
