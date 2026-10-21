@@ -262,13 +262,13 @@ export default function Configuracion() {
 
   if (sErr) return (
     <div className="max-w-lg mx-auto mt-20 text-center space-y-3" data-testid="cfg-error">
-      <AlertTriangle className="w-12 h-12 mx-auto text-[#C1401E]" />
+      <AlertTriangle className="w-12 h-12 mx-auto text-brand-600" />
       <h1 className="font-display text-xl font-black tracking-tight text-slate-800">No se pudo cargar la Configuración</h1>
       <p className="text-sm text-slate-500">No se pudo conectar con el servidor para leer los ajustes (endpoint /settings). Verifica que el servidor esté activo.</p>
       {sErr && <p className="text-xs text-red-600">{sErr}</p>}
     </div>
   );
-  if (!s) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>;
+  if (!s) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>;
 
   const I = (label, k, type = "text") => (
     <div><Label className="text-xs uppercase tracking-wider text-slate-500">{label}</Label>
@@ -279,7 +279,7 @@ export default function Configuracion() {
     <div className="space-y-5" data-testid="configuracion-page">
       <div className="flex items-center justify-between">
         <div><h1 className="font-display text-2xl font-black tracking-tight">Configuración</h1><p className="text-slate-500 text-sm">Datos de la empresa, precios, sucursales y usuarios</p></div>
-        <Button onClick={save} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cfg-save"><Save className="w-4 h-4 mr-1" /> {saving ? "Guardando..." : "Guardar"}</Button>
+        <Button onClick={save} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="cfg-save"><Save className="w-4 h-4 mr-1" /> {saving ? "Guardando..." : "Guardar"}</Button>
       </div>
 
       <Tabs defaultValue="empresa">
@@ -297,12 +297,12 @@ export default function Configuracion() {
 
         <TabsContent value="empresa" className="pt-4">
           <div className="card-soft p-5 grid grid-cols-2 gap-4 max-w-3xl">
-            <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold"><Building2 className="w-4 h-4 text-[#C1401E]" /> Datos generales</div>
+            <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold"><Building2 className="w-4 h-4 text-brand-600" /> Datos generales</div>
             {I("Nombre de la empresa", "empresa_nombre")}
             {I("RFC", "rfc")}
             {I("Teléfono", "telefono")}
             {I("Correo", "correo")}
-            <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold mt-2"><MapPin className="w-4 h-4 text-[#C1401E]" /> Ubicación</div>
+            <div className="col-span-2 flex items-center gap-2 text-slate-700 font-semibold mt-2"><MapPin className="w-4 h-4 text-brand-600" /> Ubicación</div>
             <div className="col-span-2">{I("Dirección", "direccion")}</div>
             {I("Colonia", "colonia")}
             {I("Ciudad", "ciudad")}
@@ -435,7 +435,7 @@ export default function Configuracion() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="card-soft p-5 space-y-4">
-              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#C1401E]" /> Diseño de ticket</div>
+              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-brand-600" /> Diseño de ticket</div>
               <div>
                 <Label className="text-xs uppercase tracking-wider text-slate-500 mb-1 block">Logo del negocio</Label>
                 <ImageUpload value={s.logo_url} onChange={(v) => set("logo_url", v)} testid="cfg-logo-upload" heightClass="h-28" />
@@ -445,7 +445,7 @@ export default function Configuracion() {
                 <div className="flex gap-2 mt-1">
                   {[["80mm", "Ticket 80mm"], ["carta", "Carta"]].map(([v, l]) => (
                     <button key={v} type="button" onClick={() => setTc("tamano", v)} data-testid={`cfg-ticket-size-${v}`}
-                      className={`flex-1 py-2 rounded-md border text-sm font-medium ${(s.ticket_config?.tamano || "80mm") === v ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+                      className={`flex-1 py-2 rounded-md border text-sm font-medium ${(s.ticket_config?.tamano || "80mm") === v ? "border-brand-600 bg-brand-600/5 text-brand-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
                   ))}
                 </div>
               </div>
@@ -483,7 +483,7 @@ export default function Configuracion() {
                   {elt.map((blk, i) => (
                     <div key={i} className="border border-slate-200 rounded-lg p-2 flex flex-col gap-2">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-semibold text-[#C1401E] w-28">{TYPE_LABELS[blk.tipo] || blk.tipo}</span>
+                        <span className="text-[11px] font-semibold text-brand-600 w-28">{TYPE_LABELS[blk.tipo] || blk.tipo}</span>
                         <button type="button" onClick={() => moveEl(i, -1)} className="text-slate-400 hover:text-slate-700 disabled:opacity-30" disabled={i === 0} data-testid={`cfg-elt-up-${i}`}>↑</button>
                         <button type="button" onClick={() => moveEl(i, 1)} className="text-slate-400 hover:text-slate-700 disabled:opacity-30" disabled={i === elt.length - 1} data-testid={`cfg-elt-down-${i}`}>↓</button>
                         <div className="ml-auto flex items-center gap-2">
@@ -559,7 +559,7 @@ export default function Configuracion() {
           <div className="space-y-4">
             {s && (
               <div className="card-soft p-5 space-y-4">
-                <div className="flex items-center gap-2 text-slate-700 font-semibold"><PrinterIcon className="w-4 h-4 text-[#C1401E]" /> Impresoras y salida de documentos</div>
+                <div className="flex items-center gap-2 text-slate-700 font-semibold"><PrinterIcon className="w-4 h-4 text-brand-600" /> Impresoras y salida de documentos</div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-center justify-between border border-slate-200 rounded-md px-3 h-12">
                     <div>
@@ -661,7 +661,7 @@ export default function Configuracion() {
 
         <TabsContent value="storage" className="pt-4">
           <div className="card-soft p-5 max-w-xl space-y-5" data-testid="storage-panel">
-            <div className="flex items-center gap-2 text-slate-700 font-semibold"><HardDrive className="w-4 h-4 text-[#C1401E]" /> Almacenamiento de archivos</div>
+            <div className="flex items-center gap-2 text-slate-700 font-semibold"><HardDrive className="w-4 h-4 text-brand-600" /> Almacenamiento de archivos</div>
             <p className="text-sm text-slate-500">Este ERP guarda las imágenes de productos, categorías, logo y PDFs de ticket en un almacenamiento local. Aquí puedes seleccionar el directorio donde se guardarán (por ejemplo, al instalar en tu VPS).</p>
 
             <div>
@@ -669,7 +669,7 @@ export default function Configuracion() {
               <div className="flex gap-2">
                 {[["local", "Local (disco del servidor)"]].map(([v, l]) => (
                   <button key={v} type="button" onClick={() => setStorage("backend", v)} data-testid={`storage-backend-${v}`}
-                    className={`flex-1 py-2 rounded-md border text-sm font-medium ${(s.storage?.backend || "local") === v ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+                    className={`flex-1 py-2 rounded-md border text-sm font-medium ${(s.storage?.backend || "local") === v ? "border-brand-600 bg-brand-600/5 text-brand-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
                 ))}
               </div>
             </div>
@@ -690,7 +690,7 @@ export default function Configuracion() {
 
         <TabsContent value="cuentas" className="pt-4">
           <div className="card-soft p-5 max-w-2xl space-y-5" data-testid="cuentas-tab">
-            <div className="flex items-center gap-2 text-slate-700 font-semibold"><Landmark className="w-4 h-4 text-[#C1401E]" /> Cuentas bancarias</div>
+            <div className="flex items-center gap-2 text-slate-700 font-semibold"><Landmark className="w-4 h-4 text-brand-600" /> Cuentas bancarias</div>
             <p className="text-sm text-slate-500">Cuentas para mostrar en cotizaciones y usar como forma de pago. Puedes marcarla como predeterminada.</p>
 
             {/* Alta / edición */}
@@ -738,7 +738,7 @@ export default function Configuracion() {
               </div>
               <div className="flex gap-2">
                 {ctaEditId && <Button variant="outline" onClick={() => { setCtaForm(ctaBlank()); setCtaEditId(null); }}>Cancelar</Button>}
-                <Button onClick={guardarCuenta} disabled={ctaSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cta-guardar">
+                <Button onClick={guardarCuenta} disabled={ctaSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="cta-guardar">
                   {ctaSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Plus className="w-4 h-4 mr-1" /> Guardar</>}
                 </Button>
               </div>
@@ -754,7 +754,7 @@ export default function Configuracion() {
                          className="h-10 w-10 object-contain rounded-lg border border-slate-200 bg-white p-1 shrink-0"
                          data-testid={`cta-logo-${c.id}`} />
                   ) : (
-                    <div className="h-10 w-10 rounded-lg bg-[#C1401E]/10 text-[#C1401E] flex flex-col items-center justify-center shrink-0">
+                    <div className="h-10 w-10 rounded-lg bg-brand-600/10 text-brand-600 flex flex-col items-center justify-center shrink-0">
                       <Landmark className="w-5 h-5" />
                       {c.banco && <span className="text-[8px] leading-none mt-0.5">revisar</span>}
                     </div>
@@ -782,11 +782,11 @@ export default function Configuracion() {
         {can("config") && (
           <TabsContent value="datos" className="pt-4">
             <div className="card-soft p-5 max-w-xl space-y-5">
-              <div className="flex items-center gap-2 text-slate-700 font-semibold"><DatabaseZap className="w-4 h-4 text-[#C1401E]" /> Exportar / Importar datos</div>
+              <div className="flex items-center gap-2 text-slate-700 font-semibold"><DatabaseZap className="w-4 h-4 text-brand-600" /> Exportar / Importar datos</div>
               <p className="text-sm text-slate-500">Genera un respaldo ZIP con los datos del ERP, o restaura desde un respaldo. Exclusivo para administradores. (Los usuarios y secretos no se exportan/restauran.)</p>
               <div className="border border-slate-200 rounded-lg p-4 space-y-3">
                 <div className="text-xs uppercase tracking-wider text-slate-500">Respaldo (exportar)</div>
-                <Button onClick={descargarExport} disabled={exporting} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="datos-export">
+                <Button onClick={descargarExport} disabled={exporting} className="bg-brand-600 hover:bg-brand-700" data-testid="datos-export">
                   {exporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <><DatabaseZap className="w-4 h-4 mr-1" /> Exportar ZIP</>}
                 </Button>
               </div>

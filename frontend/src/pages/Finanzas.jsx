@@ -62,7 +62,7 @@ export default function Finanzas() {
     ["Ingresos (ventas)", money(r?.ventas_total), TrendingUp, "text-green-700"],
     ["Resultado neto", money(r?.resultado_neto), ArrowUpCircle, r?.resultado_neto < 0 ? "text-red-600" : "text-green-700"],
     ["Utilidad bruta", money(r?.utilidad_bruta), ArrowUpCircle, "text-green-700"],
-    ["Efectivo recibido", money(r?.efectivo), Wallet, "text-[#C1401E]"],
+    ["Efectivo recibido", money(r?.efectivo), Wallet, "text-brand-600"],
     ["Compras de mercancía", money(r?.compras_total), ArrowDownCircle, "text-blue-700"],
     ["Gastos operativos", money(r?.gastos_total), ArrowDownCircle, "text-amber-700"],
     ["Cuentas por cobrar", money(r?.cartera_cxc), HandCoins, "text-purple-700"],
@@ -97,11 +97,11 @@ export default function Finanzas() {
           <Label className="text-[10px] uppercase text-slate-400">Hasta</Label>
           <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="mt-1 h-9 w-40" data-testid="finanzas-hasta" />
         </div>
-        <Button className="h-9 bg-[#C1401E] hover:bg-[#A03316]" onClick={load} data-testid="finanzas-aplicar">Aplicar filtro</Button>
+        <Button className="h-9 bg-brand-600 hover:bg-brand-700" onClick={load} data-testid="finanzas-aplicar">Aplicar filtro</Button>
       </div>
 
       {err && <div className="card-soft p-6 text-center text-red-600"><p className="mb-3">{err}</p><Button variant="outline" onClick={load}>Reintentar</Button></div>}
-      {!err && loading && <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>}
+      {!err && loading && <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>}
 
       {!err && !loading && r && (
         <>
@@ -112,7 +112,7 @@ export default function Finanzas() {
           </div>
 
           <div className="card-soft p-4">
-            <h3 className="font-display text-sm font-bold mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-[#C1401E]" /> Ingresos vs Egresos por mes</h3>
+            <h3 className="font-display text-sm font-bold mb-3 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-brand-600" /> Ingresos vs Egresos por mes</h3>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={r.serie || []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#eee" />

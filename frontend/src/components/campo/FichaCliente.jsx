@@ -18,7 +18,7 @@ export default function FichaCliente({ c, onCerrar }) {
         <X className="w-4 h-4" />
       </button>
       <div className="flex items-start gap-2 pr-6">
-        <Store className="w-5 h-5 text-[#C1401E] shrink-0 mt-0.5" />
+        <Store className="w-5 h-5 text-brand-600 shrink-0 mt-0.5" />
         <div>
           <div className="font-display font-bold leading-tight">{c.nombre}</div>
           <div className="text-xs text-slate-400 font-mono">{c.codigo || "—"}</div>

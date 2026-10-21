@@ -379,12 +379,12 @@ export default function MiActividadCampo({ embedded = false }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2">
-              <RouteIcon className="w-6 h-6 text-[#C1401E]" /> Mi Actividad de Campo
+              <RouteIcon className="w-6 h-6 text-brand-600" /> Mi Actividad de Campo
             </h1>
             <p className="text-slate-500 text-sm">{user?.name} · tus visitas, tu ruta y tu cartera</p>
           </div>
           <Button size="sm" variant={gpsOn ? "default" : "outline"} onClick={toggleGps}
-                  className={gpsOn ? "bg-[#C1401E] hover:bg-[#A03316]" : ""}
+                  className={gpsOn ? "bg-brand-600 hover:bg-brand-700" : ""}
                   data-testid="ma-gps">
             {gpsBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Crosshair className="w-4 h-4 mr-1" />}
             {gpsOn ? "GPS ON" : "Activar GPS"}
@@ -395,7 +395,7 @@ export default function MiActividadCampo({ embedded = false }) {
       {embedded && (
         <div className="flex justify-end">
           <Button size="sm" variant={gpsOn ? "default" : "outline"} onClick={toggleGps}
-                  className={gpsOn ? "bg-[#C1401E] hover:bg-[#A03316]" : ""}
+                  className={gpsOn ? "bg-brand-600 hover:bg-brand-700" : ""}
                   data-testid="ma-gps">
             {gpsBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Crosshair className="w-4 h-4 mr-1" />}
             {gpsOn ? "GPS ON" : "Activar GPS"}
@@ -414,13 +414,13 @@ export default function MiActividadCampo({ embedded = false }) {
         {TABS.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} data-testid={`ma-tab-${t.id}`}
             className={`px-4 py-2 text-sm font-medium transition-colors ${
-              tab === t.id ? "bg-[#C1401E] text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+              tab === t.id ? "bg-brand-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
             {t.label}
           </button>
         ))}
       </div>
 
-      {loading && <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-[#C1401E]" /></div>}
+      {loading && <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-brand-600" /></div>}
 
       {!loading && (
         <>
@@ -431,7 +431,7 @@ export default function MiActividadCampo({ embedded = false }) {
                 {[
                   [CalendarDays, "Programadas / en camino", programadas.length, "text-blue-700"],
                   [CheckCircle2, "Realizadas", realizadas.length, "text-green-700"],
-                  [Clock3, "De hoy", visitasHoy.length, "text-[#C1401E]"],
+                  [Clock3, "De hoy", visitasHoy.length, "text-brand-600"],
                   [UserCircle2, "Clientes con visita", clientesDeVisitas.length, "text-slate-500"],
                 ].map(([Ic, l, val, cls], i) => (
                   <div key={i} className="card-soft p-4">
@@ -457,7 +457,7 @@ export default function MiActividadCampo({ embedded = false }) {
                   </SelectContent>
                 </Select>
                 <div className="ml-auto">
-                  <Button onClick={openNew} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="ma-nueva-visita">
+                  <Button onClick={openNew} className="bg-brand-600 hover:bg-brand-700" data-testid="ma-nueva-visita">
                     <Plus className="w-4 h-4 mr-1" /> Nueva visita
                   </Button>
                 </div>
@@ -520,7 +520,7 @@ export default function MiActividadCampo({ embedded = false }) {
             <div className="space-y-4" data-testid="ma-ruta">
               <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
                 {[
-                  [TrendingUp, "Ventas hoy", money(ventasHoy.monto), "text-[#C1401E]", `${ventasHoy.numero ?? 0} ventas`],
+                  [TrendingUp, "Ventas hoy", money(ventasHoy.monto), "text-brand-600", `${ventasHoy.numero ?? 0} ventas`],
                   [TrendingUp, "Ventas del mes", money(ventasMes.monto), "text-green-700", `${ventasMes.numero ?? 0} ventas`],
                   [Users, "Clientes asignados", cartera.length, "text-blue-700", `${conUbicacion} con ubicación`],
                   [CalendarDays, "Visitas programadas", v.programadas ?? 0, "text-slate-700", `${v.realizadas_hoy ?? 0} realizadas hoy`],
@@ -542,7 +542,7 @@ export default function MiActividadCampo({ embedded = false }) {
                   ["hoy", "Visitados hoy"], ["pend", "Pendientes"],
                 ].map(([k, label]) => (
                   <button key={k} onClick={() => setFiltroRuta(k)}
-                    className={`px-3 py-1.5 rounded-full text-xs border font-medium ${filtroRuta === k ? "bg-[#C1401E] text-white border-[#C1401E]" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                    className={`px-3 py-1.5 rounded-full text-xs border font-medium ${filtroRuta === k ? "bg-brand-600 text-white border-brand-600" : "bg-white text-slate-600 hover:bg-slate-50"}`}
                     data-testid={`ruta-filtro-${k}`}>{label}</button>
                 ))}
                 <button onClick={() => setRutaSugerida((v) => !v)}
@@ -552,14 +552,14 @@ export default function MiActividadCampo({ embedded = false }) {
                 </button>
                 <Button size="sm" variant={capturando ? "default" : "outline"}
                   onClick={() => setCapturando(capturando ? null : { abrir: true })}
-                  className={capturando ? "bg-[#C1401E] hover:bg-[#A03316]" : ""}
+                  className={capturando ? "bg-brand-600 hover:bg-brand-700" : ""}
                   data-testid="ruta-capturar-btn">
                   <Crosshair className="w-4 h-4 mr-1" /> Agregar ubicación de cliente
                 </Button>
               </div>
 
               {capturando && (
-                <div className="card-soft p-4 border-2 border-dashed border-[#C1401E]/40" data-testid="ruta-captura-panel">
+                <div className="card-soft p-4 border-2 border-dashed border-brand-600/40" data-testid="ruta-captura-panel">
                   {!capturando.cliente ? (
                     <>
                       <p className="text-sm font-semibold mb-2">Selecciona el cliente al que quieres asignar ubicación:</p>
@@ -609,7 +609,7 @@ export default function MiActividadCampo({ embedded = false }) {
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                     <button className="rounded-lg bg-slate-50 p-2 hover:bg-slate-100 text-left" onClick={() => iniciarVisitaDesde(selCliCard)}>
-                      <ListChecks className="w-3.5 h-3.5 text-[#C1401E]" /> Registrar visita
+                      <ListChecks className="w-3.5 h-3.5 text-brand-600" /> Registrar visita
                     </button>
                     {can("pedido.gestionar") && (
                       <button className="rounded-lg bg-slate-50 p-2 hover:bg-slate-100 text-left"
@@ -809,7 +809,7 @@ export default function MiActividadCampo({ embedded = false }) {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNuevoMapaOpen(false)}>Cancelar</Button>
-            <Button onClick={guardarNuevoClienteMapa} disabled={nuevoMapaSaving} className="bg-[#C1401E] hover:bg-[#A03316]">
+            <Button onClick={guardarNuevoClienteMapa} disabled={nuevoMapaSaving} className="bg-brand-600 hover:bg-brand-700">
               {nuevoMapaSaving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <CheckCircle2 className="w-4 h-4 mr-1" />} Crear cliente
             </Button>
           </DialogFooter>
@@ -869,7 +869,7 @@ export default function MiActividadCampo({ embedded = false }) {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFormOpen(false)}>Cancelar</Button>
-            <Button onClick={guardar} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="ma-visita-guardar">
+            <Button onClick={guardar} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="ma-visita-guardar">
               {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : "Guardar"}
             </Button>
           </DialogFooter>

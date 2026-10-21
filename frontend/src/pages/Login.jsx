@@ -1,21 +1,23 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { api, formatApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/api";
 import { useBranding } from "@/hooks/useBranding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Boxes, Loader2, Lock } from "lucide-react";
+import { ArrowLeft, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
-  const { logo, empresa_nombre } = useBranding();
+  const { empresa_nombre } = useBranding();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => { document.title = "Acceso al sistema — Grupo RYSA"; }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -32,56 +34,52 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex">
-      <div className="hidden lg:flex flex-col justify-between w-1/2 bg-ink p-12 relative overflow-hidden">
-        <div className="absolute inset-0 opacity-20"
-          style={{ backgroundImage: "url('https://images.unsplash.com/photo-1710141530542-f792450e736e?crop=entropy&cs=srgb&fm=jpg&q=85&w=1200')", backgroundSize: "cover", backgroundPosition: "center" }} />
-        <div className="relative z-10 flex items-center gap-3">
-          <img src={logo} alt="logo" className="w-10 h-10 rounded-lg object-contain bg-white/10" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-          <span className="font-display font-extrabold text-white text-2xl">{empresa_nombre}</span>
-        </div>
-        <div className="relative z-10">
-          <h2 className="font-display text-4xl font-black text-white tracking-tighter leading-tight">
-            Sistema ERP & Punto de Venta
-          </h2>
-          <p className="text-slate-300 mt-4 max-w-md">
-            Plásticos y desechables al mayoreo y menudeo. Controla inventario, ventas, caja y clientes en un solo lugar.
+    <div className="min-h-screen flex bg-white">
+      <aside className="relative hidden w-[46%] flex-col justify-between overflow-hidden bg-carbon-950 p-12 text-white lg:flex">
+        <img src="/images/categorias/hero.webp" alt="" className="absolute inset-0 h-full w-full object-cover opacity-35" />
+        <div className="absolute inset-0 bg-gradient-to-t from-carbon-950 via-carbon-950/70 to-carbon-950/30" aria-hidden="true" />
+        <Link to="/" className="relative z-10" aria-label="Grupo RYSA, ir al sitio">
+          <img src="/brand/logotipo-Photoroom.png" alt="Grupo RYSA" className="h-14 w-auto invert" />
+        </Link>
+        <div className="relative z-10 max-w-md">
+          <p className="etiqueta text-brand-400">Sistema interno</p>
+          <h2 className="titular-ancho mt-3 text-[2.6rem] font-extrabold leading-[1.02]">ERP y punto de venta</h2>
+          <p className="mt-4 text-[1.05rem] leading-7 text-slate-300">
+            Inventario, ventas, caja, clientes, cotizaciones y facturación de {empresa_nombre} en un solo lugar.
           </p>
         </div>
-        <div className="relative z-10 text-slate-400 text-sm">© {new Date().getFullYear()} Grupo RYSA</div>
-      </div>
+        <p className="relative z-10 text-sm text-slate-500">© {new Date().getFullYear()} {empresa_nombre}</p>
+      </aside>
 
-      <div className="flex-1 flex items-center justify-center p-6 bg-canvas">
-        <form onSubmit={submit} className="w-full max-w-sm animate-fade-up" data-testid="login-form">
-          <div className="lg:hidden flex items-center gap-2 mb-8">
-            <img src={logo} alt="logo" className="w-9 h-9 rounded-lg object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-            <span className="font-display font-extrabold text-2xl">{empresa_nombre}</span>
-          </div>
-          <h1 className="font-display text-3xl font-black tracking-tighter text-slate-900">Iniciar sesión</h1>
-          <p className="text-slate-500 mt-1 mb-8 text-sm">Ingresa tus credenciales para acceder al sistema.</p>
+      <main className="flex flex-1 items-center justify-center bg-slate-50 p-6 sm:p-10">
+        <form onSubmit={submit} className="w-full max-w-sm animate-fade-up" data-testid="login-form" aria-labelledby="login-titulo">
+          <Link to="/" className="mb-10 block lg:hidden" aria-label="Grupo RYSA, ir al sitio">
+            <img src="/brand/logotipo-Photoroom.png" alt="Grupo RYSA" className="h-12 w-auto" />
+          </Link>
+          <h1 id="login-titulo" className="titular text-[2rem] font-extrabold text-carbon-900">Iniciar sesión</h1>
+          <p className="mt-2 mb-8 text-[0.95rem] text-slate-600">Ingresa con tu correo y contraseña de usuario.</p>
 
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
-              <Label htmlFor="email" className="text-xs uppercase tracking-wider text-slate-500">Correo</Label>
-              <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+              <Label htmlFor="email" className="text-sm font-medium text-slate-700">Correo</Label>
+              <Input id="email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)}
                 data-testid="login-email" className="mt-1.5 h-11" placeholder="correo@gruporysa.com" />
             </div>
             <div>
-              <Label htmlFor="password" className="text-xs uppercase tracking-wider text-slate-500">Contraseña</Label>
-              <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
+              <Label htmlFor="password" className="text-sm font-medium text-slate-700">Contraseña</Label>
+              <Input id="password" type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)}
                 data-testid="login-password" className="mt-1.5 h-11" placeholder="••••••••" />
             </div>
           </div>
 
-          <Button type="submit" disabled={loading} data-testid="login-submit"
-            className="w-full h-11 mt-6 bg-[#C1401E] hover:bg-[#A03316] text-white font-semibold">
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Lock className="w-4 h-4 mr-2" /> Entrar</>}
+          <Button type="submit" variant="terracota" disabled={loading} data-testid="login-submit" className="mt-7 h-11 w-full text-[0.95rem]">
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" aria-label="Entrando" /> : <><Lock className="h-4 w-4" /> Entrar</>}
           </Button>
-          <Link to="/" className="block text-center text-sm text-slate-500 hover:text-[#C1401E] mt-4">
-            ← Volver al inicio
+          <Link to="/" className="mt-6 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-carbon-900">
+            <ArrowLeft className="h-4 w-4" /> Volver al sitio
           </Link>
         </form>
-      </div>
+      </main>
     </div>
   );
 }

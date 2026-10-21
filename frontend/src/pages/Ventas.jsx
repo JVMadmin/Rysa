@@ -313,16 +313,16 @@ export default function Ventas() {
               {busy === "multi" ? <Loader2 className="w-4 h-4 animate-spin" /> : <><FileText className="w-4 h-4 mr-1" /> Facturar {sel.length || ""} seleccionadas</>}
             </Button>
           )}
-          <Button onClick={() => nav("/app/pos")} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="nueva-venta-btn"><Plus className="w-4 h-4 mr-1" /> Nueva venta</Button>
+          <Button onClick={() => nav("/app/pos")} className="bg-brand-600 hover:bg-brand-700" data-testid="nueva-venta-btn"><Plus className="w-4 h-4 mr-1" /> Nueva venta</Button>
         </div>
       </div>
 
       <div className="card-soft p-3 space-y-3">
         <div className="flex flex-wrap gap-2">
           {QUICK.map(([k, l]) => (
-            <Button key={k} size="sm" variant={rango === k ? "default" : "outline"} className={rango === k ? "bg-[#C1401E] hover:bg-[#A03316]" : ""} onClick={() => setRango(k)} data-testid={`quick-${k}`}>{l}</Button>
+            <Button key={k} size="sm" variant={rango === k ? "default" : "outline"} className={rango === k ? "bg-brand-600 hover:bg-brand-700" : ""} onClick={() => setRango(k)} data-testid={`quick-${k}`}>{l}</Button>
           ))}
-          <Button size="sm" variant={rango === "rango" ? "default" : "outline"} className={rango === "rango" ? "bg-[#C1401E] hover:bg-[#A03316]" : ""} onClick={() => setRango("rango")} data-testid="quick-rango">Fecha a fecha</Button>
+          <Button size="sm" variant={rango === "rango" ? "default" : "outline"} className={rango === "rango" ? "bg-brand-600 hover:bg-brand-700" : ""} onClick={() => setRango("rango")} data-testid="quick-rango">Fecha a fecha</Button>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           {rango === "rango" && (
@@ -356,20 +356,20 @@ export default function Ventas() {
           <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
             <th className="p-3 w-8">{can("venta.facturar") ? <input type="checkbox" checked={sel.length === facturables.length && facturables.length > 0} onChange={(e) => setSel(e.target.checked ? facturables.map((f) => f.id) : [])} data-testid="sel-todas" /> : null}</th>
             {[{ key: "estado", label: "Estado" }, { key: "folio", label: "Folio" }, { key: "fecha", label: "Fecha" }, { key: "cliente", label: "Cliente" }, { key: "vendedor", label: "Vendedor" }].map((col) => (
-              <th key={col.key} onClick={() => toggleSort(col.key)} className={`p-3 cursor-pointer select-none hover:text-[#C1401E] ${col.right ? "text-right" : "text-left"}`}>
+              <th key={col.key} onClick={() => toggleSort(col.key)} className={`p-3 cursor-pointer select-none hover:text-brand-600 ${col.right ? "text-right" : "text-left"}`}>
                 <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
                   {col.label}
                   {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
                 </span>
               </th>
             ))}
-            <th className="p-3 text-right cursor-pointer select-none hover:text-[#C1401E]" onClick={() => toggleSort("total")}>
+            <th className="p-3 text-right cursor-pointer select-none hover:text-brand-600" onClick={() => toggleSort("total")}>
               <span className="inline-flex items-center gap-1 flex-row-reverse">Total {sort.key === "total" ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-30" />}</span>
             </th>
             <th className="p-3">Cond.</th><th className="p-3 text-center">Factura</th><th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {loading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && sorted.length === 0 && <tr><td colSpan={10} className="p-10 text-center text-slate-400"><Receipt className="w-8 h-8 mx-auto mb-2" />Sin ventas.</td></tr>}
             {!loading && sorted.map((s) => {
               const legacy = s.source === "LEGACY";
@@ -381,9 +381,9 @@ export default function Ventas() {
                   {s._abono
                     ? <Badge className="bg-blue-100 text-blue-700">Abono a cuenta</Badge>
                     : <Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : s.estado === "cotizacion" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge>}
-                  {legacy && <Badge className="ml-1 bg-[#C1401E] text-white">LEGACY</Badge>}
+                  {legacy && <Badge className="ml-1 bg-brand-600 text-white">LEGACY</Badge>}
                 </td>
-                <td className="p-3 font-medium text-[#C1401E]">{s.folio}</td>
+                <td className="p-3 font-medium text-brand-600">{s.folio}</td>
                 <td className="p-3 text-slate-500">{s.fecha?.slice(0, 10)} {s.hora}</td>
                 <td className="p-3">{s.cliente_nombre}</td>
                 <td className="p-3 text-slate-500" data-testid={`venta-vendedor-${s.folio}`}>{s.vendedor_nombre || s.usuario_nombre}</td>
@@ -450,7 +450,7 @@ export default function Ventas() {
           ) : (
           <>
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2">Venta {detalle?.folio}
-            {detalle?.source === "LEGACY" && <Badge className="bg-[#C1401E] text-white">DOCUMENTO HISTÓRICO · SOLO LECTURA</Badge>}
+            {detalle?.source === "LEGACY" && <Badge className="bg-brand-600 text-white">DOCUMENTO HISTÓRICO · SOLO LECTURA</Badge>}
           </DialogTitle></DialogHeader>
           {detalle && (
             <div className="text-sm">
@@ -592,7 +592,7 @@ export default function Ventas() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFacturarSale(null)}>Cancelar</Button>
-            <Button onClick={facturar} disabled={busy === "fact"} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="facturar-confirm">{busy === "fact" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Emitir CFDI"}</Button>
+            <Button onClick={facturar} disabled={busy === "fact"} className="bg-brand-600 hover:bg-brand-700" data-testid="facturar-confirm">{busy === "fact" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Emitir CFDI"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

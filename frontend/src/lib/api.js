@@ -59,3 +59,9 @@ export const BLOB = API;
 
 // Convierte una URL relativa de archivo (/api/files/...) en absoluta usando el backend.
 export const fileUrl = (u) => (!u ? "" : /^https?:\/\//.test(u) ? u : `${process.env.REACT_APP_BACKEND_URL}${u.startsWith("/") ? "" : "/"}${u}`);
+// Foto REAL del producto. Las URLs de images.unsplash.com las asignó en
+// automático catalog_images.py (una misma foto genérica para ~1,500 artículos,
+// con reglas de otro giro): no muestran el producto, así que se tratan como
+// "sin foto" para no confundir en POS, catálogo e inventario.
+export const esFotoGenerica = (u) => /(^|\/\/)images\.unsplash\.com\//.test(u || "");
+export const fotoProducto = (u) => (!u || esFotoGenerica(u) ? "" : fileUrl(u));

@@ -137,7 +137,7 @@ export default function PresentacionesModal({ open, onClose, product, onUpdated 
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto" data-testid="presentaciones-modal">
         <DialogHeader>
           <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-[#C1401E]/10 flex items-center justify-center text-[#C1401E]">
+            <div className="w-9 h-9 rounded-lg bg-brand-600/10 flex items-center justify-center text-brand-600">
               <Boxes className="w-5 h-5" />
             </div>
             <div>
@@ -192,7 +192,7 @@ export default function PresentacionesModal({ open, onClose, product, onUpdated 
                   return (
                     <tr key={p.id} className={isBase ? "bg-slate-50/40" : "hover:bg-slate-50"}>
                       <td className="p-2.5 font-bold text-slate-800 flex items-center gap-1.5">
-                        <Package className={`w-3.5 h-3.5 ${isBase ? "text-emerald-600" : "text-[#C1401E]"}`} />
+                        <Package className={`w-3.5 h-3.5 ${isBase ? "text-emerald-600" : "text-brand-600"}`} />
                         {p.nombre}
                       </td>
                       <td className="p-2.5 text-center">
@@ -262,7 +262,7 @@ export default function PresentacionesModal({ open, onClose, product, onUpdated 
         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-              <Plus className="w-3.5 h-3.5 text-[#C1401E]" />
+              <Plus className="w-3.5 h-3.5 text-brand-600" />
               {editingId ? "Editar Presentación" : "Nueva Presentación Comercial (Caja, Paquete, etc.)"}
             </h4>
             {editingId && (
@@ -281,7 +281,7 @@ export default function PresentacionesModal({ open, onClose, product, onUpdated 
                   key={s}
                   type="button"
                   onClick={() => setNombre(s)}
-                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-white border border-slate-200 text-slate-600 hover:border-[#C1401E] hover:text-[#C1401E] transition-colors"
+                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-white border border-slate-200 text-slate-600 hover:border-brand-600 hover:text-brand-600 transition-colors"
                 >
                   {s}
                 </button>
@@ -350,7 +350,7 @@ export default function PresentacionesModal({ open, onClose, product, onUpdated 
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="w-full h-8 text-xs bg-[#C1401E] hover:bg-[#A03316]"
+                className="w-full h-8 text-xs bg-brand-600 hover:bg-brand-700"
                 data-testid="pres-save-btn"
               >
                 {saving ? (

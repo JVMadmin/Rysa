@@ -9,7 +9,7 @@ export default function EnConstruccion({ titulo, descripcion }) {
       </div>
       <div className="card-soft flex flex-col items-center justify-center gap-3 py-20 text-center">
         <div className="w-14 h-14 rounded-2xl bg-terracota/10 flex items-center justify-center">
-          <Boxes className="w-7 h-7 text-[#C1401E]" />
+          <Boxes className="w-7 h-7 text-brand-600" />
         </div>
         <p className="text-slate-600 font-semibold">{descripcion || "Este módulo aún no está disponible."}</p>
         <p className="text-sm text-slate-400">RYSA ERP · Prepárate para próximas actualizaciones</p>

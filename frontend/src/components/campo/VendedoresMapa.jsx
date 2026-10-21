@@ -51,7 +51,7 @@ export function CapaVendedores({ vendedores = [], seleccionado = "", onSelect })
                 {v.foto_url ? (
                   <img src={fileUrl(v.foto_url)} alt={v.name} className="w-6 h-6 rounded-full object-cover border border-slate-200" />
                 ) : (
-                  <div className="w-6 h-6 rounded-full bg-orange-100 text-[#C1401E] flex items-center justify-center font-bold text-[10px]">
+                  <div className="w-6 h-6 rounded-full bg-orange-100 text-brand-600 flex items-center justify-center font-bold text-[10px]">
                     {(v.name || "V").slice(0, 1).toUpperCase()}
                   </div>
                 )}
@@ -90,7 +90,7 @@ export function TarjetaInfoVendedor({
             className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm shrink-0"
           />
         ) : (
-          <div className="w-12 h-12 rounded-full bg-[#C1401E]/10 text-[#C1401E] flex items-center justify-center font-black text-base shrink-0">
+          <div className="w-12 h-12 rounded-full bg-brand-600/10 text-brand-600 flex items-center justify-center font-black text-base shrink-0">
             {(v.name || "V").slice(0, 1).toUpperCase()}
           </div>
         )}
@@ -152,7 +152,7 @@ export function TarjetaInfoVendedor({
             className="text-xs h-8 border-orange-200 text-orange-950 hover:bg-orange-50"
             title="Ver visitas realizadas hoy"
           >
-            <ClipboardList className="w-3.5 h-3.5 mr-1 text-[#C1401E]" /> Visitas
+            <ClipboardList className="w-3.5 h-3.5 mr-1 text-brand-600" /> Visitas
           </Button>
         )}
         {onVerVentas && (
@@ -171,7 +171,7 @@ export function TarjetaInfoVendedor({
             size="sm"
             variant={mostrarRuta ? "default" : "outline"}
             onClick={onToggleRuta}
-            className={`text-xs h-8 ${mostrarRuta ? "bg-[#C1401E] hover:bg-[#A03316] text-white" : "border-slate-200 text-slate-700"}`}
+            className={`text-xs h-8 ${mostrarRuta ? "bg-brand-600 hover:bg-brand-700 text-white" : "border-slate-200 text-slate-700"}`}
             title="Trazar histórico de recorrido con temperatura"
           >
             <RouteIcon className="w-3.5 h-3.5 mr-1" /> {mostrarRuta ? "Ocultar ruta" : "Ruta térmica"}

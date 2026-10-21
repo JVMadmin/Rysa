@@ -234,7 +234,7 @@ export default function Caja() {
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail) || "Error al descargar ventas"); }
   };
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>;
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>;
 
   const caja = data?.caja;
   const res = data?.resumen;
@@ -245,12 +245,12 @@ export default function Caja() {
 
       {!caja ? (
         <div className="card-soft p-8 max-w-md">
-          <div className="w-12 h-12 rounded-md bg-[#C1401E]/10 flex items-center justify-center mb-4"><Wallet className="w-6 h-6 text-[#C1401E]" /></div>
+          <div className="w-12 h-12 rounded-md bg-brand-600/10 flex items-center justify-center mb-4"><Wallet className="w-6 h-6 text-brand-600" /></div>
           <h2 className="font-display text-lg font-bold">No hay caja abierta</h2>
           <p className="text-slate-500 text-sm mb-4">Ingresa el fondo inicial para comenzar a operar.</p>
           <Label className="text-xs uppercase tracking-wider text-slate-500">Fondo inicial</Label>
           <Input type="number" value={fondo} onChange={(e) => setFondo(e.target.value)} className="mt-1 mb-4" data-testid="fondo-inicial" placeholder="0.00" />
-          <Button onClick={abrir} className="w-full bg-[#C1401E] hover:bg-[#A03316]" data-testid="abrir-caja-btn"><Unlock className="w-4 h-4 mr-2" /> Abrir caja</Button>
+          <Button onClick={abrir} className="w-full bg-brand-600 hover:bg-brand-700" data-testid="abrir-caja-btn"><Unlock className="w-4 h-4 mr-2" /> Abrir caja</Button>
         </div>
       ) : (
         <>
@@ -259,13 +259,13 @@ export default function Caja() {
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => { setMov({ tipo: "retiro", concepto: "", monto: "", referencia: "" }); setMovOpen(true); }} data-testid="entregar-efectivo-btn"><HandCoins className="w-4 h-4 mr-1" /> Entregar efectivo</Button>
               <Button variant="outline" onClick={() => setMovOpen(true)} data-testid="mov-caja-btn"><ArrowDownCircle className="w-4 h-4 mr-1" /> Movimiento</Button>
-              <Button onClick={() => setCloseOpen(true)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cerrar-caja-btn"><Lock className="w-4 h-4 mr-1" /> Cerrar caja</Button>
+              <Button onClick={() => setCloseOpen(true)} className="bg-brand-600 hover:bg-brand-700" data-testid="cerrar-caja-btn"><Lock className="w-4 h-4 mr-1" /> Cerrar caja</Button>
             </div>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[["Fondo inicial", res.fondo_inicial], ["Ventas efectivo", res.ventas_efectivo], ["Entradas", res.entradas], ["Retiros", res.retiros], ["Devoluciones", res.devoluciones], ["Efectivo esperado", res.efectivo_esperado]].map(([l, v], i) => (
-              <div key={i} className={`card-soft border-slate-200 p-4 ${i === 5 ? "border-[#C1401E] ring-1 ring-[#C1401E]" : "border-slate-200"}`}>
+              <div key={i} className={`card-soft border-slate-200 p-4 ${i === 5 ? "border-brand-600 ring-1 ring-brand-600" : "border-slate-200"}`}>
                 <div className="text-xs uppercase tracking-wider text-slate-500">{l}</div>
                 <div className="font-display text-lg font-black mt-1">{money(v)}</div>
               </div>
@@ -309,7 +309,7 @@ export default function Caja() {
                   <td className="p-3" colSpan={3}></td>
                   <td className="p-3 text-right text-green-600">{money(res.ventas_efectivo + res.entradas)}</td>
                   <td className="p-3 text-right text-red-600">{money(res.retiros + res.devoluciones)}</td>
-                  <td className="p-3 text-right text-[#C1401E]">{money(res.efectivo_esperado)}</td>
+                  <td className="p-3 text-right text-brand-600">{money(res.efectivo_esperado)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -320,7 +320,7 @@ export default function Caja() {
       {cierre && (
         <div className="card-soft p-5 max-w-3xl" data-testid="reporte-cierre">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <h3 className="font-display font-bold flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-[#C1401E]" /> Reporte de cierre</h3>
+            <h3 className="font-display font-bold flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-brand-600" /> Reporte de cierre</h3>
             <div className="flex gap-2">
               <Button size="sm" onClick={() => setRepOpen(true)} data-testid="cierre-verificar">
                 <ClipboardCheck className="w-4 h-4 mr-1" /> Verificar / reporte completo
@@ -377,7 +377,7 @@ export default function Caja() {
         <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto" data-testid="reporte-verificacion">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              <ClipboardCheck className="w-5 h-5 text-[#C1401E]" /> Reporte de cierre · verificación
+              <ClipboardCheck className="w-5 h-5 text-brand-600" /> Reporte de cierre · verificación
             </DialogTitle>
           </DialogHeader>
 
@@ -404,9 +404,9 @@ export default function Caja() {
                   <div className="font-semibold tabular-nums">{money(v)}</div>
                 </div>
               ))}
-              <div className="rounded-lg border-2 border-[#C1401E] p-2">
+              <div className="rounded-lg border-2 border-brand-600 p-2">
                 <div className="text-[10px] uppercase text-slate-500 font-semibold">Esperado</div>
-                <div className="font-black tabular-nums text-[#C1401E]">{money(cierre?.efectivo_esperado)}</div>
+                <div className="font-black tabular-nums text-brand-600">{money(cierre?.efectivo_esperado)}</div>
               </div>
               <div className={`rounded-lg p-2 ${Number(cierre?.diferencia) === 0 ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}>
                 <div className="text-[10px] uppercase text-slate-400">Contado / Diferencia</div>
@@ -509,11 +509,11 @@ export default function Caja() {
       {isAdminOrOwner && (
         <div className="card-soft p-4 space-y-3" data-testid="caja-global">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="font-display font-bold flex items-center gap-2"><Users className="w-5 h-5 text-[#C1401E]" /> Estado global de cajas</h3>
+            <h3 className="font-display font-bold flex items-center gap-2"><Users className="w-5 h-5 text-brand-600" /> Estado global de cajas</h3>
           </div>
 
           {loadingOps ? (
-            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>
+            <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-brand-600" /></div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -536,7 +536,7 @@ export default function Caja() {
                         {o.estado === "abierta" ? (
                           <Button size="sm" variant="outline" onClick={() => setCloseTarget(o)} data-testid={`caja-global-cerrar-${o.usuario_id}`}><Lock className="w-3.5 h-3.5 mr-1" /> Cerrar</Button>
                         ) : (
-                          <Button size="sm" onClick={() => setOpenTarget(o)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid={`caja-global-abrir-${o.usuario_id}`}><Unlock className="w-3.5 h-3.5 mr-1" /> Abrir</Button>
+                          <Button size="sm" onClick={() => setOpenTarget(o)} className="bg-brand-600 hover:bg-brand-700" data-testid={`caja-global-abrir-${o.usuario_id}`}><Unlock className="w-3.5 h-3.5 mr-1" /> Abrir</Button>
                         )}
                       </td>
                     </tr>
@@ -551,7 +551,7 @@ export default function Caja() {
       {/* Historial de aperturas y cortes de caja */}
       <div className="card-soft p-4 space-y-3" data-testid="caja-historial">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-display font-bold flex items-center gap-2"><History className="w-5 h-5 text-[#C1401E]" /> {isAdminOrOwner ? "Historial global de cajas" : "Mi historial de cortes y aperturas"}</h3>
+          <h3 className="font-display font-bold flex items-center gap-2"><History className="w-5 h-5 text-brand-600" /> {isAdminOrOwner ? "Historial global de cajas" : "Mi historial de cortes y aperturas"}</h3>
           <div className="flex flex-wrap items-center gap-2">
             <Input type="date" value={histDesde} onChange={(e) => setHistDesde(e.target.value)} className="w-40 h-9" data-testid="hist-desde" />
             <span className="text-slate-400 text-sm">a</span>
@@ -575,7 +575,7 @@ export default function Caja() {
             <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
               {[{ key: "caja", label: "Caja" }, { key: "estado", label: "Estado", noSort: true }, { key: "cajero", label: "Cajero" }, { key: "fecha_apertura", label: "Apertura" }, { key: "fecha_cierre", label: "Cierre" },
                 { key: "fondo", label: "Fondo", right: true }, { key: "esperado", label: "Esperado", right: true }, { key: "contado", label: "Contado", right: true }, { key: "diferencia", label: "Diferencia", right: true }].map((col) => (
-                <th key={col.key} onClick={() => !col.noSort && toggleSort(col.key)} className={`p-2 ${col.noSort ? "" : "cursor-pointer select-none hover:text-[#C1401E]"} ${col.right ? "text-right" : "text-left"}`}>
+                <th key={col.key} onClick={() => !col.noSort && toggleSort(col.key)} className={`p-2 ${col.noSort ? "" : "cursor-pointer select-none hover:text-brand-600"} ${col.right ? "text-right" : "text-left"}`}>
                   <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
                     {col.label}
                     {sort.key === col.key ? (sort.dir === "asc" ? "↑" : "↓") : !col.noSort && <ArrowUpDown className="w-3 h-3 opacity-30" />}
@@ -692,7 +692,7 @@ export default function Caja() {
 
       <Dialog open={movOpen} onOpenChange={(o) => { setMovOpen(o); if (!o) { setBloqueoRetiro(null); setMovFoto(null); } }}>
         <DialogContent data-testid="mov-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> {mov.tipo === "retiro" ? "Entrega de efectivo" : mov.tipo === "gasto" ? "Registrar gasto" : "Movimiento de caja"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-brand-600" /> {mov.tipo === "retiro" ? "Entrega de efectivo" : mov.tipo === "gasto" ? "Registrar gasto" : "Movimiento de caja"}</DialogTitle></DialogHeader>
           {mov.tipo === "retiro" && (
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
               El monto se <b>descontará del efectivo en caja</b> y se generará un ticket de entrega con folio RET y firmas.
@@ -759,7 +759,7 @@ export default function Caja() {
             ) : (
               <>
                 <Button variant="outline" onClick={() => setMovOpen(false)}>Cancelar</Button>
-                <Button onClick={() => registrarMov(false)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="mov-save">Registrar</Button>
+                <Button onClick={() => registrarMov(false)} className="bg-brand-600 hover:bg-brand-700" data-testid="mov-save">Registrar</Button>
               </>
             )}
           </DialogFooter>
@@ -778,9 +778,9 @@ export default function Caja() {
               </div>
             ))}
           </div>
-          <div className="text-sm">Efectivo esperado: <b className="text-[#C1401E]">{money(res?.efectivo_esperado)}</b></div>
+          <div className="text-sm">Efectivo esperado: <b className="text-brand-600">{money(res?.efectivo_esperado)}</b></div>
           <div><Label className="text-xs uppercase tracking-wider text-slate-500">Efectivo contado</Label><Input type="number" value={contado} onChange={(e) => setContado(e.target.value)} className="mt-1" data-testid="efectivo-contado" /></div>
-          <DialogFooter><Button variant="outline" onClick={() => setCloseOpen(false)}>Cancelar</Button><Button onClick={cerrar} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirm-cierre"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setCloseOpen(false)}>Cancelar</Button><Button onClick={cerrar} className="bg-brand-600 hover:bg-brand-700" data-testid="confirm-cierre"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -790,7 +790,7 @@ export default function Caja() {
           <div className="space-y-4">
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Fondo inicial</Label><Input type="number" value={openFondo} onChange={(e) => setOpenFondo(e.target.value)} className="mt-1" data-testid="abrir-por-usuario-fondo" placeholder="0.00" /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => { setOpenTarget(null); setOpenFondo(""); }}>Cancelar</Button><Button onClick={abrirPorUsuario} className="bg-[#C1401E] hover:bg-[#A03316]"><Unlock className="w-4 h-4 mr-1" /> Abrir caja</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => { setOpenTarget(null); setOpenFondo(""); }}>Cancelar</Button><Button onClick={abrirPorUsuario} className="bg-brand-600 hover:bg-brand-700"><Unlock className="w-4 h-4 mr-1" /> Abrir caja</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -799,7 +799,7 @@ export default function Caja() {
           <DialogHeader><DialogTitle className="font-display">Cerrar caja {closeTarget?.caja?.caja_nombre} de {closeTarget?.usuario_nombre}</DialogTitle></DialogHeader>
           <p className="text-sm text-slate-500">Efectivo esperado: <b>{money(closeTarget?.resumen?.efectivo_esperado)}</b></p>
           <div><Label className="text-xs uppercase tracking-wider text-slate-500">Efectivo contado</Label><Input type="number" value={closeContado} onChange={(e) => setCloseContado(e.target.value)} className="mt-1" data-testid="cerrar-por-usuario-contado" /></div>
-          <DialogFooter><Button variant="outline" onClick={() => { setCloseTarget(null); setCloseContado(""); }}>Cancelar</Button><Button onClick={cerrarPorUsuario} className="bg-[#C1401E] hover:bg-[#A03316]"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => { setCloseTarget(null); setCloseContado(""); }}>Cancelar</Button><Button onClick={cerrarPorUsuario} className="bg-brand-600 hover:bg-brand-700"><ArrowUpCircle className="w-4 h-4 mr-1" /> Confirmar cierre</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

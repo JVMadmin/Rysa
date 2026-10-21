@@ -1,61 +1,89 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap');
+/* Tipografías LOCALES (sin Google Fonts):
+   - Archivo (variable, ejes wght + wdth): titulares, en ancho expandido.
+   - IBM Plex Sans: texto, navegación, formularios y tablas.
+   Ver docs/diseno/DIRECCION_VISUAL.md. */
+@import '@fontsource-variable/archivo/wdth.css';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-sans/700.css';
+@import '@fontsource/ibm-plex-sans/400-italic.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+
+/* Densidad: el sitio público usa 16 px; el ERP (tablas, POS) una densidad
+   de 87.5 % aplicada por ErpLayout con la clase `erp-densidad`. Antes había
+   un 81 % global que también encogía el sitio público y los formularios. */
+html { font-size: 100%; }
+html.erp-densidad { font-size: 87.5%; }
 
 @layer base {
   :root {
-    /* Escala global: reducida otro 10% (pasa de 90% a ~81%) para que la
-       información se vea más alejada/espaciosa en pantalla (equivale a
-       alejarse un 10% más del zoom anterior). Tailwind usa rem, así que
-       reducir el font-size raíz comprime toda la interfaz proporcionalmente. */
-    font-size: 81%;
-    /* Finexy fintech palette */
-    --background: 20 20% 96%;          /* #F6F5F4 fondo general */
-    --foreground: 0 0% 10%;            /* #1A1A1A texto principal */
-    --card: 0 0% 100%;                 /* tarjetas blanco puro */
-    --card-foreground: 0 0% 10%;
+    /* ── Marca (medida sobre el isotipo oficial) ───────────────────── */
+    --brand-50: #FEF2F2;
+    --brand-100: #FDE3E3;
+    --brand-200: #FBC8C8;
+    --brand-500: #E3191C;
+    --brand-600: #CF090B;   /* rojo RYSA */
+    --brand-700: #A8070A;
+    --brand-800: #860609;
+    --carbon-900: #1F2023;  /* carbón RYSA */
+    --carbon-950: #141517;
+
+    /* ── Tokens semánticos (shadcn, en HSL) ───────────────────────── */
+    --background: 240 6% 97%;          /* #F6F6F7 fondo general */
+    --foreground: 225 6% 13%;          /* #1F2023 texto principal */
+    --card: 0 0% 100%;
+    --card-foreground: 225 6% 13%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 10%;
-    --primary: 13 73% 44%;             /* #C1401E terracota */
+    --popover-foreground: 225 6% 13%;
+    --primary: 360 92% 42%;            /* #CF090B rojo RYSA */
     --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 96%;             /* gris claro */
-    --secondary-foreground: 0 0% 10%;
-    --muted: 24 23% 95%;
-    --muted-foreground: 217 9% 46%;    /* #6B7280 texto secundario */
-    --accent: 14 70% 94%;              /* tint terracota suave */
-    --accent-foreground: 13 73% 30%;
-    --destructive: 0 72% 51%;          /* #DC2626 rojo */
-    --destructive-foreground: 0 0% 98%;
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 13 73% 44%;
-    --radius: 1.25rem;                 /* ~20px radius grande */
+    --secondary: 240 5% 94%;
+    --secondary-foreground: 225 6% 13%;
+    --muted: 240 5% 95%;
+    --muted-foreground: 225 5% 45%;    /* #6E717A */
+    --accent: 0 86% 97%;               /* tinte rojo suave */
+    --accent-foreground: 359 92% 34%;
+    --destructive: 4 76% 40%;          /* #B42318: más oscuro que la marca */
+    --destructive-foreground: 0 0% 100%;
+    --border: 225 7% 89%;
+    --input: 225 7% 86%;
+    --ring: 360 92% 42%;
+    --radius: 0.75rem;                 /* 12 px */
 
     /* Estados */
-    --success: 142 71% 45%;            /* #16A34A verde */
-    --warning: 32 95% 44%;             /* #D97706 �mbar */
+    --success: 142 72% 29%;            /* #15803D */
+    --warning: 26 90% 37%;             /* #B45309 */
+    --info: 224 76% 48%;               /* #1D4ED8 */
 
-    /* Header Design System - Rojo Óxido & Gris (Linear / Notion Style) */
+    /* Movimiento */
+    --ease-out: cubic-bezier(.2, .7, .2, 1);
+    --dur-fast: 150ms;
+    --dur-base: 240ms;
+
+    /* Encabezado del ERP */
     --header-bg: rgba(255, 255, 255, 0.92);
-    --header-border: #E2E8F0;
-    --header-text-primary: #1E293B;
-    --header-text-secondary: #64748B;
-    --header-brand-oxido: #C1401E;
-    --header-brand-oxido-hover: #A03316;
-    --header-brand-oxido-light: #FDF4F0;
-    --header-brand-oxido-border: #F7D7CB;
-    --header-grey-dark: #334155;
-    --header-grey-medium: #64748B;
-    --header-grey-light: #F8FAFC;
-    --header-grey-hover: #F1F5F9;
+    --header-border: #E2E3E6;
+    --header-text-primary: #1F2023;
+    --header-text-secondary: #6E717A;
+    --header-brand-oxido: var(--brand-600);
+    --header-brand-oxido-hover: var(--brand-700);
+    --header-brand-oxido-light: var(--brand-50);
+    --header-brand-oxido-border: var(--brand-200);
+    --header-grey-dark: #3C3E44;
+    --header-grey-medium: #6E717A;
+    --header-grey-light: #F7F7F8;
+    --header-grey-hover: #EFEFF1;
     --header-radius-sm: 6px;
     --header-radius-md: 8px;
     --header-radius-full: 9999px;
@@ -95,7 +123,7 @@ body {
 .rysa-header-avatar {
   background: linear-gradient(135deg, var(--header-brand-oxido) 0%, var(--header-brand-oxido-hover) 100%);
   color: #ffffff;
-  box-shadow: 0 2px 4px rgba(185, 90, 58, 0.2);
+  box-shadow: 0 2px 4px rgba(207, 9, 11, 0.22);
 }
 
 .rysa-header-badge-success {
@@ -125,12 +153,12 @@ body {
   body { @apply bg-background text-foreground; }
 }
 
-/* Finexy helpers */
+/* Ayudantes compartidos */
 .card-soft {
   background-color: #fff;
-  border: 1px solid #F0EDEA;
-  border-radius: 1.25rem;
-  box-shadow: 0 1px 2px rgba(26,26,26,0.04), 0 8px 24px rgba(26,26,26,0.06);
+  border: 1px solid #E8E9EC;
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(31,32,35,0.04), 0 6px 18px rgba(31,32,35,0.05);
 }
 .dot {
   width: 8px; height: 8px; border-radius: 9999px; display: inline-block;
@@ -141,10 +169,16 @@ body {
 .dot-muted { background-color: #9CA3AF; }
 .status-pill {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; font-weight: 600; color: #1A1A1A;
+  font-size: 12px; font-weight: 600; color: var(--carbon-900);
 }
 
-.font-display { font-family: 'Outfit', sans-serif; }
+/* Titulares: Archivo expandido. `font-display` se usa en ~220 lugares del ERP;
+   ahí mantiene el ancho normal y el sitio público usa `.titular` (expandido). */
+.font-display { font-family: 'Archivo Variable', 'Archivo', 'IBM Plex Sans', sans-serif; font-stretch: 100%; letter-spacing: -0.01em; }
+.titular { font-family: 'Archivo Variable', 'Archivo', sans-serif; font-stretch: 118%; letter-spacing: -0.012em; line-height: 1.04; }
+.titular-ancho { font-family: 'Archivo Variable', 'Archivo', sans-serif; font-stretch: 125%; letter-spacing: -0.015em; line-height: 1; }
+.etiqueta { font-family: 'IBM Plex Sans', sans-serif; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.cifras { font-variant-numeric: tabular-nums; }
 
 /* ---- Mapas (Leaflet) ---------------------------------------------------- */
 /* Contenedor acotado: evita que los paneles de Leaflet tapen menús/modales. */
@@ -156,15 +190,18 @@ body {
   100% { transform: scale(1.25); opacity: 0; }
 }
 
-::selection { background: #C1401E; color: #fff; }
+::selection { background: var(--brand-600); color: #fff; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-thumb { background: #CBCDD2; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #9A9DA5; }
 
 @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-.animate-fade-up { animation: fadeUp 0.5s ease both; }
+.animate-fade-up { animation: fadeUp 0.5s var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
 
 /* Ticket térmico */
 .thermal { width: 80mm; max-width: 100%; }
@@ -172,7 +209,7 @@ body {
 /* Plantilla factura/cotización (carta) */
 .invoice-letter { width: 210mm; max-width: 100%; background: #fff; color: #000; }
 .invoice-letter table { width: 100%; border-collapse: collapse; font-size: 10pt; }
-.invoice-letter th { background: #C1401E; color: #fff; padding: 6px 8px; text-align: left; font-size: 9pt; }
+.invoice-letter th { background: var(--brand-600); color: #fff; padding: 6px 8px; text-align: left; font-size: 9pt; }
 .invoice-letter td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
 .invoice-letter .text-right { text-align: right; }
 .invoice-letter .text-center { text-align: center; }
@@ -196,7 +233,7 @@ body {
 /* Comprobante comercial RYSA — Formato carta (Letter 8.5x11) */
 .letter-doc { width: 210mm; max-width: 100%; background: #fff; color: #000; padding: 12mm 16mm; }
 .letter-doc table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
-.letter-doc th { background: #C1401E; color: #fff; padding: 5px 8px; text-align: left; font-size: 8.5pt; }
+.letter-doc th { background: var(--brand-600); color: #fff; padding: 5px 8px; text-align: left; font-size: 8.5pt; }
 .letter-doc td { padding: 4px 8px; border-bottom: 1px solid #e2e8f0; }
 .letter-doc .text-right { text-align: right; }
 .letter-doc .text-center { text-align: center; }

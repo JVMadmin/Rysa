@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, money, fileUrl } from "@/lib/api";
+import { api, money, fotoProducto } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +45,7 @@ export default function Catalogo() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2">
-            <Images className="w-6 h-6 text-[#C1401E]" /> Catálogo
+            <Images className="w-6 h-6 text-brand-600" /> Catálogo
           </h1>
           <p className="text-slate-500 text-sm">Productos disponibles para mostrar al cliente · {filtrados.length} artículos</p>
         </div>
@@ -65,7 +65,7 @@ export default function Catalogo() {
         </button>
         {categorias.map((c) => (
           <button key={c} onClick={() => setCat(c === cat ? "" : c)}
-            className={`px-3 py-1.5 rounded-full text-xs border ${cat === c ? "bg-[#C1401E] text-white border-[#C1401E]" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+            className={`px-3 py-1.5 rounded-full text-xs border ${cat === c ? "bg-brand-600 text-white border-brand-600" : "bg-white text-slate-600 hover:bg-slate-50"}`}
             data-testid={`catalogo-cat-${c}`}>
             {c}
           </button>
@@ -78,7 +78,7 @@ export default function Catalogo() {
       </div>
 
       {loading && !items ? (
-        <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-[#C1401E]" /></div>
+        <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-brand-600" /></div>
       ) : filtrados.length === 0 ? (
         <div className="card-soft p-12 text-center" data-testid="catalogo-vacio">
           <PackageX className="w-10 h-10 mx-auto text-slate-300 mb-3" />
@@ -89,8 +89,8 @@ export default function Catalogo() {
           {filtrados.map((p) => (
             <div key={p.id} className="card-soft overflow-hidden flex flex-col" data-testid={`catalogo-item-${p.codigo}`}>
               <div className="h-36 bg-slate-100 flex items-center justify-center overflow-hidden relative">
-                {p.imagen ? (
-                  <img src={fileUrl(p.imagen)} alt={p.nombre} loading="lazy"
+                {fotoProducto(p.imagen) ? (
+                  <img src={fotoProducto(p.imagen)} alt={p.nombre} loading="lazy"
                        className="w-full h-full object-cover" />
                 ) : (
                   <Images className="w-10 h-10 text-slate-300" />
@@ -108,7 +108,7 @@ export default function Catalogo() {
                 {p.categoria && <Badge variant="outline" className="mt-1 w-fit text-[10px]">{p.categoria}</Badge>}
                 <div className="mt-auto pt-2 flex items-center justify-between">
                   {Number(p.precio_publico) > 0
-                    ? <span className="font-display font-black text-lg text-[#C1401E]">{money(p.precio_publico)}</span>
+                    ? <span className="font-display font-black text-lg text-brand-600">{money(p.precio_publico)}</span>
                     : <span className="text-xs text-slate-400">Precio a consultar</span>}
                   <span className={`text-[11px] tabular-nums ${Number(p.existencia) <= 0 ? "text-red-600 font-semibold" : "text-slate-500"}`}>
                     {Number(p.existencia)} pza

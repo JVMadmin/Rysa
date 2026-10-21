@@ -35,7 +35,7 @@ export default function TicketVerificar() {
         {data && !error && (
           <div className="p-6 space-y-4">
             <div className="text-center">
-              <div className="font-display text-3xl font-black text-[#C1401E]">{data.folio}</div>
+              <div className="font-display text-3xl font-black text-brand-600">{data.folio}</div>
               <div className="text-xs text-slate-400 uppercase tracking-wider mt-1">{data.empresa} · {data.rfc}</div>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">

@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useRef, useCallback, useContext } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { api, formatApiError, money, fileUrl, fotoProducto } from "@/lib/api";
 import { numeroALetras } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { useCart, CartContext } from "@/context/CartContext";
@@ -72,13 +72,13 @@ const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva 
   return (
   <div className="relative">
     <button onClick={onAdd} data-testid={`pos-prod-${p.codigo}`}
-      className="w-full text-left border border-slate-200 rounded-md p-2 hover:border-[#C1401E] hover:bg-slate-50 transition-colors">
-      {p.imagen_url && <img src={fileUrl(p.imagen_url)} alt="" className="h-10 w-10 object-contain mb-1 mx-auto" />}
+      className="w-full text-left border border-slate-200 rounded-md p-2 hover:border-brand-600 hover:bg-slate-50 transition-colors">
+      {fotoProducto(p.imagen_url) && <img src={fotoProducto(p.imagen_url)} alt="" className="h-10 w-10 object-contain mb-1 mx-auto" />}
       <div className="text-[10px] text-slate-400 truncate">{p.codigo}</div>
       <div className="text-xs font-medium line-clamp-2 h-7">{p.descripcion}</div>
       <div className="flex items-center justify-between mt-0.5">
         <div>
-          <span className="font-display font-bold text-[#C1401E] text-xs">{money(principal)}</span>
+          <span className="font-display font-bold text-brand-600 text-xs">{money(principal)}</span>
           <span className="text-[9px] text-slate-400 ml-0.5">({etiqueta} {money(secundario)})</span>
         </div>
         <span className="flex items-center gap-0.5">
@@ -985,7 +985,7 @@ export default function POS({ windowId, windowLabel }) {
               {filteredClients.map((c) => (
                  <button key={c.id} onClick={() => pickClient(c)} data-testid={`pos-cliente-opt-${c.codigo}`}
                    className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center justify-between">
-                   <span className="truncate"><b className="text-[#C1401E] mr-1">{c.codigo}</b> {c.nombre}
+                   <span className="truncate"><b className="text-brand-600 mr-1">{c.codigo}</b> {c.nombre}
                      {puedeVerClientesFull && c.rfc && <span className="text-slate-400 font-mono text-xs ml-1">· {c.rfc}</span>}
                    </span>
                    <span className="flex items-center gap-1.5 shrink-0">
@@ -1000,13 +1000,13 @@ export default function POS({ windowId, windowLabel }) {
         <div className="flex items-center gap-2">
           {puedeVerClientesFull && (
             <Button variant="outline" onClick={openNuevoCliente} className="h-12 whitespace-nowrap" data-testid="pos-nuevo-cliente" title="Registrar un cliente nuevo sin salir del POS">
-              <UserPlus className="w-4 h-4 mr-1 text-[#C1401E]" /> Nuevo cliente
+              <UserPlus className="w-4 h-4 mr-1 text-brand-600" /> Nuevo cliente
             </Button>
           )}
           <Button
             variant={cajaAbierta ? "outline" : "default"}
             onClick={() => setCajaModalOpen(true)}
-            className={`h-12 whitespace-nowrap ${cajaAbierta ? "" : "bg-[#C1401E] hover:bg-[#A03316]"}`}
+            className={`h-12 whitespace-nowrap ${cajaAbierta ? "" : "bg-brand-600 hover:bg-brand-700"}`}
             data-testid="pos-caja-btn"
             title={cajaAbierta ? "Ver caja abierta" : "Abrir caja"}
           >
@@ -1028,9 +1028,9 @@ export default function POS({ windowId, windowLabel }) {
         <div className="flex flex-col card-soft min-h-0 flex-1">
           <div className="p-3 border-b border-slate-200 space-y-2">
             <div className="flex items-center gap-2">
-              <ShoppingCart className="w-5 h-5 text-[#C1401E]" />
+              <ShoppingCart className="w-5 h-5 text-brand-600" />
               <span className="font-display font-bold">Ticket</span>
-              <Badge className="bg-[#C1401E]/10 text-[#C1401E] font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
+              <Badge className="bg-brand-600/10 text-brand-600 font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
               <span className="ml-auto text-sm text-slate-400">{cart.length} items</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -1054,7 +1054,7 @@ export default function POS({ windowId, windowLabel }) {
               <UserIcon className="w-3.5 h-3.5" />
               <span className="truncate">{clienteSel ? clienteSel.nombre : "Público General"}</span>
               <Badge variant="outline" className="ml-auto text-[10px]" data-testid="pos-lista-badge">{Number(lista) === listaNames.length + 1 ? "Precio mínimo" : listaNames[lista - 1]}</Badge>
-              {Number(descPct) > 0 && <Badge className="bg-[#C1401E]/10 text-[#C1401E] text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
+              {Number(descPct) > 0 && <Badge className="bg-brand-600/10 text-brand-600 text-[10px]" data-testid="pos-descpct">-{descPct}%</Badge>}
             </div>
             {credInfo && (
               <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2" data-testid="pos-credito-indicador">
@@ -1073,7 +1073,7 @@ export default function POS({ windowId, windowLabel }) {
                 </div>
                 {credInfo.sal > 0 && can("cxc.abono") && (
                   <Button size="sm" onClick={() => { setAbonoCli(clienteSel); setAbono({ monto: "", metodo: "efectivo", referencia: "" }); }}
-                    className="w-full mt-2 bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-abonar-credito">
+                    className="w-full mt-2 bg-brand-600 hover:bg-brand-700" data-testid="pos-abonar-credito">
                     <HandCoins className="w-4 h-4 mr-1" /> Abonar a la cuenta ({money(credInfo.sal)})
                   </Button>
                 )}
@@ -1114,7 +1114,7 @@ export default function POS({ windowId, windowLabel }) {
                     const importeVista = +((i.cantidad * i.precio - (i.descuento || 0)) * fIva).toFixed(2);
                     return (
                       <tr key={i.product_id} onClick={() => setSelected(i.product_id)}
-                        className={`cursor-pointer align-middle ${selected === i.product_id ? "bg-[#C1401E]/[0.04]" : "hover:bg-slate-50"}`}
+                        className={`cursor-pointer align-middle ${selected === i.product_id ? "bg-brand-600/[0.04]" : "hover:bg-slate-50"}`}
                         data-testid={`cart-item-${i.codigo}`}>
                         <td className="px-1.5 py-1 font-mono text-[10px] text-slate-500 whitespace-nowrap">{i.codigo}</td>
                         <td className="px-1.5 py-1">
@@ -1152,12 +1152,12 @@ export default function POS({ windowId, windowLabel }) {
                         </td>
                         <td className="px-1.5 py-1 text-[11px] text-slate-700 min-w-[130px]">
                           <div className="truncate max-w-[180px]">{i.descripcion}</div>
-                          {i.descuento > 0 && <div className="text-[9px] text-[#C1401E]">Desc -{money(i.descuento)}</div>}
+                          {i.descuento > 0 && <div className="text-[9px] text-brand-600">Desc -{money(i.descuento)}</div>}
                         </td>
                         <td className="px-1.5 py-1 text-right tabular-nums text-slate-500 whitespace-nowrap">{i.iva_tasa}%</td>
                         <td className="px-1.5 py-1 text-right tabular-nums whitespace-nowrap">
                           <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(precioVista)); }}
-                            className="underline decoration-dotted hover:text-[#C1401E]" data-testid={`cart-price-${i.codigo}`}>
+                            className="underline decoration-dotted hover:text-brand-600" data-testid={`cart-price-${i.codigo}`}>
                             {money(precioVista)}
                           </button>
                         </td>
@@ -1188,7 +1188,7 @@ export default function POS({ windowId, windowLabel }) {
               <div className="grid grid-cols-3 gap-2">
                 {[["contado", "Contado", Banknote], ["transferencia", "Transferencia", ArrowLeftRight], ["credito", "Crédito", CreditCard]].map(([k, l, Ic]) => (
                   <button key={k} onClick={() => setFormaPago(k)} data-testid={`forma-pago-${k}`}
-                    className={`flex flex-col items-center gap-1 py-2 rounded-md border text-xs font-medium transition-colors ${formaPago === k ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                    className={`flex flex-col items-center gap-1 py-2 rounded-md border text-xs font-medium transition-colors ${formaPago === k ? "border-brand-600 bg-brand-600/5 text-brand-600" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                     <Ic className="w-4 h-4" /> {l}
                   </button>
                 ))}
@@ -1205,14 +1205,14 @@ export default function POS({ windowId, windowLabel }) {
               <Input type="number" value={descGlobal} onChange={(e) => setDescGlobal(e.target.value)} className="h-8" data-testid="pos-desc-global" placeholder={descMode === "%" ? "0 %" : "0.00"} />
               <button
                 onClick={() => { if (can("config") || can("producto.precio")) setIncluyeIva((v) => !v); else toast.error("Sin permiso para cambiar IVA"); }}
-                className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-[#C1401E] text-[#C1401E] bg-[#C1401E]/5" : "border-slate-200 text-slate-400"}`}
+                className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-brand-600 text-brand-600 bg-brand-600/5" : "border-slate-200 text-slate-400"}`}
                 data-testid="pos-incluye-iva">
-                <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-[#C1401E] border-[#C1401E]" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
+                <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-brand-600 border-brand-600" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
                 IVA (8%) aplicado
               </button>
             </div>
-            {totals.descGlobalAmount > 0 && <div className="text-xs text-[#C1401E]">Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}: -{money(totals.descGlobalAmount)}</div>}
-            {totals.descPctAmount > 0 && <div className="text-xs text-[#C1401E]">Descuento cliente ({descPct}%): -{money(totals.descPctAmount)}</div>}
+            {totals.descGlobalAmount > 0 && <div className="text-xs text-brand-600">Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}: -{money(totals.descGlobalAmount)}</div>}
+            {totals.descPctAmount > 0 && <div className="text-xs text-brand-600">Descuento cliente ({descPct}%): -{money(totals.descPctAmount)}</div>}
             {creditoBloqueado && (
               <div className="flex items-center gap-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2" data-testid="pos-credito-bloqueo">
                 <CreditCard className="w-4 h-4" /> Este cliente no tiene crédito habilitado. Usa contado o habilita su crédito en Clientes.
@@ -1238,7 +1238,7 @@ export default function POS({ windowId, windowLabel }) {
           <div className="flex items-center gap-1.5 mb-2">
             {[["todos", "Todos", LayoutGrid], ["favoritos", "Favoritos", Star], ["mas_vendidos", "Más vendidos", Flame]].map(([k, l, Ic]) => (
               <button key={k} onClick={() => setVista(k)} data-testid={`pos-vista-${k}`}
-                className={`flex items-center gap-1.5 px-3 h-9 rounded-md text-sm font-medium transition-colors ${vista === k ? "bg-[#C1401E] text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+                className={`flex items-center gap-1.5 px-3 h-9 rounded-md text-sm font-medium transition-colors ${vista === k ? "bg-brand-600 text-white" : "border border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
                 <Ic className="w-4 h-4" /> {l}
               </button>
             ))}
@@ -1261,7 +1261,7 @@ export default function POS({ windowId, windowLabel }) {
 
         <div className="flex-1 overflow-y-auto card-soft">
           {catLoading && !q ? (
-            <div className="h-full flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>
+            <div className="h-full flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-600" /></div>
           ) : q ? (
             results.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-300 p-10">
@@ -1330,14 +1330,14 @@ export default function POS({ windowId, windowLabel }) {
               <div className="flex justify-between text-lg font-bold"><span>Cambio</span><span data-testid="pos-cambio" className="text-green-600">{money(cambio)}</span></div>
             </div>
           )}
-          <DialogFooter><Button variant="outline" onClick={() => setPayOpen(false)}>Cancelar</Button><Button onClick={confirmar} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirmar-venta">Confirmar venta</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setPayOpen(false)}>Cancelar</Button><Button onClick={confirmar} className="bg-brand-600 hover:bg-brand-700" data-testid="confirmar-venta">Confirmar venta</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Nuevo cliente desde el POS (el carrito y la venta NO se tocan) */}
       <Dialog open={nuevoClienteOpen} onOpenChange={setNuevoClienteOpen}>
         <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto" data-testid="pos-nuevo-cliente-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><UserPlus className="w-5 h-5 text-[#C1401E]" /> Nuevo cliente</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><UserPlus className="w-5 h-5 text-brand-600" /> Nuevo cliente</DialogTitle></DialogHeader>
           {ncDup.length > 0 && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800" data-testid="pos-nc-duplicados">
               <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="w-4 h-4" /> Ya existe un cliente similar. Puedes seleccionarlo:</div>
@@ -1345,7 +1345,7 @@ export default function POS({ windowId, windowLabel }) {
                 {ncDup.map((c) => (
                   <button key={c.id} onClick={() => seleccionarExistente(c)} data-testid={`pos-nc-usar-${c.codigo}`}
                     className="w-full text-left px-3 py-2 rounded-md bg-white border border-amber-200 hover:bg-amber-100 flex items-center justify-between">
-                    <span><b className="text-[#C1401E]">{c.codigo}</b> {c.nombre}{c.rfc ? ` · ${c.rfc}` : ""}</span>
+                    <span><b className="text-brand-600">{c.codigo}</b> {c.nombre}{c.rfc ? ` · ${c.rfc}` : ""}</span>
                     <span className="text-xs font-semibold text-amber-700">Usar este</span>
                   </button>
                 ))}
@@ -1380,7 +1380,7 @@ export default function POS({ windowId, windowLabel }) {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setNuevoClienteOpen(false); setNcError(""); setNcDup([]); }}>Cancelar</Button>
-            <Button onClick={guardarNuevoCliente} disabled={ncBusy} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-nc-guardar">
+            <Button onClick={guardarNuevoCliente} disabled={ncBusy} className="bg-brand-600 hover:bg-brand-700" data-testid="pos-nc-guardar">
               {ncBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />} Guardar cliente
             </Button>
           </DialogFooter>
@@ -1409,7 +1409,7 @@ export default function POS({ windowId, windowLabel }) {
           <DialogFooter>
             <Button variant="outline" onClick={() => { setInvOverride(null); setInvReason(""); }}>Cancelar</Button>
             <Button disabled={!invReason.trim()} onClick={() => { setInvOverride(null); setPayOpen(true); }}
-              className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="inv-override-continue">Continuar</Button>
+              className="bg-brand-600 hover:bg-brand-700" data-testid="inv-override-continue">Continuar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1425,9 +1425,9 @@ export default function POS({ windowId, windowLabel }) {
                   const pr = priceFromList(linePrice, i + 1);
                   return (
                     <button key={i} onClick={() => setLinePrecio(linePrice, pr * fDlg)} data-testid={`line-precio-${i + 1}`}
-                      className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-[#C1401E] ${Math.abs(linePrice.precio - pr) < 0.001 ? "border-[#C1401E] bg-[#C1401E]/5" : "border-slate-200"}`}>
+                      className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-brand-600 ${Math.abs(linePrice.precio - pr) < 0.001 ? "border-brand-600 bg-brand-600/5" : "border-slate-200"}`}>
                       <span className="text-sm text-slate-500">{listaNames[i] || `Precio ${i + 1}`}</span>
-                      <span className="font-display font-bold text-[#C1401E]">{money(pr * fDlg)}</span>
+                      <span className="font-display font-bold text-brand-600">{money(pr * fDlg)}</span>
                     </button>
                   );
                 })}
@@ -1442,7 +1442,7 @@ export default function POS({ windowId, windowLabel }) {
                 {can("producto.precio") ? (
                   <div className="flex gap-2 mt-1">
                     <Input type="number" value={libreVal} onChange={(e) => setLibreVal(e.target.value)} placeholder="0.00" data-testid="line-precio-libre-input" />
-                    <Button onClick={() => setLinePrecio(linePrice, libreVal)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="line-precio-libre-apply">Aplicar</Button>
+                    <Button onClick={() => setLinePrecio(linePrice, libreVal)} className="bg-brand-600 hover:bg-brand-700" data-testid="line-precio-libre-apply">Aplicar</Button>
                   </div>
                 ) : <p className="text-xs text-slate-400 mt-1">No tienes permiso para capturar precio libre.</p>}
               </div>
@@ -1466,7 +1466,7 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="text-xs text-slate-400 mb-2">{p.codigo}</div>
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   {listaNames.map((_, i) => (
-                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-[#C1401E]">{money(calcListPrice(p, i + 1, listasPct))}</div></div>
+                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-brand-600">{money(calcListPrice(p, i + 1, listasPct))}</div></div>
                   ))}
                 </div>
               </div>
@@ -1485,7 +1485,7 @@ export default function POS({ windowId, windowLabel }) {
             {suspended.map((s) => (
               <div key={s.id} className="flex items-center justify-between border border-slate-200 rounded-md p-3">
                 <div><div className="text-sm font-medium">{s.payload.items.length} productos</div><div className="text-xs text-slate-400">{s.fecha?.slice(0, 16).replace("T", " ")}</div></div>
-                <Button size="sm" onClick={() => recuperar(s)} className="bg-[#C1401E] hover:bg-[#A03316]"><PlayCircle className="w-4 h-4 mr-1" /> Recuperar</Button>
+                <Button size="sm" onClick={() => recuperar(s)} className="bg-brand-600 hover:bg-brand-700"><PlayCircle className="w-4 h-4 mr-1" /> Recuperar</Button>
               </div>
             ))}
           </div>
@@ -1506,17 +1506,17 @@ export default function POS({ windowId, windowLabel }) {
               <div className="flex justify-center gap-2 mb-3 flex-wrap">
                 <Button size="sm" variant={printMode === "thermal" ? "default" : "outline"}
                   onClick={() => setPrintMode("thermal")}
-                  className={printMode === "thermal" ? "bg-[#C1401E]" : ""}>
+                  className={printMode === "thermal" ? "bg-brand-600" : ""}>
                   Ticket térmico
                 </Button>
                 <Button size="sm" variant={printMode === "letter" ? "default" : "outline"}
                   onClick={() => setPrintMode("letter")}
-                  className={printMode === "letter" ? "bg-[#C1401E]" : ""}>
+                  className={printMode === "letter" ? "bg-brand-600" : ""}>
                   Formato carta
                 </Button>
                 <Button size="sm" variant={printMode === "invoice" ? "default" : "outline"}
                   onClick={() => setPrintMode("invoice")}
-                  className={printMode === "invoice" ? "bg-[#C1401E]" : ""}>
+                  className={printMode === "invoice" ? "bg-brand-600" : ""}>
                   {ticket.tipo_venta === "cotizacion" ? "Cotización" : "Factura"}
                 </Button>
               </div>
@@ -1597,9 +1597,9 @@ export default function POS({ windowId, windowLabel }) {
                   {!cartaUrl ? (
                     <div className="py-16 flex flex-col items-center gap-3">
                       {pdfBusy ? (
-                        <Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" />
+                        <Loader2 className="w-7 h-7 animate-spin text-brand-600" />
                       ) : (
-                        <Button onClick={generarCartaPDF} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="letter-cargar">
+                        <Button onClick={generarCartaPDF} className="bg-brand-600 hover:bg-brand-700" data-testid="letter-cargar">
                           <FileText className="w-4 h-4 mr-1" /> Generar vista previa del PDF oficial
                         </Button>
                       )}
@@ -1618,7 +1618,7 @@ export default function POS({ windowId, windowLabel }) {
                         <div className="text-center py-10">
                           <p className="text-sm text-slate-500 mb-2">Tu navegador no muestra el PDF integrado.</p>
                           <a href={fileUrl(cartaUrl)} target="_blank" rel="noreferrer"
-                             className="text-[#C1401E] underline font-semibold">Abrir el PDF en una pestaña</a>
+                             className="text-brand-600 underline font-semibold">Abrir el PDF en una pestaña</a>
                         </div>
                       </object>
                       <p className="text-[11px] text-slate-400 text-center mt-1">
@@ -1803,7 +1803,7 @@ export default function POS({ windowId, windowLabel }) {
             <Button onClick={printInvoice} variant="outline" data-testid="invoice-print">
               <Printer className="w-4 h-4 mr-1" /> Imprimir {ticket?.tipo_venta === "cotizacion" ? "cotización" : "factura"}
             </Button>
-            <Button onClick={() => setTicket(null)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="ticket-nueva">Nueva venta</Button>
+            <Button onClick={() => setTicket(null)} className="bg-brand-600 hover:bg-brand-700" data-testid="ticket-nueva">Nueva venta</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1813,19 +1813,19 @@ export default function POS({ windowId, windowLabel }) {
         <DialogContent className="max-w-md" data-testid="cotizacion-dialog">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              <FileText className="w-5 h-5 text-[#C1401E]" /> Cotización {cotizacion?.folio}
+              <FileText className="w-5 h-5 text-brand-600" /> Cotización {cotizacion?.folio}
             </DialogTitle>
           </DialogHeader>
           {cotizacion && (
             <div className="space-y-3">
-              <div className="rounded-lg bg-[#F4ECE7] p-3 text-sm space-y-1">
+              <div className="rounded-lg bg-brand-50 p-3 text-sm space-y-1">
                 <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Cliente</span><b className="truncate">{cotizacion.cliente_nombre || "Público General"}</b></div>
                 <div className="flex justify-between"><span className="text-slate-500">Emisión</span><b>{String(cotizacion.fecha || "").slice(0, 10)}</b></div>
                 <div className="flex justify-between"><span className="text-slate-500">Vence (auto: emisión + 2 días)</span><b>{String(cotizacion.fecha_vencimiento || "").slice(0, 10) || "—"}</b></div>
                 <div className="flex justify-between"><span className="text-slate-500">Partidas</span><b>{(cotizacion.items || []).length}</b></div>
-                <div className="flex justify-between border-t border-[#E5D5CC] pt-1">
-                  <span className="font-bold text-[#C1401E]">TOTAL (IVA incluido)</span>
-                  <span className="font-display font-black text-[#C1401E]">{money(cotizacion.total)}</span>
+                <div className="flex justify-between border-t border-brand-100 pt-1">
+                  <span className="font-bold text-brand-600">TOTAL (IVA incluido)</span>
+                  <span className="font-display font-black text-brand-600">{money(cotizacion.total)}</span>
                 </div>
               </div>
               <p className="text-[11px] text-slate-400 leading-snug">
@@ -1854,7 +1854,7 @@ export default function POS({ windowId, windowLabel }) {
       {/* Abono directo a crédito del cliente desde el POS */}
       <Dialog open={!!abonoCli} onOpenChange={(o) => !o && setAbonoCli(null)}>
         <DialogContent data-testid="pos-abono-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> Abonar a cuenta · {abonoCli?.nombre}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-brand-600" /> Abonar a cuenta · {abonoCli?.nombre}</DialogTitle></DialogHeader>
           {abonoCli && (
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-md p-3 flex items-center justify-between">
@@ -1883,7 +1883,7 @@ export default function POS({ windowId, windowLabel }) {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setAbonoCli(null)}>Cancelar</Button>
-            <Button onClick={guardarAbono} disabled={abonoSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="pos-abono-guardar">{abonoSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
+            <Button onClick={guardarAbono} disabled={abonoSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="pos-abono-guardar">{abonoSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1891,34 +1891,34 @@ export default function POS({ windowId, windowLabel }) {
       {/* Comprobante de abono desde el POS */}
       <Dialog open={!!posComp} onOpenChange={(o) => !o && setPosComp(null)}>
         <DialogContent className="max-w-md" data-testid="pos-comprobante-abono-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> Abono registrado correctamente</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-brand-600" /> Abono registrado correctamente</DialogTitle></DialogHeader>
           {posComp && (
             <div className="space-y-4">
               <div className="rounded-xl border border-[#E5E0DA] overflow-hidden" data-testid="pos-comprobante-abono-cuerpo">
-                <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-[#C1401E]">
+                <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-brand-600">
                   <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/isotipo1.png"} alt="logo" className="h-12 w-12 object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                   <div className="flex-1">
-                    <div className="font-display font-extrabold text-[#C1401E] leading-none">{settings.empresa_nombre || "Grupo RYSA"}</div>
+                    <div className="font-display font-extrabold text-brand-600 leading-none">{settings.empresa_nombre || "Grupo RYSA"}</div>
                     <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 mt-0.5">Comprobante de Abono</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-lg font-display font-black text-[#C1401E]">{posComp.abono.folio}</div>
+                    <div className="text-lg font-display font-black text-brand-600">{posComp.abono.folio}</div>
                     <div className="text-[11px] text-slate-500">{(posComp.abono.fecha || new Date().toISOString()).slice(0, 10)} {(posComp.abono.fecha || "").slice(11, 16)}</div>
                   </div>
                 </div>
                 <div className="p-4 space-y-3">
                   <div className="text-sm"><span className="text-slate-400 text-xs">Cliente:</span> <b>{posComp.abono.cliente_nombre || posComp.cliente?.nombre}</b></div>
-                  <div className="rounded-lg bg-[#F4ECE7] p-3 space-y-2">
+                  <div className="rounded-lg bg-brand-50 p-3 space-y-2">
                     <div className="flex justify-between text-sm"><span className="text-slate-500">Saldo anterior</span><span className="font-semibold">{money(posComp.abono.saldo_anterior)}</span></div>
-                    <div className="flex justify-between text-base font-bold text-[#C1401E] border-t border-[#E5D5CC] pt-2"><span>ABONO</span><span>{money(posComp.abono.monto)}</span></div>
-                    <div className="flex justify-between text-base font-black border-t-2 border-[#C1401E] pt-2"><span>SALDO RESTANTE</span><span>{money(posComp.abono.saldo_restante)}</span></div>
+                    <div className="flex justify-between text-base font-bold text-brand-600 border-t border-brand-100 pt-2"><span>ABONO</span><span>{money(posComp.abono.monto)}</span></div>
+                    <div className="flex justify-between text-base font-black border-t-2 border-brand-600 pt-2"><span>SALDO RESTANTE</span><span>{money(posComp.abono.saldo_restante)}</span></div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
                     <div><span className="text-slate-400">Método:</span> <span className="capitalize font-medium text-slate-700">{posComp.abono.metodo}</span></div>
                     {posComp.abono.referencia && <div><span className="text-slate-400">Referencia:</span> <span className="font-medium text-slate-700">{posComp.abono.referencia}</span></div>}
                     {posComp.abono.usuario_nombre && <div><span className="text-slate-400">Usuario:</span> <span className="font-medium text-slate-700">{posComp.abono.usuario_nombre}</span></div>}
                   </div>
-                  <div className="text-center font-bold text-[#C1401E] pt-1">¡GRACIAS POR SU PAGO!</div>
+                  <div className="text-center font-bold text-brand-600 pt-1">¡GRACIAS POR SU PAGO!</div>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 justify-center">
@@ -1955,11 +1955,11 @@ export default function POS({ windowId, windowLabel }) {
             </div>
             <div>
               <div className="text-base uppercase tracking-wide text-slate-600 font-semibold">Descuento</div>
-              <div className="text-xl font-bold text-[#C1401E] leading-tight tabular-nums">-{money(totals.descGlobalAmount + totals.descPctAmount)}</div>
+              <div className="text-xl font-bold text-brand-600 leading-tight tabular-nums">-{money(totals.descGlobalAmount + totals.descPctAmount)}</div>
             </div>
             <div>
               <div className="text-base uppercase tracking-wide text-slate-600 font-semibold">Total</div>
-              <div className="font-display font-black text-3xl text-[#C1401E] leading-none tabular-nums" data-testid="pos-total">{money(totals.total)}</div>
+              <div className="font-display font-black text-3xl text-brand-600 leading-none tabular-nums" data-testid="pos-total">{money(totals.total)}</div>
             </div>
           </div>
 
@@ -1967,7 +1967,7 @@ export default function POS({ windowId, windowLabel }) {
           <div className="flex items-center gap-2 shrink-0">
             <Button variant="outline" className="h-16 w-16" onClick={suspender} title="Suspender venta" data-testid="pos-suspend"><PauseCircle className="w-7 h-7" /></Button>
             <Button
-              className="h-16 px-10 sm:px-20 bg-[#C1401E] hover:bg-[#A03316] disabled:bg-slate-300 disabled:cursor-not-allowed text-lg sm:text-xl font-bold rounded-xl shadow-lg shadow-[#C1401E]/25 transition-all active:scale-[0.98]"
+              className="h-16 px-10 sm:px-20 bg-brand-600 hover:bg-brand-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-lg sm:text-xl font-bold rounded-xl shadow-lg shadow-brand-600/25 transition-all active:scale-[0.98]"
               onClick={openPay} disabled={creditoBloqueado || cart.length === 0} data-testid="pos-cobrar">
               {tipoVenta === "cotizacion"
                 ? <><FileText className="w-7 h-7 mr-2" /> Guardar cotización</>
@@ -1989,7 +1989,7 @@ export default function POS({ windowId, windowLabel }) {
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAvisoCampoOpen(false)}>Cancelar</Button>
-            <Button className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setAvisoCampoOk(true); setAvisoCampoOpen(false); }} data-testid="aviso-venta-campo-confirmar">
+            <Button className="bg-brand-600 hover:bg-brand-700" onClick={() => { setAvisoCampoOk(true); setAvisoCampoOpen(false); }} data-testid="aviso-venta-campo-confirmar">
               Entendido, vender ahora
             </Button>
           </DialogFooter>

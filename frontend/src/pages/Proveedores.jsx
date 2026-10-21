@@ -82,7 +82,7 @@ export default function Proveedores() {
             onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} className="pl-9 h-10" />
         </div>
         <Button variant="outline" onClick={load} className="h-10"><Search className="w-4 h-4" /></Button>
-        <Button className="h-10 bg-[#C1401E] hover:bg-[#A03316]" onClick={openNew} data-testid="nuevo-proveedor"><Plus className="w-4 h-4 mr-1" /> Nuevo proveedor</Button>
+        <Button className="h-10 bg-brand-600 hover:bg-brand-700" onClick={openNew} data-testid="nuevo-proveedor"><Plus className="w-4 h-4 mr-1" /> Nuevo proveedor</Button>
       </div>
 
       <div className="card-soft overflow-x-auto">
@@ -93,11 +93,11 @@ export default function Proveedores() {
             <th className="p-3 text-right">Días</th><th className="p-3">Estado</th><th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={9} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {loading && <tr><td colSpan={9} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && list.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-slate-400">Sin proveedores.</td></tr>}
             {!loading && list.map((p) => (
               <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`prov-row-${p.codigo}`}>
-                <td className="p-3 font-mono text-[#C1401E] text-xs">{p.codigo}</td>
+                <td className="p-3 font-mono text-brand-600 text-xs">{p.codigo}</td>
                 <td className="p-3 font-medium">{p.nombre}</td>
                 <td className="p-3 text-slate-500 font-mono text-xs">{p.rfc || "—"}</td>
                 <td className="p-3 text-slate-500">{p.contacto || "—"}</td>
@@ -143,7 +143,7 @@ export default function Proveedores() {
                       {ficha.compras.map((c) => (
                         <tr key={c.id} className="border-t border-slate-100">
                           <td className="p-2 text-slate-500">{(c.fecha_recepcion || "").slice(0, 10)}</td>
-                          <td className="p-2 font-medium text-[#C1401E]">{c.folio}</td>
+                          <td className="p-2 font-medium text-brand-600">{c.folio}</td>
                           <td className="p-2">{c.factura_numero || "—"}</td>
                           <td className="p-2 text-right">{money(c.total)}</td>
                           <td className={`p-2 text-right ${c.saldo_pendiente > 0 ? "text-red-600" : "text-slate-300"}`}>{money(c.saldo_pendiente)}</td>
@@ -167,7 +167,7 @@ export default function Proveedores() {
                       {ficha.productos.map((pg) => (
                         <tr key={pg.product_id} className="border-t border-slate-100 align-top">
                           <td className="p-2"><b>{pg.codigo}</b> {pg.descripcion}</td>
-                          <td className="p-2 text-right font-semibold text-[#C1401E]">{money(pg.ultimo_costo)}</td>
+                          <td className="p-2 text-right font-semibold text-brand-600">{money(pg.ultimo_costo)}</td>
                           <td className="p-2" colSpan={3}>
                             {pg.historial.map((h, k) => (
                               <div key={k} className="text-slate-500 flex gap-2">
@@ -215,7 +215,7 @@ export default function Proveedores() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditing(null)}>Cancelar</Button>
-            <Button onClick={guardar} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button>
+            <Button onClick={guardar} disabled={saving} className="bg-brand-600 hover:bg-brand-700">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,205 +1,215 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import {
-  ArrowRight, Boxes, Check, ChevronRight, Mail, MapPin, Menu, MessageCircle,
-  Package, Phone, Recycle, ShoppingBag, Truck, Warehouse, X,
-} from "lucide-react";
+import { useEffect } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { ArrowRight, ArrowUpRight, FileCheck2, Handshake, Mail, MapPin, MessageCircle, Phone, Route, Tags } from "lucide-react";
+import SitioLayout, { cotizarUrl, useContacto } from "@/components/sitio/SitioLayout";
+import { CATEGORIAS, TOTAL_ARTICULOS, aproximado } from "@/data/categorias";
 
-const CATEGORIES = [
-  {
-    name: "Plásticos y contenedores",
-    description: "Tambos, cubetas, contenedores y soluciones para uso industrial y comercial.",
-    icon: Boxes,
-    image: "https://images.unsplash.com/photo-1710141530542-f792450e736e?auto=format&fit=crop&w=1200&q=85",
-  },
-  {
-    name: "Empaques y bolsas",
-    description: "Bolsas, papel, emplaye y materiales para proteger y presentar tus productos.",
-    icon: ShoppingBag,
-    image: "https://images.unsplash.com/photo-1616429368325-d5d7542b0ec3?auto=format&fit=crop&w=1000&q=85",
-  },
-  {
-    name: "Desechables",
-    description: "Vasos, cubiertos y artículos prácticos para negocios, eventos y servicio de alimentos.",
-    icon: Recycle,
-    image: "https://images.unsplash.com/photo-1541698321721-c083f55816da?auto=format&fit=crop&w=1000&q=85",
-  },
+// Marcas presentes en el inventario real (ver data/categorias.js). Se muestran
+// como texto, sin reproducir logotipos de terceros.
+const MARCAS = ["REYMA", "Chiaplast", "INIX", "Politab", "PRIMO", "Aguirey", "Dinastía", "Truper", "Serviplastic", "Garduño", "Cubasa", "Ideal"];
+
+// Ventajas que el propio sistema de Grupo RYSA respalda (listas de precio por
+// volumen, facturación CFDI 4.0, cuentas por cobrar y vendedores en ruta).
+const VENTAJAS = [
+  { icon: Tags, titulo: "Precio por volumen", texto: "Manejamos varias listas de precio: compra por pieza o por mayoreo y paga lo que corresponde a tu volumen." },
+  { icon: FileCheck2, titulo: "Factura electrónica", texto: "Emitimos CFDI 4.0 para tus compras, con los datos fiscales de tu negocio." },
+  { icon: Handshake, titulo: "Crédito para clientes", texto: "Negocios con compras recurrentes pueden solicitar línea de crédito y abonar a su cuenta." },
+  { icon: Route, titulo: "Asesores en ruta", texto: "Nuestros asesores visitan negocios, levantan pedidos y dan seguimiento a cada cliente." },
 ];
 
-const PRODUCT_LINES = [
-  "Tambos y cubetas", "Bolsas y papel", "Vasos y desechables", "Contenedores",
-  "Bolsas para silo", "Emplaye y rollos", "Suministros comerciales",
-];
-
-const NAVIGATION = [
-  ["Inicio", "#inicio"],
-  ["Nosotros", "#nosotros"],
-  ["Productos", "#productos"],
-  ["Contacto", "#contacto"],
-];
-
-function Brand({ compact = false }) {
+function Seccion({ id, etiqueta, titulo, children, className = "", oscura = false }) {
   return (
-    <div className="flex items-center shrink-0">
-      <img
-        src={compact ? "/brand/isotipo1.png" : "/brand/logotipo-Photoroom.png"}
-        alt="Grupo RYSA"
-        className={compact ? "h-10 w-14 object-contain" : "h-11 w-[164px] object-contain object-left"}
-      />
-    </div>
+    <section id={id} aria-labelledby={id ? `${id}-titulo` : undefined} className={`scroll-mt-20 ${className}`}>
+      <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
+        {etiqueta && (
+          <p className={`etiqueta flex items-center gap-3 ${oscura ? "text-brand-400" : "text-brand-600"}`}>
+            <span className="h-[2px] w-8 bg-current" aria-hidden="true" />{etiqueta}
+          </p>
+        )}
+        {titulo && <h2 id={id ? `${id}-titulo` : undefined} className={`titular mt-4 max-w-3xl text-[2.1rem] font-extrabold sm:text-display ${oscura ? "text-white" : "text-carbon-900"}`}>{titulo}</h2>}
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function TarjetaCategoria({ cat, indice, grande = false }) {
+  return (
+    <Link to={`/productos/${cat.slug}`}
+      className={`group relative isolate flex flex-col justify-end overflow-hidden rounded-lg bg-carbon-900 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 ${grande ? "min-h-[420px] lg:min-h-[520px]" : "min-h-[300px]"}`}>
+      <img src={cat.imagen} alt="" loading="lazy" decoding="async"
+        className="absolute inset-0 -z-20 h-full w-full object-cover transition-transform duration-700 ease-out-rysa group-hover:scale-[1.04]" />
+      <div className="absolute inset-0 -z-10 bg-gradient-to-t from-carbon-950 via-carbon-950/55 to-carbon-950/0" />
+      <span className="absolute left-5 top-5 font-display text-sm font-semibold tabular-nums text-white/80">{String(indice + 1).padStart(2, "0")}</span>
+      <div className="p-6 sm:p-7">
+        <p className="etiqueta text-white/70">{aproximado(cat.articulos)} artículos</p>
+        <h3 className={`titular mt-2 font-extrabold ${grande ? "text-[1.9rem] sm:text-[2.3rem]" : "text-[1.45rem]"}`}>{cat.nombre}</h3>
+        <p className={`mt-3 max-w-md text-[0.95rem] leading-6 text-white/80 ${grande ? "" : "line-clamp-2"}`}>{cat.resumen}</p>
+        <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-white">
+          Ver categoría <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+        </span>
+      </div>
+    </Link>
   );
 }
 
 export default function Landing() {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const c = useContacto();
+  const { hash } = useLocation();
 
-  const closeMenu = () => setMenuOpen(false);
+  // Llegadas a /#seccion desde otras páginas del sitio.
+  useEffect(() => {
+    if (!hash) return;
+    const el = document.getElementById(hash.slice(1));
+    if (el) setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  }, [hash]);
+
+  useEffect(() => { document.title = "Grupo RYSA — Plásticos, empaques, desechables y suministros"; }, []);
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#f7f7f5] text-[#17191d] selection:bg-red-700 selection:text-white">
-      <header className="sticky top-0 z-50 border-b border-black/10 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex h-[76px] max-w-7xl items-center justify-between px-5 sm:px-8">
-          <a href="#inicio" aria-label="Grupo RYSA, inicio" className="hidden sm:flex"><Brand /></a>
-          <a href="#inicio" aria-label="Grupo RYSA, inicio" className="sm:hidden"><Brand compact /></a>
-
-          <nav className="hidden items-center gap-7 lg:flex" aria-label="Navegación principal">
-            {NAVIGATION.map(([label, href]) => (
-              <a key={href} href={href} className="text-xs font-bold uppercase tracking-[0.13em] text-[#2b2e34] transition-colors hover:text-red-700">
-                {label}
+    <SitioLayout>
+      {/* ── Hero ─────────────────────────────────────────────────────── */}
+      <section aria-labelledby="hero-titulo" className="relative bg-carbon-950 text-white">
+        <div className="mx-auto grid max-w-[1240px] lg:grid-cols-[1.05fr_.95fr]">
+          <div className="relative z-10 px-5 pb-14 pt-14 sm:px-8 sm:pt-20 lg:pb-24 lg:pr-12 lg:pt-28">
+            <p className="etiqueta flex items-center gap-3 text-brand-400 animate-fade-up">
+              <span className="h-[2px] w-8 bg-current" aria-hidden="true" />Plásticos · Empaques · Desechables · Suministros
+            </p>
+            <h1 id="hero-titulo" className="titular-ancho mt-6 text-[2.6rem] font-extrabold leading-[0.98] sm:text-display-lg lg:text-display-xl animate-fade-up [animation-delay:60ms]">
+              Lo que tu negocio usa a diario, en un solo lugar.
+            </h1>
+            <p className="mt-6 max-w-lg text-[1.075rem] leading-7 text-slate-300 animate-fade-up [animation-delay:120ms]">
+              Desechables, bolsas, limpieza, recipientes, repostería y ferretería para negocios y hogares.
+              Surtimos por pieza o por mayoreo.
+            </p>
+            <div className="mt-9 flex flex-col gap-3 sm:flex-row animate-fade-up [animation-delay:180ms]">
+              <Link to="/productos" className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-600 px-6 text-[0.95rem] font-semibold text-white transition-colors hover:bg-brand-700">
+                Ver productos <ArrowRight className="h-4 w-4" />
+              </Link>
+              <a href={cotizarUrl(c)} target={c.waUrl ? "_blank" : undefined} rel="noreferrer"
+                className="inline-flex h-12 items-center justify-center gap-2 rounded-md border border-white/25 px-6 text-[0.95rem] font-semibold text-white transition-colors hover:border-white hover:bg-white hover:text-carbon-900">
+                Pedir cotización
               </a>
-            ))}
-          </nav>
-
-          <div className="hidden items-center gap-4 sm:flex">
-            <a href="#contacto" className="hidden items-center gap-2 text-sm font-medium text-[#363941] transition-colors hover:text-red-700 xl:flex">
-              <Phone className="h-4 w-4 text-red-700" /> Atención personalizada
-            </a>
-            <Link to="/login">
-              <Button data-testid="landing-login-btn" className="h-10 rounded-none bg-red-700 px-5 text-xs font-bold uppercase tracking-[0.1em] hover:bg-red-800">
-                Acceso ERP
-              </Button>
+            </div>
+            <dl className="mt-14 grid max-w-lg grid-cols-3 gap-6 border-t border-white/10 pt-7">
+              <div><dt className="text-xs text-slate-400">Artículos</dt><dd className="titular mt-1 text-2xl font-bold tabular-nums">+{(Math.floor((TOTAL_ARTICULOS - 1) / 100) * 100).toLocaleString("es-MX")}</dd></div>
+              <div><dt className="text-xs text-slate-400">Categorías</dt><dd className="titular mt-1 text-2xl font-bold tabular-nums">{CATEGORIAS.length}</dd></div>
+              <div><dt className="text-xs text-slate-400">Venta</dt><dd className="titular mt-1 text-[1.05rem] font-bold leading-tight sm:text-lg">Pieza y<br />mayoreo</dd></div>
+            </dl>
+          </div>
+          <div className="relative min-h-[320px] sm:min-h-[420px] lg:min-h-full">
+            <img src="/images/categorias/hero.webp" alt="Cubetas, palanganas y una escoba de plástico en colores rojo, naranja y amarillo"
+              width="2400" height="1600" fetchpriority="high"
+              className="absolute inset-0 h-full w-full object-cover lg:[clip-path:polygon(8%_0,100%_0,100%_100%,0_100%)]" />
+            <div className="absolute inset-y-0 left-0 hidden w-24 bg-gradient-to-r from-carbon-950 to-transparent lg:block" aria-hidden="true" />
+            <Link to="/productos/recipientes" className="absolute bottom-5 right-5 inline-flex items-center gap-2 rounded-md bg-white/95 px-3.5 py-2 text-xs font-semibold text-carbon-900 shadow-raised backdrop-blur transition-colors hover:bg-white">
+              Recipientes y artículos plásticos <ArrowUpRight className="h-3.5 w-3.5" />
             </Link>
           </div>
-
-          <button type="button" aria-label={menuOpen ? "Cerrar menú" : "Abrir menú"} onClick={() => setMenuOpen((open) => !open)} className="inline-flex h-10 w-10 items-center justify-center border border-black/15 text-[#1d2025] lg:hidden">
-            {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
         </div>
+      </section>
 
-        {menuOpen && (
-          <div className="border-t border-black/10 bg-white px-5 py-5 lg:hidden">
-            <nav className="mx-auto flex max-w-7xl flex-col gap-1" aria-label="Navegación móvil">
-              {NAVIGATION.map(([label, href]) => (
-                <a key={href} href={href} onClick={closeMenu} className="border-b border-black/10 py-3 text-sm font-bold uppercase tracking-[0.1em] text-[#202329] hover:text-red-700">
-                  {label}
-                </a>
-              ))}
-              <Link to="/login" onClick={closeMenu} className="mt-4">
-                <Button className="h-11 w-full rounded-none bg-red-700 text-xs font-bold uppercase tracking-[0.1em] hover:bg-red-800">Acceso ERP</Button>
-              </Link>
-            </nav>
-          </div>
-        )}
-      </header>
+      {/* ── Categorías ───────────────────────────────────────────────── */}
+      <Seccion id="productos" etiqueta="Productos" titulo="Seis líneas para surtir tu negocio completo." className="py-20 sm:py-28">
+        <div className="mt-4 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <p className="max-w-xl text-[1.05rem] leading-7 text-slate-600">
+            Categorías armadas a partir de nuestro inventario real. Entra a cada una para ver los tipos de artículo y las marcas que manejamos.
+          </p>
+          <Link to="/productos" className="inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-carbon-900 underline-offset-4 hover:text-brand-600 hover:underline">
+            Todas las categorías <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+        <div className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-12">
+          <div className="lg:col-span-7"><TarjetaCategoria cat={CATEGORIAS[0]} indice={0} grande /></div>
+          <div className="lg:col-span-5"><TarjetaCategoria cat={CATEGORIAS[1]} indice={1} grande /></div>
+          {CATEGORIAS.slice(2).map((cat, i) => (
+            <div key={cat.slug} className="lg:col-span-3"><TarjetaCategoria cat={cat} indice={i + 2} /></div>
+          ))}
+        </div>
+      </Seccion>
 
-      <main>
-        <section id="inicio" className="relative isolate min-h-[660px] overflow-hidden bg-[#16181c]">
-          <img
-            src="https://images.unsplash.com/photo-1710141530542-f792450e736e?auto=format&fit=crop&w=2200&q=90"
-            alt="Materiales y suministros para operación comercial"
-            className="absolute inset-0 -z-20 h-full w-full object-cover object-center"
-          />
-          <div className="absolute inset-0 -z-10 bg-gradient-to-r from-[#101216]/95 via-[#15171c]/82 to-[#15171c]/20" />
-          <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#101216]/70 to-transparent" />
-          <div className="mx-auto flex min-h-[660px] max-w-7xl items-center px-5 py-20 sm:px-8 lg:py-28">
-            <div className="max-w-3xl animate-fade-up">
-              <div className="mb-7 flex items-center gap-3 text-xs font-bold uppercase tracking-[0.22em] text-white/80">
-                <span className="h-[2px] w-11 bg-red-600" /> Plásticos · Empaques · Desechables
-              </div>
-              <h1 className="max-w-3xl font-display text-5xl font-black leading-[0.96] tracking-[-0.05em] text-white sm:text-6xl lg:text-7xl">
-                Suministros que mantienen tu negocio en movimiento.
-              </h1>
-              <p className="mt-7 max-w-xl text-base leading-7 text-white/75 sm:text-lg">
-                Grupo RYSA reúne soluciones en plásticos, empaques, desechables y suministros para las necesidades diarias de tu operación.
-              </p>
-              <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-                <a href="#productos">
-                  <Button className="h-12 w-full rounded-none bg-red-700 px-6 text-xs font-bold uppercase tracking-[0.1em] hover:bg-red-800 sm:w-auto">
-                    Explorar productos <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </a>
-                <a href="#contacto">
-                  <Button variant="outline" className="h-12 w-full rounded-none border-white/40 bg-transparent px-6 text-xs font-bold uppercase tracking-[0.1em] text-white hover:border-white hover:bg-white hover:text-[#17191d] sm:w-auto">
-                    Solicitar atención
-                  </Button>
-                </a>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="border-b border-black/10 bg-white">
-          <div className="mx-auto grid max-w-7xl grid-cols-1 divide-y divide-black/10 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            {[["Mayoreo", "Atención para negocios y distribuidores"], ["Menudeo", "Compra justo lo que necesitas"], ["Soluciones", "Para empaque, servicio y operación"]].map(([title, text]) => (
-              <div key={title} className="flex items-center gap-4 px-6 py-6 sm:px-8">
-                <span className="h-9 w-1 bg-red-700" />
-                <div><strong className="block font-display text-lg font-extrabold tracking-tight">{title}</strong><span className="text-sm text-[#666b73]">{text}</span></div>
-              </div>
+      {/* ── Marcas ───────────────────────────────────────────────────── */}
+      <section aria-labelledby="marcas-titulo" className="border-y border-slate-200 bg-slate-50 py-12">
+        <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
+          <h2 id="marcas-titulo" className="etiqueta text-slate-500">Marcas que encuentras con nosotros</h2>
+          <ul className="mt-6 flex flex-wrap gap-x-9 gap-y-4">
+            {MARCAS.map((m) => (
+              <li key={m} className="titular text-[1.35rem] font-bold text-slate-500 transition-colors hover:text-carbon-900">{m}</li>
             ))}
-          </div>
-        </section>
+          </ul>
+        </div>
+      </section>
 
-        <section id="nosotros" className="mx-auto grid max-w-7xl gap-12 px-5 py-24 sm:px-8 lg:grid-cols-2 lg:items-center lg:gap-24 lg:py-32">
-          <div className="order-2 lg:order-1">
-            <p className="flex items-center gap-3 text-xs font-bold uppercase tracking-[0.2em] text-red-700"><span className="h-[2px] w-9 bg-red-700" /> Nosotros</p>
-            <h2 className="mt-5 max-w-lg font-display text-4xl font-black leading-tight tracking-[-0.035em] text-[#191b20] sm:text-5xl">Una respuesta confiable para cada necesidad de suministro.</h2>
-            <p className="mt-6 max-w-xl text-base leading-7 text-[#5f646d]">
-              Grupo RYSA comercializa plásticos, empaques, desechables y suministros. Nuestra oferta está pensada para facilitar la compra de materiales esenciales en un mismo lugar.
+      {/* ── Ventajas ─────────────────────────────────────────────────── */}
+      <Seccion etiqueta="Cómo trabajamos" titulo="Compra como negocio, no como cliente de paso." className="py-20 sm:py-28">
+        <div className="mt-12 grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-2 lg:grid-cols-4">
+          {VENTAJAS.map(({ icon: Icon, titulo, texto }) => (
+            <article key={titulo} className="bg-white p-7">
+              <span className="flex h-11 w-11 items-center justify-center rounded-md bg-brand-50 text-brand-600"><Icon className="h-5 w-5" aria-hidden="true" /></span>
+              <h3 className="titular mt-6 text-[1.2rem] font-bold">{titulo}</h3>
+              <p className="mt-2.5 text-[0.95rem] leading-6 text-slate-600">{texto}</p>
+            </article>
+          ))}
+        </div>
+      </Seccion>
+
+      {/* ── Nosotros ─────────────────────────────────────────────────── */}
+      <section id="nosotros" aria-labelledby="nosotros-titulo" className="scroll-mt-20 bg-carbon-950 text-white">
+        <div className="mx-auto grid max-w-[1240px] items-stretch lg:grid-cols-2">
+          <div className="relative min-h-[300px] lg:min-h-[560px]">
+            <img src="/images/categorias/limpieza.webp" alt="Escobas de colores en exhibición" loading="lazy" decoding="async"
+              className="absolute inset-0 h-full w-full object-cover" />
+          </div>
+          <div className="px-5 py-16 sm:px-8 sm:py-20 lg:px-16 lg:py-24">
+            <p className="etiqueta flex items-center gap-3 text-brand-400"><span className="h-[2px] w-8 bg-current" aria-hidden="true" />Nosotros</p>
+            <h2 id="nosotros-titulo" className="titular mt-4 text-[2rem] font-extrabold sm:text-[2.6rem]">Un mostrador que conoce lo que se vende en tu negocio.</h2>
+            <div className="mt-6 space-y-4 text-[1.05rem] leading-7 text-slate-300">
+              <p>
+                Grupo RYSA comercializa plásticos, empaques, desechables y suministros. Reunimos en un mismo lugar lo que una fonda,
+                una tienda, una pastelería o un taller compran cada semana, para que no tengas que recorrer varios proveedores.
+              </p>
+              <p>
+                Atendemos tanto al cliente que necesita unas piezas como al negocio que surte por caja, con precio según su volumen
+                y factura electrónica.
+              </p>
+            </div>
+            <Link to="/productos" className="mt-9 inline-flex items-center gap-2 border-b-2 border-brand-500 pb-1.5 text-sm font-semibold text-white transition-colors hover:text-brand-400">
+              Conoce nuestras categorías <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Contacto ─────────────────────────────────────────────────── */}
+      <Seccion id="contacto" etiqueta="Contacto" titulo="Cuéntanos qué necesitas y te cotizamos." className="py-20 sm:py-28">
+        <div className="mt-10 grid gap-10 lg:grid-cols-[1.2fr_1fr] lg:gap-16">
+          <div>
+            <p className="max-w-xl text-[1.05rem] leading-7 text-slate-600">
+              Envíanos la lista de artículos y cantidades. Te respondemos con disponibilidad, precio según volumen y tiempos de entrega.
             </p>
-            <a href="#productos" className="mt-8 inline-flex items-center gap-2 border-b-2 border-red-700 pb-2 text-xs font-bold uppercase tracking-[0.12em] text-[#1d2025] transition-colors hover:text-red-700">
-              Conoce nuestras líneas <ChevronRight className="h-4 w-4" />
-            </a>
-          </div>
-          <div className="relative order-1 lg:order-2">
-            <div className="absolute -left-3 -top-3 h-24 w-24 border-l-2 border-t-2 border-red-700 sm:-left-5 sm:-top-5" />
-            <img src="https://images.unsplash.com/photo-1616429368325-d5d7542b0ec3?auto=format&fit=crop&w=1200&q=85" alt="Materiales para empaque" className="relative aspect-[4/3] w-full object-cover grayscale-[15%]" />
-            <div className="absolute bottom-0 left-0 bg-[#191b20] px-6 py-5 text-white sm:left-8 sm:bottom-8"><span className="block text-xs font-bold uppercase tracking-[0.16em] text-red-500">Grupo RYSA</span><span className="mt-1 block font-display text-xl font-extrabold">Soluciones para tu operación</span></div>
-          </div>
-        </section>
-
-        <section id="productos" className="bg-[#1a1c21] py-24 text-white lg:py-32">
-          <div className="mx-auto max-w-7xl px-5 sm:px-8">
-            <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
-              <div><p className="flex items-center gap-3 text-xs font-bold uppercase tracking-[0.2em] text-red-500"><span className="h-[2px] w-9 bg-red-600" /> Productos</p><h2 className="mt-5 font-display text-4xl font-black tracking-[-0.035em] sm:text-5xl">Líneas para cada negocio.</h2></div>
-              <p className="max-w-md text-sm leading-6 text-white/65">Explora una selección de las líneas que forman parte de nuestra oferta comercial.</p>
-            </div>
-            <div className="mt-12 grid gap-5 md:grid-cols-3">
-              {CATEGORIES.map((category) => {
-                const Icon = category.icon;
-                return <article key={category.name} className="group relative min-h-[390px] overflow-hidden border border-white/15 bg-[#25282f]">
-                  <img src={category.image} alt={category.name} className="absolute inset-0 h-full w-full object-cover opacity-65 transition duration-700 group-hover:scale-105 group-hover:opacity-80" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#101216] via-[#101216]/35 to-transparent" />
-                  <div className="absolute inset-x-0 bottom-0 p-7"><div className="mb-5 flex h-11 w-11 items-center justify-center border border-red-500 bg-[#17191d]/80"><Icon className="h-5 w-5 text-red-500" /></div><h3 className="font-display text-2xl font-extrabold">{category.name}</h3><p className="mt-3 text-sm leading-6 text-white/75">{category.description}</p></div>
-                </article>;
-              })}
-            </div>
-            <div className="mt-10 flex flex-wrap gap-2.5 border-t border-white/15 pt-8">
-              {PRODUCT_LINES.map((line) => <span key={line} className="inline-flex items-center gap-2 border border-white/20 px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-white/80"><Check className="h-3.5 w-3.5 text-red-500" />{line}</span>)}
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              {c.waUrl && (
+                <a href={cotizarUrl(c)} target="_blank" rel="noreferrer" className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-600 px-6 text-[0.95rem] font-semibold text-white transition-colors hover:bg-brand-700">
+                  <MessageCircle className="h-4 w-4" /> Cotizar por WhatsApp
+                </a>
+              )}
+              {c.correo && (
+                <a href={`mailto:${c.correo}?subject=${encodeURIComponent("Cotización — Grupo RYSA")}`}
+                  className={`inline-flex h-12 items-center justify-center gap-2 rounded-md px-6 text-[0.95rem] font-semibold transition-colors ${c.waUrl ? "border border-slate-300 text-carbon-900 hover:border-carbon-900" : "bg-brand-600 text-white hover:bg-brand-700"}`}>
+                  <Mail className="h-4 w-4" /> Escribir correo
+                </a>
+              )}
             </div>
           </div>
-        </section>
-
-        <section id="contacto" className="mx-auto max-w-7xl px-5 py-24 sm:px-8 lg:py-32">
-          <div className="grid overflow-hidden border border-black/10 lg:grid-cols-[1.15fr_.85fr]">
-            <div className="bg-white p-8 sm:p-12 lg:p-16"><p className="flex items-center gap-3 text-xs font-bold uppercase tracking-[0.2em] text-red-700"><span className="h-[2px] w-9 bg-red-700" /> Contacto</p><h2 className="mt-5 max-w-lg font-display text-4xl font-black leading-tight tracking-[-0.035em] sm:text-5xl">Hablemos de lo que tu negocio necesita.</h2><p className="mt-6 max-w-lg leading-7 text-[#626770]">Conoce nuestra oferta de productos y recibe atención para encontrar la solución más adecuada para tu operación.</p><div className="mt-10 flex flex-col gap-4 sm:flex-row"><a href="mailto:contacto@gruporysa.com"><Button className="h-12 rounded-none bg-red-700 px-6 text-xs font-bold uppercase tracking-[0.1em] hover:bg-red-800"><Mail className="mr-2 h-4 w-4" /> Escribirnos</Button></a><Link to="/login"><Button variant="outline" className="h-12 rounded-none border-[#1b1d22] px-6 text-xs font-bold uppercase tracking-[0.1em] hover:bg-[#1b1d22] hover:text-white">Acceso al ERP <ArrowRight className="ml-2 h-4 w-4" /></Button></Link></div></div>
-            <div className="bg-[#f4f4f2] p-8 sm:p-12 lg:p-16"><div className="inline-flex"><Brand /></div><div className="mt-12 space-y-6 text-sm text-[#3d4148]"><div className="flex gap-4"><Mail className="h-5 w-5 shrink-0 text-red-700" /><span>contacto@gruporysa.com</span></div><div className="flex gap-4"><MessageCircle className="h-5 w-5 shrink-0 text-red-700" /><span>Atención por WhatsApp disponible</span></div><div className="flex gap-4"><MapPin className="h-5 w-5 shrink-0 text-red-700" /><span>México</span></div></div><div className="mt-12 border-t border-black/10 pt-6 text-xs uppercase tracking-[0.12em] text-[#8a8f98]">Plásticos · Empaques · Desechables · Suministros</div></div>
-          </div>
-        </section>
-      </main>
-
-      <footer className="bg-[#ececea] py-10 text-[#3d4148]"><div className="mx-auto flex max-w-7xl flex-col gap-7 px-5 sm:px-8 md:flex-row md:items-center md:justify-between"><div className="flex items-center gap-4"><Brand compact /><span className="text-xs uppercase tracking-[0.14em]">Grupo RYSA</span></div><nav className="flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold uppercase tracking-[0.1em]">{NAVIGATION.map(([label, href]) => <a key={href} href={href} className="transition-colors hover:text-red-700">{label}</a>)}</nav><p className="text-xs">© {new Date().getFullYear()} Grupo RYSA. Todos los derechos reservados.</p></div></footer>
-    </div>
+          <dl className="divide-y divide-slate-200 rounded-lg border border-slate-200">
+            {c.correo && <div className="flex items-start gap-4 p-5"><Mail className="mt-0.5 h-5 w-5 text-brand-600" aria-hidden="true" /><div><dt className="text-xs text-slate-500">Correo</dt><dd className="mt-0.5 font-medium"><a href={c.mailUrl} className="hover:text-brand-600">{c.correo}</a></dd></div></div>}
+            {c.telefono && <div className="flex items-start gap-4 p-5"><Phone className="mt-0.5 h-5 w-5 text-brand-600" aria-hidden="true" /><div><dt className="text-xs text-slate-500">Teléfono</dt><dd className="mt-0.5 font-medium"><a href={c.telUrl} className="hover:text-brand-600">{c.telefono}</a></dd></div></div>}
+            {c.waUrl && <div className="flex items-start gap-4 p-5"><MessageCircle className="mt-0.5 h-5 w-5 text-brand-600" aria-hidden="true" /><div><dt className="text-xs text-slate-500">WhatsApp</dt><dd className="mt-0.5 font-medium"><a href={c.waUrl} target="_blank" rel="noreferrer" className="hover:text-brand-600">{c.whatsapp}</a></dd></div></div>}
+            {c.ubicacion && <div className="flex items-start gap-4 p-5"><MapPin className="mt-0.5 h-5 w-5 text-brand-600" aria-hidden="true" /><div><dt className="text-xs text-slate-500">Ubicación</dt><dd className="mt-0.5 font-medium">{c.ubicacion}</dd></div></div>}
+            {c.horario && <div className="p-5 text-sm text-slate-600">{c.horario}</div>}
+          </dl>
+        </div>
+      </Seccion>
+    </SitioLayout>
   );
 }
-

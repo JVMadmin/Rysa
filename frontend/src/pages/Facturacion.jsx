@@ -114,11 +114,11 @@ export default function Facturacion() {
                 <th className="p-3 text-right">Total</th><th className="p-3 text-center">Estado</th><th className="p-3">Fecha</th><th className="p-3"></th>
               </tr></thead>
               <tbody>
-                {loading && <tr><td colSpan={9} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+                {loading && <tr><td colSpan={9} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
                 {!loading && facturas.length === 0 && <tr><td colSpan={9} className="p-10 text-center text-slate-400"><FileText className="w-8 h-8 mx-auto mb-2" />Sin facturas emitidas.</td></tr>}
                 {!loading && facturas.map((f) => (
                   <tr key={f.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cfdi-row-${f.folio_venta}`}>
-                    <td className="p-3 font-medium text-[#C1401E]">{f.folio_venta}</td>
+                    <td className="p-3 font-medium text-brand-600">{f.folio_venta}</td>
                     <td className="p-3">{f.serie}{f.folio}</td>
                     <td className="p-3 text-xs text-slate-500 max-w-[180px] truncate" title={f.uuid}>{f.uuid || "—"}</td>
                     <td className="p-3 max-w-[180px] truncate">{f.cliente_nombre}</td>
@@ -149,16 +149,16 @@ export default function Facturacion() {
                 <th className="p-3">Folio</th><th className="p-3">Fecha</th><th className="p-3">Cliente</th><th className="p-3 text-right">Total</th><th className="p-3"></th>
               </tr></thead>
               <tbody>
-                {loading && <tr><td colSpan={5} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+                {loading && <tr><td colSpan={5} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
                 {!loading && facturables.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />No hay ventas pendientes de facturar.</td></tr>}
                 {!loading && facturables.map((s) => (
                   <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`facturable-${s.folio}`}>
-                    <td className="p-3 font-medium text-[#C1401E]">{s.folio}</td>
+                    <td className="p-3 font-medium text-brand-600">{s.folio}</td>
                     <td className="p-3 text-slate-500">{(s.fecha || "").slice(0, 10)}</td>
                     <td className="p-3">{s.cliente_nombre || "Público General"}</td>
                     <td className="p-3 text-right font-semibold">{money(s.total)}</td>
                     <td className="p-3 text-right">
-                      <Button size="sm" className="bg-[#C1401E] hover:bg-[#A03316]" disabled={busy === s.id} onClick={() => facturar(s)} data-testid={`facturar-${s.folio}`}>
+                      <Button size="sm" className="bg-brand-600 hover:bg-brand-700" disabled={busy === s.id} onClick={() => facturar(s)} data-testid={`facturar-${s.folio}`}>
                         {busy === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Stamp className="w-4 h-4 mr-1" /> Facturar</>}
                       </Button>
                     </td>
@@ -172,7 +172,7 @@ export default function Facturacion() {
         {/* Configuración PAC */}
         {puedeConfig && (
           <TabsContent value="config" className="pt-3">
-            {!cfg ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div> : (
+            {!cfg ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div> : (
               <div className="card-soft p-5 max-w-3xl space-y-4">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div><Label className="text-xs uppercase tracking-wider text-slate-500">PAC</Label>
@@ -209,7 +209,7 @@ export default function Facturacion() {
                   El certificado CSD (.cer/.key) se carga directamente en tu cuenta de Facty (una sola vez). Aquí solo se guarda la API Key de Facty (o define la variable FACTY_API_KEY en el servidor). No se muestra después de guardarla.
                 </div>
                 <div className="flex items-center gap-3">
-                  <Button onClick={guardarConfig} disabled={busy === "cfg"} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cfg-guardar">{busy === "cfg" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar configuración"}</Button>
+                  <Button onClick={guardarConfig} disabled={busy === "cfg"} className="bg-brand-600 hover:bg-brand-700" data-testid="cfg-guardar">{busy === "cfg" ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar configuración"}</Button>
                   {cfg.configurado ? <Badge className="bg-green-100 text-green-700"><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> PAC listo</Badge> : <Badge variant="outline" className="text-amber-600 border-amber-300">Faltan credenciales</Badge>}
                 </div>
               </div>

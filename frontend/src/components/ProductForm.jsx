@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { api, formatApiError, money } from "@/lib/api";
+import { api, formatApiError, money, esFotoGenerica } from "@/lib/api";
 import { toast } from "sonner";
 import { Loader2, Plus, X, Barcode, Boxes } from "lucide-react";
 import { ImageUpload } from "@/components/ImageUpload";
@@ -77,7 +77,7 @@ function toForm(p) {
     if (f[`utilpreci${i}`] === "" && pr[i - 1]) f[`utilpreci${i}`] = pr[i - 1].utilidad_pct;
   }
   if (f.preciomin === "" && p.precio_minimo) f.preciomin = p.precio_minimo;
-  if (!f.imagen) f.imagen = p.imagen_url || "";
+  if (!f.imagen) f.imagen = esFotoGenerica(p.imagen_url) ? "" : (p.imagen_url || "");
   f.codigos_barras = Array.isArray(p.codigos_barras) ? p.codigos_barras : (p.codigos_barras ? [String(p.codigos_barras)] : []);
   return f;
 }
@@ -233,7 +233,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
                 </div>
               ) : s.customBarras ? (
                 <div className="space-y-3 max-w-xl" data-testid="prod-barras-section">
-                  <div className="flex items-center gap-2 text-slate-700 font-semibold text-sm"><Barcode className="w-4 h-4 text-[#C1401E]" /> Códigos de barras del producto</div>
+                  <div className="flex items-center gap-2 text-slate-700 font-semibold text-sm"><Barcode className="w-4 h-4 text-brand-600" /> Códigos de barras del producto</div>
                   <p className="text-xs text-slate-400">Escanea con el lector o escribe el código y presiona Enter / Agregar. Puedes registrar varios códigos y sobreescribirlos.</p>
                   <div className="flex gap-2">
                     <Input
@@ -242,7 +242,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
                       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addBarcode(); } }}
                       placeholder="Escanea o escribe un código de barras"
                       data-testid="prod-barcode-input" />
-                    <Button type="button" onClick={() => addBarcode()} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="prod-barcode-add"><Plus className="w-4 h-4 mr-1" /> Agregar</Button>
+                    <Button type="button" onClick={() => addBarcode()} className="bg-brand-600 hover:bg-brand-700" data-testid="prod-barcode-add"><Plus className="w-4 h-4 mr-1" /> Agregar</Button>
                   </div>
                   <div className="flex flex-wrap gap-2" data-testid="prod-barcode-list">
                     {(f.codigos_barras || []).length === 0 && <span className="text-xs text-slate-400">Sin códigos de barras.</span>}
@@ -258,14 +258,14 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
                 <div className="space-y-4 max-w-2xl" data-testid="prod-pres-section">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-slate-800 font-semibold text-sm">
-                      <Boxes className="w-5 h-5 text-[#C1401E]" />
+                      <Boxes className="w-5 h-5 text-brand-600" />
                       <span>Presentaciones y Empaques (Cajas, Paquetes, Displays)</span>
                     </div>
                     {isEdit && (
                       <Button
                         type="button"
                         onClick={() => setPresModalOpen(true)}
-                        className="bg-[#C1401E] hover:bg-[#A03316] text-white text-xs h-8"
+                        className="bg-brand-600 hover:bg-brand-700 text-white text-xs h-8"
                         data-testid="prod-pres-open-btn"
                       >
                         <Plus className="w-3.5 h-3.5 mr-1" /> Administrar Cajas
@@ -337,7 +337,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
                           type="button"
                           variant="outline"
                           onClick={() => setPresModalOpen(true)}
-                          className="text-xs text-[#C1401E] border-[#C1401E]/30 hover:bg-orange-50"
+                          className="text-xs text-brand-600 border-brand-600/30 hover:bg-orange-50"
                         >
                           <Boxes className="w-3.5 h-3.5 mr-1" /> Configurar, agregar o editar presentaciones
                         </Button>
@@ -366,7 +366,7 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
         </Tabs>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button onClick={save} disabled={saving} data-testid="prod-save" className="bg-[#C1401E] hover:bg-[#A03316]">
+          <Button onClick={save} disabled={saving} data-testid="prod-save" className="bg-brand-600 hover:bg-brand-700">
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}
           </Button>
         </DialogFooter>

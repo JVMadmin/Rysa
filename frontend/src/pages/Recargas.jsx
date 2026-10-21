@@ -147,7 +147,7 @@ export default function Recargas() {
   const tabBtn = (id, label, Icono) => (
     <button onClick={() => setTab(id)} data-testid={`rs-tab-${id}`}
       className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${
-        tab === id ? "bg-[#C1401E] text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+        tab === id ? "bg-brand-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
       <Icono className="w-4 h-4" /> {label}
     </button>
   );
@@ -157,7 +157,7 @@ export default function Recargas() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2">
-            <Smartphone className="w-6 h-6 text-[#C1401E]" /> Recargas y Servicios
+            <Smartphone className="w-6 h-6 text-brand-600" /> Recargas y Servicios
           </h1>
           <p className="text-slate-500 text-sm">Recargas de celular (TAE) y pago de servicios (TODOCELL)</p>
         </div>
@@ -172,7 +172,7 @@ export default function Recargas() {
       {tab === "recargas" && (
         <>
           <div className="flex justify-end">
-            <Button onClick={() => openPortal(TAE_URL, "taePortal")} className="bg-[#8B3A1A] hover:bg-[#733015] h-10" data-testid="recargas-open-portal">
+            <Button onClick={() => openPortal(TAE_URL, "taePortal")} className="bg-brand-800 hover:bg-[#733015] h-10" data-testid="recargas-open-portal">
               <ExternalLink className="w-4 h-4 mr-2" /> Abrir portal TAE
             </Button>
           </div>
@@ -180,7 +180,7 @@ export default function Recargas() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Formulario de registro */}
             <div className="card-soft p-5 space-y-4" data-testid="recargas-form">
-              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#C1401E]" /> Confirmar / registrar recarga</div>
+              <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-brand-600" /> Confirmar / registrar recarga</div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs uppercase tracking-wider text-slate-500">Compañía</Label>
@@ -199,7 +199,7 @@ export default function Recargas() {
                 <div className="flex flex-wrap gap-2 mt-1">
                   {MONTOS.map((m) => (
                     <button key={m} type="button" onClick={() => set("monto", m)} data-testid={`recarga-monto-${m}`}
-                      className={`px-3 py-1.5 rounded-md border text-sm font-medium ${Number(f.monto) === m ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>${m}</button>
+                      className={`px-3 py-1.5 rounded-md border text-sm font-medium ${Number(f.monto) === m ? "border-brand-600 bg-brand-600/5 text-brand-600" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>${m}</button>
                   ))}
                 </div>
                 <Input type="number" value={f.monto} onChange={(e) => set("monto", e.target.value)} className="mt-2 max-w-[160px]" placeholder="Otro monto" data-testid="recarga-monto-input" />
@@ -221,7 +221,7 @@ export default function Recargas() {
                 <Label className="text-xs uppercase tracking-wider text-slate-500">Referencia TAE (folio del portal)</Label>
                 <Input value={f.referencia_tae} onChange={(e) => set("referencia_tae", e.target.value)} className="mt-1" placeholder="Folio/autorización que arroja TAE" data-testid="recarga-referencia" />
               </div>
-              <Button onClick={registrar} disabled={saving} className="w-full h-11 bg-[#C1401E] hover:bg-[#A03316] font-bold" data-testid="recarga-registrar">
+              <Button onClick={registrar} disabled={saving} className="w-full h-11 bg-brand-600 hover:bg-brand-700 font-bold" data-testid="recarga-registrar">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-2" /> Registrar recarga en Caja</>}
               </Button>
             </div>
@@ -229,14 +229,14 @@ export default function Recargas() {
             {/* Portal + historial */}
             <div className="space-y-5">
               <div className="card-soft p-5">
-                <div className="flex items-center gap-2 text-slate-700 font-semibold mb-2"><ExternalLink className="w-4 h-4 text-[#8B3A1A]" /> Portal del proveedor (TAE)</div>
+                <div className="flex items-center gap-2 text-slate-700 font-semibold mb-2"><ExternalLink className="w-4 h-4 text-brand-800" /> Portal del proveedor (TAE)</div>
                 <p className="text-sm text-slate-500 mb-3">El portal requiere inicio de sesión y no permite incrustarse por seguridad. Se abre en una ventana que puedes cerrar al terminar la recarga.</p>
                 <Button onClick={() => openPortal(TAE_URL, "taePortal")} variant="outline" className="w-full" data-testid="recargas-open-portal-2"><ExternalLink className="w-4 h-4 mr-2" /> Ir a recargastae.com</Button>
               </div>
 
               <div className="card-soft p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-[#C1401E]" /> Recargas de hoy</div>
+                  <div className="flex items-center gap-2 text-slate-700 font-semibold"><Receipt className="w-4 h-4 text-brand-600" /> Recargas de hoy</div>
                   <Badge variant="outline" data-testid="recargas-count">{history.length}</Badge>
                 </div>
                 <div className="max-h-72 overflow-y-auto divide-y divide-slate-100">
@@ -247,7 +247,7 @@ export default function Recargas() {
                         <div className="font-medium">{r.compania} · {r.telefono}</div>
                         <div className="text-xs text-slate-400">{r.folio} · {r.hora}</div>
                       </div>
-                      <span className="font-semibold text-[#C1401E]">{money(r.total)}</span>
+                      <span className="font-semibold text-brand-600">{money(r.total)}</span>
                     </div>
                   ))}
                 </div>
@@ -261,7 +261,7 @@ export default function Recargas() {
         <div className="space-y-5" data-testid="servicios-tab">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="card-soft p-6 space-y-3">
-              <div className="flex items-center gap-2 text-slate-800 font-bold"><Wrench className="w-5 h-5 text-[#C1401E]" /> Pago de servicios con TODOCELL</div>
+              <div className="flex items-center gap-2 text-slate-800 font-bold"><Wrench className="w-5 h-5 text-brand-600" /> Pago de servicios con TODOCELL</div>
               <p className="text-sm text-slate-500">
                 Luz, agua, internet, telefonía, televisión y más a través del portal de TODOCELL.
                 Realiza el cobro en el portal y registra el ingreso en Caja para que quede en Ventas.
@@ -271,19 +271,19 @@ export default function Recargas() {
                 <li>Telefonía fija y planes adicionales</li>
                 <li>Consultas de saldo y referencia</li>
               </ul>
-              <Button onClick={() => openPortal(TODOCELL_URL, "todocellPortal")} className="w-full h-11 bg-[#C1401E] hover:bg-[#A03316] font-bold" data-testid="servicios-open-todocell">
+              <Button onClick={() => openPortal(TODOCELL_URL, "todocellPortal")} className="w-full h-11 bg-brand-600 hover:bg-brand-700 font-bold" data-testid="servicios-open-todocell">
                 <ExternalLink className="w-4 h-4 mr-2" /> Abrir portal TODOCELL
               </Button>
             </div>
 
             <div className="card-soft p-5">
-              <div className="flex items-center gap-2 text-slate-700 font-semibold mb-2"><ExternalLink className="w-4 h-4 text-[#8B3A1A]" /> Accesos rápidos</div>
+              <div className="flex items-center gap-2 text-slate-700 font-semibold mb-2"><ExternalLink className="w-4 h-4 text-brand-800" /> Accesos rápidos</div>
               <div className="space-y-2">
                 <Button variant="outline" className="w-full justify-start" onClick={() => openPortal(TODOCELL_URL, "todocellPortal")}>
-                  <ExternalLink className="w-4 h-4 mr-2 text-[#C1401E]" /> todocell.mx — inicio de sesión
+                  <ExternalLink className="w-4 h-4 mr-2 text-brand-600" /> todocell.mx — inicio de sesión
                 </Button>
                 <Button variant="outline" className="w-full justify-start" onClick={() => openPortal(TAE_URL, "taePortal")}>
-                  <ExternalLink className="w-4 h-4 mr-2 text-[#8B3A1A]" /> recargastae.com — recargas
+                  <ExternalLink className="w-4 h-4 mr-2 text-brand-800" /> recargastae.com — recargas
                 </Button>
               </div>
               <p className="text-[11px] text-slate-400 mt-3">
@@ -337,7 +337,7 @@ export default function Recargas() {
           </div>
           <DialogFooter>
             <Button onClick={imprimirPos80} variant="outline" data-testid="recarga-print"><Printer className="w-4 h-4 mr-1" /> Imprimir POS80</Button>
-            <Button onClick={() => setTicket(null)} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="recarga-nueva">Nueva recarga</Button>
+            <Button onClick={() => setTicket(null)} className="bg-brand-600 hover:bg-brand-700" data-testid="recarga-nueva">Nueva recarga</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

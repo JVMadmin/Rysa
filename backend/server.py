@@ -6612,11 +6612,20 @@ async def get_settings(user: dict = Depends(get_current_user)):
 
 @api.get("/settings/branding")
 async def get_branding():
-    """Branding público (logo + nombre) para Login/Landing, con fallback."""
+    """Branding y contacto PÚBLICOS para Login/Landing (solo datos comerciales
+    que la empresa publica: nunca RFC, cuentas ni configuración interna).
+    Los campos vacíos se devuelven vacíos y el sitio los oculta."""
     s = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
     return {
         "empresa_nombre": s.get("empresa_nombre", "Grupo RYSA"),
         "logo_url": s.get("logo_url") or "",
+        "correo": s.get("correo") or "",
+        "telefono": s.get("telefono") or "",
+        "whatsapp": s.get("whatsapp_empresa") or "",
+        "direccion": s.get("direccion") or "",
+        "ciudad": s.get("ciudad") or "",
+        "estado": s.get("estado") or "",
+        "horario": s.get("horario_atencion") or "",
     }
 
 

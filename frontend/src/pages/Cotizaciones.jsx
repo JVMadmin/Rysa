@@ -78,7 +78,7 @@ function ComprobantesPago({ cot }) {
   return (
     <div className="rounded-lg border border-slate-200 p-3 space-y-3" data-testid="cot-comprobantes">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold flex items-center gap-1.5"><QrCode className="w-4 h-4 text-[#C1401E]" /> Comprobantes de pago</span>
+        <span className="font-semibold flex items-center gap-1.5"><QrCode className="w-4 h-4 text-brand-600" /> Comprobantes de pago</span>
         <div className="flex gap-1.5">
           <Button size="sm" variant="outline" onClick={copiar} data-testid="cot-link-copiar"><Copy className="w-3.5 h-3.5 mr-1" /> Copiar enlace</Button>
           <Button size="sm" variant="outline" onClick={regenerar} disabled={!!busy} data-testid="cot-link-regenerar">
@@ -186,7 +186,7 @@ export default function Cotizaciones() {
     <div className="space-y-5" data-testid="cotizaciones-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><Receipt className="w-6 h-6 text-[#C1401E]" /> Cotizaciones</h1>
+          <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><Receipt className="w-6 h-6 text-brand-600" /> Cotizaciones</h1>
           <p className="text-slate-500 text-sm">Cotizaciones creadas desde el punto de venta · conviértelas a venta</p>
         </div>
         <div className="flex gap-2">
@@ -214,7 +214,7 @@ export default function Cotizaciones() {
       </div>
 
       {err && <div className="card-soft p-6 text-center text-red-600"><p className="mb-3">{err}</p><Button variant="outline" onClick={load}>Reintentar</Button></div>}
-      {!err && loading && <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>}
+      {!err && loading && <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>}
 
       {!err && !loading && (
         <div className="card-soft overflow-x-auto">
@@ -229,7 +229,7 @@ export default function Cotizaciones() {
                 const [cls, label] = ESTADOS[c.estado] || ["bg-slate-100 text-slate-600", c.estado];
                 return (
                   <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cot-${c.folio}`}>
-                    <td className="p-2 font-medium text-[#C1401E]">{c.folio}</td>
+                    <td className="p-2 font-medium text-brand-600">{c.folio}</td>
                     <td className="p-2">{c.cliente_nombre || "—"}</td>
                     <td className="p-2 text-slate-500">{c.vendedor_nombre || "—"}</td>
                     <td className="p-2 text-slate-500">{(c.fecha || "").slice(0, 10)}</td>
@@ -238,7 +238,7 @@ export default function Cotizaciones() {
                     <td className="p-2 text-right whitespace-nowrap">
                       <Button size="sm" variant="ghost" onClick={() => setDet(c)}><Eye className="w-4 h-4" /></Button>
                       {c.estado === "cotizacion" && can("venta.crear") && (
-                        <Button size="sm" className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setConv(c); setConvForm({ condicion: "contado", metodo: "efectivo", monto: "", vendedor_id: "" }); }} data-testid={`convertir-${c.folio}`}>
+                        <Button size="sm" className="bg-brand-600 hover:bg-brand-700" onClick={() => { setConv(c); setConvForm({ condicion: "contado", metodo: "efectivo", monto: "", vendedor_id: "" }); }} data-testid={`convertir-${c.folio}`}>
                           <ArrowRightCircle className="w-3.5 h-3.5 mr-1" /> Vender
                         </Button>
                       )}
@@ -254,7 +254,7 @@ export default function Cotizaciones() {
       {/* Detalle */}
       <Dialog open={!!det} onOpenChange={(o) => !o && setDet(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><FileText className="w-5 h-5 text-[#C1401E]" /> Cotización {det?.folio}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><FileText className="w-5 h-5 text-brand-600" /> Cotización {det?.folio}</DialogTitle></DialogHeader>
           {det && (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3">
@@ -296,9 +296,9 @@ export default function Cotizaciones() {
       {/* Convertir a venta */}
       <Dialog open={!!conv} onOpenChange={(o) => !o && setConv(null)}>
         <DialogContent className="max-w-md" data-testid="convertir-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ArrowRightCircle className="w-5 h-5 text-[#C1401E]" /> Convertir {conv?.folio} a venta</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ArrowRightCircle className="w-5 h-5 text-brand-600" /> Convertir {conv?.folio} a venta</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="card-soft p-3 bg-amber-50"><div className="text-xs text-slate-500">Total de la cotización</div><div className="font-display text-xl font-black text-[#C1401E]">{money(conv?.total)}</div></div>
+            <div className="card-soft p-3 bg-amber-50"><div className="text-xs text-slate-500">Total de la cotización</div><div className="font-display text-xl font-black text-brand-600">{money(conv?.total)}</div></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Condición</Label>
               <Select value={convForm.condicion} onValueChange={(v) => setConvForm((s) => ({ ...s, condicion: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
@@ -323,7 +323,7 @@ export default function Cotizaciones() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setConv(null)}>Cancelar</Button>
-              <Button onClick={convertir} disabled={convSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirmar-convertir">
+              <Button onClick={convertir} disabled={convSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="confirmar-convertir">
                 {convSaving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <><ArrowRightCircle className="w-4 h-4 mr-1" /> Convertir a venta</>}
               </Button>
             </DialogFooter>

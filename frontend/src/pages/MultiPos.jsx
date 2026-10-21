@@ -41,7 +41,7 @@ export default function MultiPos() {
             <button
               onClick={() => setActive(w.id)}
               data-testid={`multipos-tab-${w.id}`}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg text-sm font-medium border border-b-0 transition-colors ${active === w.id ? "bg-[#C1401E] text-white border-[#C1401E]" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-t-lg text-sm font-medium border border-b-0 transition-colors ${active === w.id ? "bg-brand-600 text-white border-brand-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
             >
               <ShoppingCart className="w-4 h-4" />
               {w.label}

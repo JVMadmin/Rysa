@@ -67,7 +67,7 @@ export default function CuentasPorPagar() {
     finally { setExporting(""); }
   };
 
-  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>;
+  if (loading) return <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>;
 
   const saldo = data?.saldo_total || 0;
   const pendientes = data?.facturas_pendientes || 0;
@@ -252,7 +252,7 @@ export default function CuentasPorPagar() {
             </div>
             <div><Label className="text-xs uppercase text-slate-400">Referencia</Label><Input value={pagoForm.referencia} onChange={(e) => setPagoForm(s => ({...s, referencia: e.target.value}))} className="mt-1 h-9" /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setPagarOpen(null)}>Cancelar</Button><Button onClick={handlePagar} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirmar-pago">Pagar</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setPagarOpen(null)}>Cancelar</Button><Button onClick={handlePagar} className="bg-brand-600 hover:bg-brand-700" data-testid="confirmar-pago">Pagar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useLocation, Link } from "react-router-dom";
-import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { api, formatApiError, money, fotoProducto } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -280,7 +280,7 @@ export default function Productos() {
             {exporting === "pdf" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileText className="w-4 h-4 mr-1 text-red-700" />} Exportar PDF
           </Button>
           <Button variant="outline" onClick={openGlobal} data-testid="movimientos-btn"><ArrowDownUp className="w-4 h-4 mr-1" /> Movimientos</Button>
-          {can("producto.crear") && <Button onClick={() => { setEditing(null); setFormOpen(true); }} data-testid="nuevo-producto-btn" className="bg-[#C1401E] hover:bg-[#A03316]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
+          {can("producto.crear") && <Button onClick={() => { setEditing(null); setFormOpen(true); }} data-testid="nuevo-producto-btn" className="bg-brand-600 hover:bg-brand-700"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
         </div>
       </div>
@@ -369,7 +369,7 @@ export default function Productos() {
                 { key: "unidad_medida", label: "U.M." },
                 { key: "precio", label: "Precio", right: true }, { key: "utilidad", label: "Utilidad", right: true },
                 { key: "stock_minimo", label: "Min", right: true }].map((col) => (
-                <th key={col.key} onClick={() => !col.noSort && toggleSort(col.key)} className={`p-3 select-none ${col.noSort ? "" : "cursor-pointer hover:text-[#C1401E]"} ${col.right ? "text-right" : "text-left"}`}>
+                <th key={col.key} onClick={() => !col.noSort && toggleSort(col.key)} className={`p-3 select-none ${col.noSort ? "" : "cursor-pointer hover:text-brand-600"} ${col.right ? "text-right" : "text-left"}`}>
                   <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
                     {col.label}
                     {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : !col.noSort && <ArrowDownUp className="w-3 h-3 opacity-30" />}
@@ -381,14 +381,14 @@ export default function Productos() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={13} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {loading && <tr><td colSpan={13} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && sorted.length === 0 && <tr><td colSpan={13} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
             {!loading && sorted.map((p) => {
               const [color, label] = dot(p);
               return (
                 <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`prod-row-${p.codigo}`}>
                   <td className="p-3"><div className="flex items-center gap-2"><span className={`w-2.5 h-2.5 rounded-full ${color}`} title={label} /><Badge className={estadoBadge[p.estado]}>{p.estado}</Badge></div></td>
-                  <td className="p-3 font-medium text-[#C1401E]">{p.codigo}</td>
+                  <td className="p-3 font-medium text-brand-600">{p.codigo}</td>
                   <td className="p-3 max-w-xs truncate">{p.descripcion}</td>
                   <td className="p-3 text-slate-500">{p.linea}</td>
                   <td className="p-3 text-slate-500">{p.clasificacion || "—"}</td>
@@ -400,7 +400,7 @@ export default function Productos() {
                       {p.presentaciones && p.presentaciones.length > 1 && (
                         <Badge
                           variant="outline"
-                          className="text-[10px] cursor-pointer hover:bg-orange-50 text-[#C1401E] border-orange-200 font-normal px-1.5 py-0"
+                          className="text-[10px] cursor-pointer hover:bg-orange-50 text-brand-600 border-orange-200 font-normal px-1.5 py-0"
                           onClick={() => setPresProd(p)}
                           title="Ver y configurar presentaciones (cajas/empaques)"
                         >
@@ -415,8 +415,8 @@ export default function Productos() {
                   </td>
                   <td className="p-3 text-right text-slate-500">{p.stock_minimo}</td>
                   <td className="p-3">
-                    {p.imagen_url ? (
-                      <img src={fileUrl(p.imagen_url)} alt=""
+                    {fotoProducto(p.imagen_url) ? (
+                      <img src={fotoProducto(p.imagen_url)} alt=""
                         className="w-9 h-9 object-contain rounded border border-slate-100"
                         data-testid={`prod-img-${p.codigo}`} />
                     ) : (
@@ -433,7 +433,7 @@ export default function Productos() {
                         onClick={() => setPresProd(p)}
                         title="Presentaciones y Empaques (Cajas, Paquetes)"
                         data-testid={`pres-${p.codigo}`}
-                        className="text-slate-600 hover:text-[#C1401E] hover:bg-orange-50"
+                        className="text-slate-600 hover:text-brand-600 hover:bg-orange-50"
                       >
                         <Boxes className="w-4 h-4" />
                       </Button>
@@ -514,7 +514,7 @@ export default function Productos() {
                 </div>
               </div>
               <div className="flex justify-end">
-                <Button onClick={submitMov} disabled={savingMov} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="mov-guardar">
+                <Button onClick={submitMov} disabled={savingMov} className="bg-brand-600 hover:bg-brand-700" data-testid="mov-guardar">
                   {savingMov ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Plus className="w-4 h-4 mr-1" />} Registrar movimiento
                 </Button>
               </div>
@@ -584,11 +584,11 @@ export default function Productos() {
                 <th className="p-2 text-right">Entrada</th><th className="p-2 text-right">Salida</th><th className="p-2 text-right">Exist.</th>
               </tr></thead>
               <tbody>
-                {gLoading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+                {gLoading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
                 {!gLoading && gMovs.map((m) => (
                   <tr key={m.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`gmov-row-${m.id}`}>
                     <td className="p-2 text-slate-500 whitespace-nowrap">{fmtFecha(m.fecha)}</td>
-                    <td className="p-2 font-medium text-[#C1401E]">{m.codigo}</td>
+                    <td className="p-2 font-medium text-brand-600">{m.codigo}</td>
                     <td className="p-2 max-w-[200px] truncate" title={m.descripcion}>{m.descripcion}</td>
                     <td className="p-2"><Badge className={movBadge(m.tipo)}>{m.tipo}</Badge></td>
                     <td className="p-2">{m.documento}</td>
@@ -659,12 +659,12 @@ export default function Productos() {
                 </table>
               </div>
               {preview.preview.length > 300 && <p className="text-xs text-slate-400">Mostrando 300 de {preview.total} filas.</p>}
-              {progress && <p className="text-sm text-[#C1401E] font-medium" data-testid="import-progress">Importando... {progress.done} / {progress.total}</p>}
+              {progress && <p className="text-sm text-brand-600 font-medium" data-testid="import-progress">Importando... {progress.done} / {progress.total}</p>}
             </>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportOpen(false)} disabled={!!progress}>Cancelar</Button>
-            <Button onClick={confirmImport} disabled={!!progress} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirm-import">
+            <Button onClick={confirmImport} disabled={!!progress} className="bg-brand-600 hover:bg-brand-700" data-testid="confirm-import">
               {progress ? "Importando..." : "Confirmar importación"}
             </Button>
           </DialogFooter>

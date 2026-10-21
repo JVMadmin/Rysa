@@ -16,7 +16,7 @@ import {
   Loader2, Lock, RefreshCw, RotateCcw, ShieldAlert, Sparkles, Upload, Users,
 } from "lucide-react";
 
-const TERRACOTA = "#C1401E";
+const TERRACOTA = "#CF090B";
 const nf = new Intl.NumberFormat("es-MX");
 const money = (v) => "$" + new Intl.NumberFormat("es-MX", { minimumFractionDigits: 2 }).format(v || 0);
 
@@ -448,7 +448,7 @@ export default function LegacyMigration() {
             <Button variant="outline" onClick={sincronizarMaestros} disabled={dataBusy || syncBusy}
                     title="Importa o actualiza clientes y productos desde CLIENTES.dbf y ARTICULO.dbf"
                     data-testid="legacy-sync-masters">
-              {syncBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Users className="w-4 h-4 mr-1 text-[#C1401E]" />}
+              {syncBusy ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Users className="w-4 h-4 mr-1 text-brand-600" />}
               Sincronizar Catálogo Maestro
             </Button>
             <Button variant="outline" onClick={cargarDatos} disabled={dataBusy || syncBusy}
@@ -525,7 +525,7 @@ export default function LegacyMigration() {
               <tbody>
                 {(review?.documentos || []).map((d) => (
                   <tr key={d.legacy_key} className="border-t border-slate-100">
-                    <td className="p-2 font-medium text-[#C1401E]">{d.serie}-{d.folio?.replace(/^0+/, "") || d.folio}</td>
+                    <td className="p-2 font-medium text-brand-600">{d.serie}-{d.folio?.replace(/^0+/, "") || d.folio}</td>
                     <td className="p-2">{d.cliente}</td>
                     <td className="p-2">{d.condicion || "—"}</td>
                     <td className="p-2 text-right">{money(d.saldo)}</td>

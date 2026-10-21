@@ -27,17 +27,17 @@ export default function ReporteRapido() {
   return (
     <>
       <Button size="sm" variant="outline" onClick={abrir} data-testid="reporte-rapido-btn">
-        <Zap className="w-4 h-4 mr-1 text-[#C1401E]" /> Reporte rápido
+        <Zap className="w-4 h-4 mr-1 text-brand-600" /> Reporte rápido
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg" data-testid="reporte-rapido-dialog">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              <Zap className="w-5 h-5 text-[#C1401E]" /> Mi reporte del día
+              <Zap className="w-5 h-5 text-brand-600" /> Mi reporte del día
             </DialogTitle>
           </DialogHeader>
           {loading ? (
-            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>
+            <div className="flex justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-brand-600" /></div>
           ) : rep ? (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3">
@@ -45,9 +45,9 @@ export default function ReporteRapido() {
                   <div className="text-[10px] uppercase tracking-wider text-slate-400">Ventas de hoy</div>
                   <div className="font-display font-black text-2xl">{rep.num_ventas}</div>
                 </div>
-                <div className="rounded-lg bg-[#C1401E]/5 border border-[#C1401E]/20 p-3">
+                <div className="rounded-lg bg-brand-600/5 border border-brand-600/20 p-3">
                   <div className="text-[10px] uppercase tracking-wider text-slate-400">Total vendido</div>
-                  <div className="font-display font-black text-2xl text-[#C1401E]">{money(rep.total)}</div>
+                  <div className="font-display font-black text-2xl text-brand-600">{money(rep.total)}</div>
                 </div>
               </div>
 

@@ -33,11 +33,11 @@ const ResumenReportes = ({ f }) => {
     if (f.proveedor && f.proveedor !== "__all") params.proveedor = f.proveedor;
     api.get("/compras/reportes", { params }).then((r) => setRep(r.data)).catch(() => setRep(null)).finally(() => setRepLoading(false));
   }, [f.desde, f.hasta, f.tipo, f.proveedor]);
-  if (repLoading) return <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div>;
+  if (repLoading) return <div className="flex justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-brand-600" /></div>;
   if (!rep) return <div className="card-soft p-10 text-center text-slate-400">No se pudo cargar el reporte.</div>;
   return (
     <div className="space-y-4">
-      <div className="text-sm text-slate-500 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-[#C1401E]" /> Reporte de compras y gastos · {rep.registros} registros · {rep.desde || "inicio"} a {rep.hasta || "hoy"}</div>
+      <div className="text-sm text-slate-500 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-brand-600" /> Reporte de compras y gastos · {rep.registros} registros · {rep.desde || "inicio"} a {rep.hasta || "hoy"}</div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="card-soft p-4"><div className="text-xs uppercase tracking-wider text-slate-400">Compras del periodo</div><div className="font-display font-black text-xl text-blue-700 mt-1">{money(rep.compras_periodo)}</div></div>
         <div className="card-soft p-4"><div className="text-xs uppercase tracking-wider text-slate-400">Gastos del periodo</div><div className="font-display font-black text-xl text-amber-700 mt-1">{money(rep.gastos_periodo)}</div></div>
@@ -571,7 +571,7 @@ export default function Compras() {
           ["recurrentes", "Recurrentes", Repeat], ["presupuestos", "Presupuestos", PieChart],
           ["reportes", "Reportes", BarChart3]].map(([k, l, Ic]) => (
           <button key={k} onClick={() => setTab(k)}
-            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${tab === k ? "bg-[#C1401E] text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700"}`}
+            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${tab === k ? "bg-brand-600 text-white shadow-sm" : "bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700"}`}
             data-testid={`compras-tab-${k}`}>
             <Ic className="w-4 h-4" /> {l}
           </button>
@@ -641,7 +641,7 @@ export default function Compras() {
         </div>
         <Button variant="outline" onClick={buscar} className="h-9"><Search className="w-4 h-4" /></Button>
         <Button variant="ghost" onClick={limpiar} className="h-9 text-xs"><span className="underline">Limpiar filtros</span></Button>
-        <Button className="h-9 bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { const t = tab === "gastos" ? "gasto" : "compra"; setForm({ ...blank(), tipo: t }); setItemSearch(""); setFacturaFile(null); setOcrInfo(null); setOcrError(""); setOcrProveedor(null); setOpen(true); }} data-testid="nueva-compra">
+        <Button className="h-9 bg-brand-600 hover:bg-brand-700" onClick={() => { const t = tab === "gastos" ? "gasto" : "compra"; setForm({ ...blank(), tipo: t }); setItemSearch(""); setFacturaFile(null); setOcrInfo(null); setOcrError(""); setOcrProveedor(null); setOpen(true); }} data-testid="nueva-compra">
           <Plus className="w-4 h-4 mr-1" /> {tab === "gastos" ? "Nuevo gasto" : "Nueva compra / gasto"}
         </Button>
       </div>
@@ -655,7 +655,7 @@ export default function Compras() {
             <th className="p-3">Estado</th><th className="p-3">Método</th><th className="p-3">Usuario</th><th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={14} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {loading && <tr><td colSpan={14} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && error && <tr><td colSpan={14} className="p-10 text-center"><div className="inline-flex items-center gap-2 text-red-600"><CheckCircle2 className="w-8 h-8 text-red-500" /><div className="text-left"><b>Cargando compras…</b><div className="text-sm text-red-500">No se pudo conectar con el módulo de Compras. Verifica que el servidor esté activo y desplegado con el módulo de Compras (endpoint /compras).</div></div></div></td></tr>}
             {!loading && !error && docs.length === 0 && <tr><td colSpan={14} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin movimientos.</td></tr>}
             {!loading && docs.map((c) => {
@@ -666,7 +666,7 @@ export default function Compras() {
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`compra-row-${c.folio}`}>
                   <td className="p-3 text-slate-500">{(c.fecha_recepcion || "").slice(0, 10)}</td>
                   <td className="p-3"><Badge className={`${tc}`}>{tl}</Badge></td>
-                  <td className="p-3 font-medium text-[#C1401E]">{c.folio}</td>
+                  <td className="p-3 font-medium text-brand-600">{c.folio}</td>
                   <td className="p-3 text-slate-500">{c.factura_numero || "—"}{c.documentos?.length ? ` (${c.documentos.length})` : ""}</td>
                   <td className="p-3">{c.proveedor_nombre || "—"}</td>
                   <td className="p-3 text-slate-600 max-w-[180px] truncate" title={c.concepto}>{c.concepto || "—"}</td>
@@ -698,14 +698,14 @@ export default function Compras() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm text-slate-500">
-              <ClipboardList className="w-4 h-4 text-[#C1401E]" /> Órdenes de compra · estados: borrador → enviada → recibida
+              <ClipboardList className="w-4 h-4 text-brand-600" /> Órdenes de compra · estados: borrador → enviada → recibida
             </div>
-            <Button className="h-9 bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setOrdForm(ordBlank()); setOrdItemSearch(""); setOrdOpen(true); }} data-testid="nueva-orden">
+            <Button className="h-9 bg-brand-600 hover:bg-brand-700" onClick={() => { setOrdForm(ordBlank()); setOrdItemSearch(""); setOrdOpen(true); }} data-testid="nueva-orden">
               <Plus className="w-4 h-4 mr-1" /> Nueva orden
             </Button>
           </div>
           <div className="card-soft overflow-x-auto">
-            {ordLoading ? <div className="flex justify-center py-14"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div> : (
+            {ordLoading ? <div className="flex justify-center py-14"><Loader2 className="w-6 h-6 animate-spin text-brand-600" /></div> : (
             <table className="w-full text-sm">
               <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
                 <th className="p-3">Folio</th><th className="p-3">Proveedor</th><th className="p-3">Fecha</th>
@@ -718,14 +718,14 @@ export default function Compras() {
                   const sol = o.items?.reduce((a, i) => a + Number(i.solicitado || 0), 0) || 0;
                   return (
                     <tr key={o.id} className="border-t border-slate-100 hover:bg-slate-50">
-                      <td className="p-3 font-medium text-[#C1401E]">{o.folio}</td>
+                      <td className="p-3 font-medium text-brand-600">{o.folio}</td>
                       <td className="p-3">{o.proveedor_nombre || "—"}</td>
                       <td className="p-3 text-slate-500">{(o.fecha_orden || "").slice(0, 10)}</td>
                       <td className="p-3"><Badge className={{ borrador: "bg-slate-100 text-slate-600", enviada: "bg-blue-100 text-blue-700", parcialmente_recibida: "bg-amber-100 text-amber-700", recibida: "bg-green-100 text-green-700", cancelada: "bg-red-100 text-red-700" }[o.estado] || "bg-slate-100 text-slate-600"}>{o.estado?.replace("_", " ")}</Badge></td>
                       <td className="p-3 text-right font-semibold">{money(o.total)}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-24 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-[#C1401E]" style={{ width: `${sol ? (rec / sol) * 100 : 0}%` }} /></div>
+                          <div className="h-1.5 w-24 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-brand-600" style={{ width: `${sol ? (rec / sol) * 100 : 0}%` }} /></div>
                           <span className="text-[10px] text-slate-400">{Math.round(sol ? (rec / sol) * 100 : 0)}%</span>
                         </div>
                       </td>
@@ -749,9 +749,9 @@ export default function Compras() {
       {/* ==================== RECEPCIONES ==================== */}
       {tab === "recepciones" && (
         <div className="space-y-4">
-          <div className="text-sm text-slate-500 flex items-center gap-2"><PackageCheck className="w-4 h-4 text-[#C1401E]" /> Recepciones de mercancía · solo la cantidad recibida afecta inventario</div>
+          <div className="text-sm text-slate-500 flex items-center gap-2"><PackageCheck className="w-4 h-4 text-brand-600" /> Recepciones de mercancía · solo la cantidad recibida afecta inventario</div>
           <div className="card-soft overflow-x-auto">
-            {rcpLoading ? <div className="flex justify-center py-14"><Loader2 className="w-6 h-6 animate-spin text-[#C1401E]" /></div> : (
+            {rcpLoading ? <div className="flex justify-center py-14"><Loader2 className="w-6 h-6 animate-spin text-brand-600" /></div> : (
             <table className="w-full text-sm">
               <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
                 <th className="p-3">Folio</th><th className="p-3">Orden</th><th className="p-3">Proveedor</th><th className="p-3">Fecha</th><th className="p-3">Factura</th><th className="p-3 text-right">Total</th><th className="p-3 text-right">Conceptos</th>
@@ -760,7 +760,7 @@ export default function Compras() {
                 {recepciones.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-slate-400">Sin recepciones registradas.</td></tr>}
                 {recepciones.map((rc) => (
                   <tr key={rc.id} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="p-3 font-medium text-[#C1401E]">{rc.folio}</td>
+                    <td className="p-3 font-medium text-brand-600">{rc.folio}</td>
                     <td className="p-3">{rc.orden_folio || "—"}</td>
                     <td className="p-3">{rc.proveedor_nombre || "—"}</td>
                     <td className="p-3 text-slate-500">{(rc.fecha || "").slice(0, 10)}</td>
@@ -780,8 +780,8 @@ export default function Compras() {
       {tab === "recurrentes" && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm text-slate-500 flex items-center gap-2"><Repeat className="w-4 h-4 text-[#C1401E]" /> Compras y gastos recurrentes</div>
-            <Button className="h-9 bg-[#C1401E] hover:bg-[#A03316]" onClick={() => setRecOpen(true)} data-testid="nuevo-recurrente"><Plus className="w-4 h-4 mr-1" /> Nuevo recurrente</Button>
+            <div className="text-sm text-slate-500 flex items-center gap-2"><Repeat className="w-4 h-4 text-brand-600" /> Compras y gastos recurrentes</div>
+            <Button className="h-9 bg-brand-600 hover:bg-brand-700" onClick={() => setRecOpen(true)} data-testid="nuevo-recurrente"><Plus className="w-4 h-4 mr-1" /> Nuevo recurrente</Button>
           </div>
           <div className="card-soft overflow-x-auto">
             <table className="w-full text-sm">
@@ -811,8 +811,8 @@ export default function Compras() {
       {tab === "presupuestos" && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-sm text-slate-500 flex items-center gap-2"><PieChart className="w-4 h-4 text-[#C1401E]" /> Presupuestos por categoría y periodo</div>
-            <Button className="h-9 bg-[#C1401E] hover:bg-[#A03316]" onClick={() => setPresOpen(true)} data-testid="nuevo-presupuesto"><Plus className="w-4 h-4 mr-1" /> Nuevo presupuesto</Button>
+            <div className="text-sm text-slate-500 flex items-center gap-2"><PieChart className="w-4 h-4 text-brand-600" /> Presupuestos por categoría y periodo</div>
+            <Button className="h-9 bg-brand-600 hover:bg-brand-700" onClick={() => setPresOpen(true)} data-testid="nuevo-presupuesto"><Plus className="w-4 h-4 mr-1" /> Nuevo presupuesto</Button>
           </div>
           <div className="card-soft overflow-x-auto">
             <table className="w-full text-sm">
@@ -905,7 +905,7 @@ export default function Compras() {
       {/* Alta de compra / gasto */}
       <Dialog open={open} onOpenChange={(o) => { if (!o) setOpen(false); }}>
         <DialogContent className="max-w-5xl max-h-[94vh] overflow-y-auto" data-testid="nueva-compra-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Plus className="w-5 h-5 text-[#C1401E]" /> Nueva compra / gasto</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Plus className="w-5 h-5 text-brand-600" /> Nueva compra / gasto</DialogTitle></DialogHeader>
 
           {/* Factura / OCR */}
           <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
@@ -914,7 +914,7 @@ export default function Compras() {
               <Button type="button" size="sm" variant="outline" onClick={adjuntarFactura} disabled={!facturaFile || docBusy} className="h-9" data-testid="adjuntar-factura" title="Sube el documento de la factura como evidencia">
                 {docBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4 mr-1" />} Adjuntar
               </Button>
-              <Button type="button" size="sm" className="h-9 bg-[#C1401E] hover:bg-[#A03316]" onClick={leerFactura} disabled={!facturaFile || ocrBusy} data-testid="leer-factura" title="Lee la factura con OCR y precarga los datos">
+              <Button type="button" size="sm" className="h-9 bg-brand-600 hover:bg-brand-700" onClick={leerFactura} disabled={!facturaFile || ocrBusy} data-testid="leer-factura" title="Lee la factura con OCR y precarga los datos">
                 {ocrBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanLine className="w-4 h-4 mr-1" />} Leer con OCR
               </Button>
             </div>
@@ -951,7 +951,7 @@ export default function Compras() {
                   <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
                     <span className="text-slate-500">El proveedor no existe en el catálogo:</span>
                     <Badge className="bg-slate-100 text-slate-700">{ocrProveedor.nombre}{ocrProveedor.rfc ? ` · ${ocrProveedor.rfc}` : ""}</Badge>
-                    <Button type="button" size="sm" variant="outline" onClick={crearProveedorOcr} disabled={provSaving} className="h-7 text-xs text-[#C1401E]">
+                    <Button type="button" size="sm" variant="outline" onClick={crearProveedorOcr} disabled={provSaving} className="h-7 text-xs text-brand-600">
                       {provSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <><UserPlus className="w-3 h-3 mr-1" /> Crear proveedor</>}
                     </Button>
                   </div>
@@ -962,7 +962,7 @@ export default function Compras() {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="col-span-2 md:col-span-2">
-              <Label className="text-xs uppercase tracking-wider text-slate-500 flex items-center justify-between">Proveedor <button type="button" onClick={() => setProvOpen(true)} className="inline-flex items-center gap-1 text-[#C1401E] text-[11px] font-semibold uppercase hover:underline"><UserPlus className="w-3.5 h-3.5" /> Nuevo</button></Label>
+              <Label className="text-xs uppercase tracking-wider text-slate-500 flex items-center justify-between">Proveedor <button type="button" onClick={() => setProvOpen(true)} className="inline-flex items-center gap-1 text-brand-600 text-[11px] font-semibold uppercase hover:underline"><UserPlus className="w-3.5 h-3.5" /> Nuevo</button></Label>
               <Select value={form.proveedor_id} onValueChange={(v) => setForm((s) => ({ ...s, proveedor_id: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Selecciona proveedor" /></SelectTrigger>
                 <SelectContent>
@@ -1024,18 +1024,18 @@ export default function Compras() {
             <Label className="text-xs uppercase tracking-wider text-slate-500 mb-1">Agregar producto ✓ Afecta inventario / ☐ Gasto</Label>
             <div className="flex gap-2 items-center">
               <Input value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} placeholder="Buscar producto por código, SKU, nombre, categoría, línea, código de barras..." className="h-9 flex-1" />
-              <Button type="button" size="sm" variant="outline" onClick={() => { setProdForm(prodBlank()); setProdOpen(true); }} className="h-9 text-[#C1401E] whitespace-nowrap" title="Crear producto nuevo que no existe en el catálogo"><PackagePlus className="w-4 h-4 mr-1" /> Nuevo producto</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => { setProdForm(prodBlank()); setProdOpen(true); }} className="h-9 text-brand-600 whitespace-nowrap" title="Crear producto nuevo que no existe en el catálogo"><PackagePlus className="w-4 h-4 mr-1" /> Nuevo producto</Button>
             </div>
             {itemSearch && (
               <div className="border rounded-md mt-1 max-h-40 overflow-y-auto divide-y">
                 {itemsFiltrados.length === 0 && <div className="p-2 text-xs text-slate-400">Sin resultados</div>}
                 {itemsFiltrados.map((p) => (
                   <button key={p.id} type="button" onClick={() => addItem(p)} className="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2 text-xs">
-                    <b className="text-[#C1401E]">{p.codigo}</b>
+                    <b className="text-brand-600">{p.codigo}</b>
                     <span className="flex-1 truncate">{p.descripcion}</span>
                     <span className="text-slate-400">Exist: {p.existencia || 0}</span>
                     <span className="text-slate-400">Costo: {money(p.costo || 0)}</span>
-                    <Plus className="w-3.5 h-3.5 text-[#C1401E]" />
+                    <Plus className="w-3.5 h-3.5 text-brand-600" />
                   </button>
                 ))}
               </div>
@@ -1078,7 +1078,7 @@ export default function Compras() {
           <div className="grid grid-cols-3 gap-3 mt-3">
             <div><Label className="text-xs text-slate-400">Subtotal</Label><Input value={form.subtotal} readOnly className="mt-1 text-right font-semibold" /></div>
             <div><Label className="text-xs text-slate-400">IVA</Label><Input value={form.iva} readOnly className="mt-1 text-right" /></div>
-            <div><Label className="text-xs text-slate-400">Total</Label><Input value={form.total} readOnly className="mt-1 text-right font-bold text-[#C1401E]" /></div>
+            <div><Label className="text-xs text-slate-400">Total</Label><Input value={form.total} readOnly className="mt-1 text-right font-bold text-brand-600" /></div>
           </div>
           <div>
             <Label className="text-xs uppercase tracking-wider text-slate-500">Observaciones</Label>
@@ -1086,7 +1086,7 @@ export default function Compras() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={guardar} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="guardar-compra">
+            <Button onClick={guardar} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="guardar-compra">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" /> Confirmar y registrar</>}
             </Button>
           </DialogFooter>
@@ -1096,7 +1096,7 @@ export default function Compras() {
       {/* Proveedor nuevo */}
       <Dialog open={provOpen} onOpenChange={(o) => !o && setProvOpen(false)}>
         <DialogContent className="max-w-md" data-testid="nuevo-proveedor-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><UserPlus className="w-5 h-5 text-[#C1401E]" /> Nuevo proveedor</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><UserPlus className="w-5 h-5 text-brand-600" /> Nuevo proveedor</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <Label className="text-xs uppercase tracking-wider text-slate-500">Nombre *</Label>
@@ -1109,7 +1109,7 @@ export default function Compras() {
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Email</Label><Input value={provForm.email} onChange={(e) => setProvForm((s) => ({ ...s, email: e.target.value }))} className="mt-1" placeholder="Email" /></div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setProvOpen(false)}>Cancelar</Button>
-              <Button onClick={guardarProveedor} disabled={provSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="guardar-proveedor">
+              <Button onClick={guardarProveedor} disabled={provSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="guardar-proveedor">
                 {provSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" /> Crear y seleccionar</>}
               </Button>
             </DialogFooter>
@@ -1120,7 +1120,7 @@ export default function Compras() {
       {/* Producto nuevo */}
       <Dialog open={prodOpen} onOpenChange={(o) => !o && setProdOpen(false)}>
         <DialogContent className="max-w-md" data-testid="nuevo-producto-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><PackagePlus className="w-5 h-5 text-[#C1401E]" /> Nuevo producto</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><PackagePlus className="w-5 h-5 text-brand-600" /> Nuevo producto</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <Label className="text-xs uppercase tracking-wider text-slate-500">Descripción *</Label>
@@ -1204,7 +1204,7 @@ export default function Compras() {
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Existencia inicial</Label><Input type="number" value={prodForm.existencia} onChange={(e) => setProdForm((s) => ({ ...s, existencia: e.target.value }))} className="mt-1" /></div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setProdOpen(false)}>Cancelar</Button>
-              <Button onClick={guardarProducto} disabled={prodSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="guardar-producto">
+              <Button onClick={guardarProducto} disabled={prodSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="guardar-producto">
                 {prodSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" /> Crear y agregar</>}
               </Button>
             </DialogFooter>
@@ -1215,7 +1215,7 @@ export default function Compras() {
       {/* Nueva orden de compra */}
       <Dialog open={ordOpen} onOpenChange={(o) => !o && setOrdOpen(false)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="nueva-orden-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ClipboardList className="w-5 h-5 text-[#C1401E]" /> Nueva orden de compra</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ClipboardList className="w-5 h-5 text-brand-600" /> Nueva orden de compra</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div className="col-span-2">
@@ -1237,8 +1237,8 @@ export default function Compras() {
                   {ordItemsFiltrados.length === 0 && <div className="p-2 text-xs text-slate-400">Sin resultados</div>}
                   {ordItemsFiltrados.map((p) => (
                     <button key={p.id} type="button" onClick={() => addOrdItem(p)} className="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2 text-xs">
-                      <b className="text-[#C1401E]">{p.codigo}</b><span className="flex-1 truncate">{p.descripcion}</span>
-                      <span className="text-slate-400">Costo: {money(p.costo || 0)}</span><Plus className="w-3.5 h-3.5 text-[#C1401E]" />
+                      <b className="text-brand-600">{p.codigo}</b><span className="flex-1 truncate">{p.descripcion}</span>
+                      <span className="text-slate-400">Costo: {money(p.costo || 0)}</span><Plus className="w-3.5 h-3.5 text-brand-600" />
                     </button>
                   ))}
                 </div>
@@ -1264,7 +1264,7 @@ export default function Compras() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setOrdOpen(false)}>Cancelar</Button>
-              <Button onClick={guardarOrden} disabled={ordSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="guardar-orden">
+              <Button onClick={guardarOrden} disabled={ordSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="guardar-orden">
                 {ordSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" /> Crear orden</>}
               </Button>
             </DialogFooter>
@@ -1275,7 +1275,7 @@ export default function Compras() {
       {/* Recepción de mercancía */}
       <Dialog open={rcpOpen} onOpenChange={(o) => !o && setRcpOpen(false)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="recepcion-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><PackageCheck className="w-5 h-5 text-[#C1401E]" /> Recepción · {rcpOrden?.folio}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><PackageCheck className="w-5 h-5 text-brand-600" /> Recepción · {rcpOrden?.folio}</DialogTitle></DialogHeader>
           {rcpOrden && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3 text-sm">
@@ -1313,7 +1313,7 @@ export default function Compras() {
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setRcpOpen(false)}>Cancelar</Button>
-                <Button onClick={confirmarRecepcion} disabled={rcpSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirmar-recepcion">
+                <Button onClick={confirmarRecepcion} disabled={rcpSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="confirmar-recepcion">
                   {rcpSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" /> Confirmar recepción</>}
                 </Button>
               </DialogFooter>
@@ -1325,7 +1325,7 @@ export default function Compras() {
       {/* Operación recurrente */}
       <Dialog open={recOpen} onOpenChange={(o) => !o && setRecOpen(false)}>
         <DialogContent className="max-w-lg" data-testid="nuevo-recurrente-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Repeat className="w-5 h-5 text-[#C1401E]" /> Operación recurrente</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Repeat className="w-5 h-5 text-brand-600" /> Operación recurrente</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div><Label className="text-xs uppercase tracking-wider text-slate-500">Tipo</Label>
@@ -1368,7 +1368,7 @@ export default function Compras() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setRecOpen(false)}>Cancelar</Button>
-              <Button onClick={guardarRecurrente} disabled={recSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="guardar-recurrente">
+              <Button onClick={guardarRecurrente} disabled={recSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="guardar-recurrente">
                 {recSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" /> Guardar</>}
               </Button>
             </DialogFooter>
@@ -1379,7 +1379,7 @@ export default function Compras() {
       {/* Presupuesto */}
       <Dialog open={presOpen} onOpenChange={(o) => !o && setPresOpen(false)}>
         <DialogContent className="max-w-md" data-testid="nuevo-presupuesto-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><PieChart className="w-5 h-5 text-[#C1401E]" /> Nuevo presupuesto</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><PieChart className="w-5 h-5 text-brand-600" /> Nuevo presupuesto</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Categoría *</Label>
               <Select value={presForm.categoria} onValueChange={(v) => setPresForm((s) => ({ ...s, categoria: v }))}>
@@ -1394,7 +1394,7 @@ export default function Compras() {
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Notas</Label><Input value={presForm.notas} onChange={(e) => setPresForm((s) => ({ ...s, notas: e.target.value }))} className="mt-1" /></div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setPresOpen(false)}>Cancelar</Button>
-              <Button onClick={guardarPresupuesto} disabled={presSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="guardar-presupuesto">
+              <Button onClick={guardarPresupuesto} disabled={presSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="guardar-presupuesto">
                 {presSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <><CheckCircle2 className="w-4 h-4 mr-1" /> Guardar</>}
               </Button>
             </DialogFooter>

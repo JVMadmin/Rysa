@@ -335,7 +335,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
           <Button variant="outline" onClick={() => runExport("pdf")} disabled={!!exporting} data-testid="cli-export-pdf">
             {exporting === "pdf" ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileText className="w-4 h-4 mr-1 text-red-700" />} Exportar PDF
           </Button>
-          {can("cliente.crear") && <Button onClick={openNew} data-testid="nuevo-cliente-btn" className="bg-[#C1401E] hover:bg-[#A03316]"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
+          {can("cliente.crear") && <Button onClick={openNew} data-testid="nuevo-cliente-btn" className="bg-brand-600 hover:bg-brand-700"><Plus className="w-4 h-4 mr-1" /> Nuevo</Button>}
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={onFile} />
         </div>
       </div>
@@ -352,7 +352,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
             <SelectContent>{FILTROS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
           </Select>
           <Button variant={hideEmpty ? "default" : "outline"} onClick={() => setHideEmpty((v) => !v)}
-            className={hideEmpty ? "bg-[#C1401E] hover:bg-[#A03316]" : ""} data-testid="cli-hide-empty" title="Ocultar columnas sin datos">
+            className={hideEmpty ? "bg-brand-600 hover:bg-brand-700" : ""} data-testid="cli-hide-empty" title="Ocultar columnas sin datos">
             {hideEmpty ? <Eye className="w-4 h-4 mr-1" /> : <EyeOff className="w-4 h-4 mr-1" />} Columnas vacías
           </Button>
           <Button variant="outline" onClick={load} data-testid="cli-buscar" className="gap-1"><Search className="w-4 h-4" /> Buscar</Button>
@@ -386,7 +386,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
           <thead className="bg-slate-50"><tr className="text-xs uppercase tracking-wider text-slate-500">
             {visibleCols.map((col) => (
               <th key={col.key} onClick={() => toggleSort(col.key)} data-testid={`sort-${col.key}`}
-                className={`p-3 cursor-pointer select-none hover:text-[#C1401E] ${col.right ? "text-right" : col.center ? "text-center" : "text-left"}`}>
+                className={`p-3 cursor-pointer select-none hover:text-brand-600 ${col.right ? "text-right" : col.center ? "text-center" : "text-left"}`}>
                 <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
                   {col.label}
                   {sort.key === col.key
@@ -398,7 +398,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
             <th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {loading && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && pageRows.length === 0 && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center text-slate-400"><Users className="w-8 h-8 mx-auto mb-2" />Sin clientes.</td></tr>}
             {!loading && pageRows.map((c) => {
               const cs = creditStatus(c);
@@ -429,7 +429,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                       </td>
                     );
                     const v = colVal(c, col.key);
-                    const cls = col.key === "codigo" ? "font-medium text-[#C1401E]"
+                    const cls = col.key === "codigo" ? "font-medium text-brand-600"
                       : col.key === "nombre" ? "max-w-[220px] truncate"
                       : col.key === "saldo" ? `font-semibold ${c.saldo > 0 ? "text-red-600" : ""}`
                       : (col.money || col.center) ? "" : "text-slate-500";
@@ -556,7 +556,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                   <TileLayer url={MAP_THEME} attribution="&copy; OpenStreetMap" />
                   <MapClickPicker onPick={setPos} />
                   {Number.isFinite(Number(f.latitud)) && Number.isFinite(Number(f.longitud)) && Number(f.latitud) !== 0 && Number(f.longitud) !== 0 && (
-                    <Marker position={[f.latitud, f.longitud]} icon={pinIcon("#C1401E")} />
+                    <Marker position={[f.latitud, f.longitud]} icon={pinIcon("#CF090B")} />
                   )}
                 </MapContainer>
               </div>
@@ -644,11 +644,11 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                 <>
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2 text-sm">
-                      <Badge className="bg-[#C1401E] text-white">LEGACY</Badge>
+                      <Badge className="bg-brand-600 text-white">LEGACY</Badge>
                       <span className="text-slate-500">{histLegacy.total_documentos} documentos históricos</span>
                     </div>
                     <div className="text-sm">
-                      Saldo histórico pendiente: <b className="text-[#C1401E]">{money(histLegacy.saldo_historico)}</b>
+                      Saldo histórico pendiente: <b className="text-brand-600">{money(histLegacy.saldo_historico)}</b>
                     </div>
                   </div>
                   <div className="border rounded-lg overflow-auto max-h-80">
@@ -660,7 +660,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                         {(histLegacy.documentos || []).map((d, i) => (
                           <tr key={i} className="border-t border-slate-100">
                             <td className="p-2 text-slate-500">{d.fecha}</td>
-                            <td className="p-2 font-medium text-[#C1401E]">{d.folio}</td>
+                            <td className="p-2 font-medium text-brand-600">{d.folio}</td>
                             <td className="p-2">{d.condicion === "credito" ? "Crédito" : "Contado"}</td>
                             <td className="p-2 text-right">{money(d.total)}</td>
                             <td className="p-2 text-right">{money(d.saldo)}</td>
@@ -686,7 +686,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-            <Button onClick={save} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cli-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button>
+            <Button onClick={save} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="cli-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -696,13 +696,13 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="import-dialog">
           <DialogHeader><DialogTitle className="font-display">Importar clientes</DialogTitle></DialogHeader>
           {!preview ? (
-            <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>
+            <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>
           ) : (
             <div className="space-y-4">
               <div className="grid grid-cols-4 gap-3 text-center">
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Total</div><div className="font-display font-bold text-lg" data-testid="imp-total">{preview.total}</div></div>
                 <div className="bg-green-50 rounded p-3"><div className="text-xs text-slate-400">Nuevos</div><div className="font-display font-bold text-lg text-green-700" data-testid="imp-nuevos">{preview.nuevos}</div></div>
-                <div className="bg-blue-50 rounded p-3"><div className="text-xs text-slate-400">A actualizar</div><div className="font-display font-bold text-lg text-[#C1401E]" data-testid="imp-existentes">{preview.existentes}</div></div>
+                <div className="bg-blue-50 rounded p-3"><div className="text-xs text-slate-400">A actualizar</div><div className="font-display font-bold text-lg text-brand-600" data-testid="imp-existentes">{preview.existentes}</div></div>
                 <div className="bg-red-50 rounded p-3"><div className="text-xs text-slate-400">Con errores</div><div className="font-display font-bold text-lg text-red-600" data-testid="imp-errores">{preview.con_errores}</div></div>
               </div>
 
@@ -756,7 +756,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                           {r.errores?.length
                             ? <span className="inline-flex items-center gap-1 text-red-600"><X className="w-3 h-3" /> omitir</span>
                             : r.existe
-                              ? <span className="inline-flex items-center gap-1 text-[#C1401E]"><RefreshCw className="w-3 h-3" /> actualizar</span>
+                              ? <span className="inline-flex items-center gap-1 text-brand-600"><RefreshCw className="w-3 h-3" /> actualizar</span>
                               : <span className="inline-flex items-center gap-1 text-green-700"><CheckCircle2 className="w-3 h-3" /> crear</span>}
                         </td>
                         <td className="p-2 text-slate-500">
@@ -771,7 +771,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => { setImpOpen(false); setPreview(null); }}>Cancelar</Button>
-            <Button onClick={confirmImport} disabled={!preview || importing} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="imp-confirm">
+            <Button onClick={confirmImport} disabled={!preview || importing} className="bg-brand-600 hover:bg-brand-700" data-testid="imp-confirm">
               {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirmar importación"}
             </Button>
           </DialogFooter>

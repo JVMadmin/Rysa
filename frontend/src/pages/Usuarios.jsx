@@ -101,7 +101,7 @@ export default function Usuarios({ embedded = false }) {
     <div className="space-y-5" data-testid="usuarios-page">
       <div className="flex items-center justify-between">
         <div>{!embedded && <><h1 className="font-display text-2xl font-black tracking-tight">Usuarios y Roles</h1><p className="text-slate-500 text-sm">{rows.length} usuarios</p></>}{embedded && <p className="text-slate-500 text-sm">{rows.length} usuarios</p>}</div>
-        <Button onClick={openNew} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="nuevo-usuario-btn"><Plus className="w-4 h-4 mr-1" /> Nuevo usuario</Button>
+        <Button onClick={openNew} className="bg-brand-600 hover:bg-brand-700" data-testid="nuevo-usuario-btn"><Plus className="w-4 h-4 mr-1" /> Nuevo usuario</Button>
       </div>
 
       {!canAssign && (
@@ -114,7 +114,7 @@ export default function Usuarios({ embedded = false }) {
             <th className="p-3">Nombre</th><th className="p-3">Correo</th><th className="p-3">Rol</th><th className="p-3">Módulos</th><th className="p-3">Activo</th><th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={6} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {loading && <tr><td colSpan={6} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && rows.map((u) => (
               <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50">
                 <td className="p-3 font-medium">{u.name}</td><td className="p-3 text-slate-500">{u.email}</td>
@@ -175,7 +175,7 @@ export default function Usuarios({ embedded = false }) {
               </div>
             )}
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={save} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="user-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : editId ? "Guardar" : "Crear"}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button onClick={save} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="user-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : editId ? "Guardar" : "Crear"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

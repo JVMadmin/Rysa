@@ -117,12 +117,12 @@ export default function Categorias() {
         <div className="flex flex-wrap gap-2">
           {canExport && <Button variant="outline" onClick={exportExcel} disabled={exporting} data-testid="cat-export"><Download className="w-4 h-4 mr-1" /> Exportar</Button>}
           {canImport && <Button variant="outline" onClick={() => fileRef.current?.click()} data-testid="cat-import"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
-          {editable && <Button className="bg-[#C1401E] hover:bg-[#A03316]" onClick={openNew} data-testid="cat-new"><Plus className="w-4 h-4 mr-1" /> Nueva categoría</Button>}
+          {editable && <Button className="bg-brand-600 hover:bg-brand-700" onClick={openNew} data-testid="cat-new"><Plus className="w-4 h-4 mr-1" /> Nueva categoría</Button>}
         </div>
       </div>
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={onFile} data-testid="cat-import-file" />
 
-      {loading ? <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div> : (
+      {loading ? <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div> : (
         <>
         <div className="card-soft p-3">
           <div className="relative max-w-md">
@@ -145,8 +145,8 @@ export default function Categorias() {
                 <div className="h-32 bg-slate-100 relative overflow-hidden">
                   {c.imagen_url
                     ? <img src={fileUrl(c.imagen_url)} alt={c.nombre} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
-                    : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#C1401E]/10 to-[#C1401E]/10"><ImageIcon className="w-8 h-8 text-slate-300" /></div>}
-                  <Badge className="absolute top-2 right-2 bg-[#C1401E] text-white">{c.count}</Badge>
+                    : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-brand-600/10 to-brand-600/10"><ImageIcon className="w-8 h-8 text-slate-300" /></div>}
+                  <Badge className="absolute top-2 right-2 bg-brand-600 text-white">{c.count}</Badge>
                 </div>
                 <div className="p-4">
                   <div className="font-display font-bold text-slate-800 truncate">{c.nombre}</div>
@@ -157,7 +157,7 @@ export default function Categorias() {
                       <PackageSearch className="w-4 h-4 mr-1" /> Ver ({c.count})
                     </Button>
                     {editable && <>
-                      <Button size="sm" className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => openEdit(c)} data-testid={`cat-edit-${c.nombre}`}><Pencil className="w-4 h-4" /></Button>
+                      <Button size="sm" className="bg-brand-600 hover:bg-brand-700" onClick={() => openEdit(c)} data-testid={`cat-edit-${c.nombre}`}><Pencil className="w-4 h-4" /></Button>
                       <Button size="sm" variant="outline" className="text-red-600 hover:bg-red-50" onClick={() => remove(c)} data-testid={`cat-del-${c.nombre}`}><Trash2 className="w-4 h-4" /></Button>
                     </>}
                   </div>
@@ -186,7 +186,7 @@ export default function Categorias() {
               <Textarea value={f.ficha_tecnica} onChange={(e) => setF((s) => ({ ...s, ficha_tecnica: e.target.value }))} className="mt-1" data-testid="cat-ficha" placeholder="Material, medidas, presentación..." /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={close}>Cancelar</Button>
-            <Button onClick={save} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cat-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button></DialogFooter>
+            <Button onClick={save} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="cat-save">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Guardar"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -239,7 +239,7 @@ export default function Categorias() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportOpen(false)}>Cancelar</Button>
-            <Button onClick={confirmImport} disabled={!preview || importing} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cat-import-confirm">
+            <Button onClick={confirmImport} disabled={!preview || importing} className="bg-brand-600 hover:bg-brand-700" data-testid="cat-import-confirm">
               {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : "Importar"}
             </Button>
           </DialogFooter>

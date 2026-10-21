@@ -76,8 +76,8 @@ export default function Dashboard() {
   const sucursalActualObj = sucursales.find((s) => s.id === sucursalSel);
 
   const MODULES = [
-    { to: "/app/pos", label: "Punto de Venta", desc: "Cobrar rápido", icon: ShoppingCart, color: "#C1401E", perm: "venta.crear" },
-    { to: "/app/productos", label: "Productos", desc: "Inventario", icon: Package, color: "#C1401E" },
+    { to: "/app/pos", label: "Punto de Venta", desc: "Cobrar rápido", icon: ShoppingCart, color: "#CF090B", perm: "venta.crear" },
+    { to: "/app/productos", label: "Productos", desc: "Inventario", icon: Package, color: "#CF090B" },
     { to: "/app/clientes", label: "Clientes", desc: "Directorio", icon: Users, color: "#16A34A" },
     { to: "/app/caja", label: "Caja", desc: "Cortes y movimientos", icon: Wallet, color: "#FF5A00", perm: "caja.ver" },
     { to: "/app/cxc", label: "Cuentas por Cobrar", desc: "Cartera", icon: Receipt, color: "#8B5CF6", perm: "cxc.ver" },
@@ -143,9 +143,9 @@ export default function Dashboard() {
 
       {/* KPIs principales */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi icon={TrendingUp} label={global ? "Ventas del día" : "Mis ventas del día"} value={money(d.ventas_hoy)} color="#C1401E" testid="kpi-ventas-hoy" featured />
+        <Kpi icon={TrendingUp} label={global ? "Ventas del día" : "Mis ventas del día"} value={money(d.ventas_hoy)} color="#CF090B" testid="kpi-ventas-hoy" featured />
         <Kpi icon={TrendingUp} label={global ? "Ventas del mes" : "Mis ventas del mes"} value={money(d.ventas_mes)} color="#16A34A" testid="kpi-ventas-mes" />
-        <Kpi icon={ShoppingCart} label={global ? "N° ventas hoy" : "Mis N° ventas hoy"} value={d.num_ventas_hoy} color="#C1401E" testid="kpi-num-ventas" />
+        <Kpi icon={ShoppingCart} label={global ? "N° ventas hoy" : "Mis N° ventas hoy"} value={d.num_ventas_hoy} color="#CF090B" testid="kpi-num-ventas" />
         <Kpi icon={Wallet} label={global ? "Total en cajas abiertas" : "Total en mi caja"} value={money(d.total_caja)} color="#FF5A00" testid="kpi-caja" />
       </div>
 
@@ -286,7 +286,7 @@ export default function Dashboard() {
 
       {/* KPIs inventario */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Kpi icon={Package} label="Productos activos" value={d.productos} color="#C1401E" testid="kpi-productos" />
+        <Kpi icon={Package} label="Productos activos" value={d.productos} color="#CF090B" testid="kpi-productos" />
         <Kpi icon={AlertTriangle} label="Stock bajo" value={d.bajo_stock} color="#D97706" testid="kpi-stock-bajo" />
         <Kpi icon={PackageX} label="Sin existencia" value={d.sin_existencia} color="#DC2626" testid="kpi-sin-existencia" />
         <Kpi icon={Users} label="Clientes" value={d.clientes} color="#16A34A" testid="kpi-clientes" />
@@ -301,7 +301,7 @@ export default function Dashboard() {
               <XAxis dataKey="dia" tick={{ fontSize: 12, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 12, fill: "#9CA3AF" }} axisLine={false} tickLine={false} width={56} />
               <Tooltip formatter={(v) => money(v)} cursor={{ fill: "rgba(193,64,30,0.06)" }} />
-              <Bar dataKey="total" fill="#C1401E" radius={[8, 8, 0, 0]} />
+              <Bar dataKey="total" fill="#CF090B" radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

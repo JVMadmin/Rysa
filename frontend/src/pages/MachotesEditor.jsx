@@ -148,7 +148,7 @@ function ColorIn({ value, onChange, disabled, permitirVacio = true }) {
       </div>
       {!disabled && (
         <div className="flex flex-wrap gap-1">
-          {COLORES.map((c) => <button key={c} title={c} onClick={() => onChange(c)} className={`h-5 w-5 rounded border ${value === c ? "ring-2 ring-[#C1401E] ring-offset-1" : "border-slate-300"}`} style={{ background: c }} />)}
+          {COLORES.map((c) => <button key={c} title={c} onClick={() => onChange(c)} className={`h-5 w-5 rounded border ${value === c ? "ring-2 ring-brand-600 ring-offset-1" : "border-slate-300"}`} style={{ background: c }} />)}
         </div>
       )}
     </div>
@@ -422,11 +422,11 @@ function EditorEstilo({ b, set, ro }) {
       </div>
       <div className="flex flex-wrap gap-1">
         {[["negrita", "B", "font-bold"], ["cursiva", "I", "italic"], ["subrayado", "U", "underline"], ["mayusculas", "AA", ""]].map(([k, t, cls]) => (
-          <button key={k} disabled={ro} onClick={() => s(k)(!e[k])} className={`h-8 min-w-8 rounded border px-2 text-xs ${cls} ${e[k] ? "border-[#C1401E] bg-[#C1401E]/10 text-[#C1401E]" : "border-slate-200"}`}>{t}</button>
+          <button key={k} disabled={ro} onClick={() => s(k)(!e[k])} className={`h-8 min-w-8 rounded border px-2 text-xs ${cls} ${e[k] ? "border-brand-600 bg-brand-600/10 text-brand-600" : "border-slate-200"}`}>{t}</button>
         ))}
         <span className="mx-1 border-l" />
         {[["left", "Izq"], ["center", "Centro"], ["right", "Der"], ["justify", "Just"]].map(([v, t]) => (
-          <button key={v} disabled={ro} onClick={() => s("align")(v)} className={`h-8 rounded border px-2 text-xs ${(e.align || "left") === v ? "border-[#C1401E] bg-[#C1401E]/10 text-[#C1401E]" : "border-slate-200"}`}>{t}</button>
+          <button key={v} disabled={ro} onClick={() => s("align")(v)} className={`h-8 rounded border px-2 text-xs ${(e.align || "left") === v ? "border-brand-600 bg-brand-600/10 text-brand-600" : "border-slate-200"}`}>{t}</button>
         ))}
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -534,7 +534,7 @@ function ArbolBloques({ bloques, pref = [], sel, onSel, onAccion, ro, nivel = 0 
         return (
           <div key={b.id || i}>
             <div onClick={() => onSel(ruta)}
-              className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm ${activo ? "bg-[#C1401E]/10 ring-1 ring-[#C1401E]/40" : "hover:bg-slate-50"} ${b.visible === false ? "opacity-45" : ""}`}>
+              className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm ${activo ? "bg-brand-600/10 ring-1 ring-brand-600/40" : "hover:bg-slate-50"} ${b.visible === false ? "opacity-45" : ""}`}>
               <Icon className="h-4 w-4 shrink-0 text-slate-500" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13px] font-medium text-slate-700">{info.label}{b.condicion ? <span className="ml-1 text-[10px] text-amber-600">• condición</span> : null}</div>
@@ -552,7 +552,7 @@ function ArbolBloques({ bloques, pref = [], sel, onSel, onAccion, ro, nivel = 0 
               <div key={ci} className="ml-3 mt-0.5">
                 <div className="flex items-center gap-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                   <ChevronRight className="h-3 w-3" />Columna {ci + 1}
-                  {!ro && <button onClick={() => onAccion("agregar_en", [...ruta, ci])} className="ml-auto text-[#C1401E] hover:underline normal-case font-medium">+ bloque</button>}
+                  {!ro && <button onClick={() => onAccion("agregar_en", [...ruta, ci])} className="ml-auto text-brand-600 hover:underline normal-case font-medium">+ bloque</button>}
                 </div>
                 <ArbolBloques bloques={col.bloques || []} pref={[...ruta, ci]} sel={sel} onSel={onSel} onAccion={onAccion} ro={ro} nivel={nivel + 1} />
               </div>
@@ -578,8 +578,8 @@ function Paleta({ open, onClose, onElegir }) {
             <div key={g}>
               <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{g}</p>
               <div className="space-y-1">{items.map((it) => { const I = it.icon; return (
-                <button key={it.label} onClick={() => onElegir(it.bloque)} className="flex w-full items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-left text-sm hover:border-[#C1401E] hover:bg-[#C1401E]/5">
-                  <I className="h-4 w-4 text-slate-500" />{it.label}{it.preset && <span className="ml-auto text-[10px] text-[#C1401E]">plantilla</span>}</button>); })}</div>
+                <button key={it.label} onClick={() => onElegir(it.bloque)} className="flex w-full items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-left text-sm hover:border-brand-600 hover:bg-brand-600/5">
+                  <I className="h-4 w-4 text-slate-500" />{it.label}{it.preset && <span className="ml-auto text-[10px] text-brand-600">plantilla</span>}</button>); })}</div>
             </div>
           ))}
         </div>
@@ -756,7 +756,7 @@ export default function MachotesEditor() {
       {/* Encabezado */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-800"><FileText className="h-6 w-6 text-[#C1401E]" />Editor de formatos</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-800"><FileText className="h-6 w-6 text-brand-600" />Editor de formatos</h1>
           <p className="text-sm text-slate-500">Diseña tickets, notas, cotizaciones y comprobantes. El formato predeterminado del sistema siempre se conserva y se puede restaurar.</p>
         </div>
       </div>
@@ -767,7 +767,7 @@ export default function MachotesEditor() {
           <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Documentos</p>
           {catalogo.map((t) => (
             <button key={t.tipo} onClick={() => elegirTipo(t.tipo)} data-testid={`fmt-tipo-${t.tipo}`}
-              className={`w-full rounded-lg px-3 py-2 text-left ${tipo === t.tipo ? "bg-[#C1401E]/10 ring-1 ring-[#C1401E]/40" : "hover:bg-slate-50"}`}>
+              className={`w-full rounded-lg px-3 py-2 text-left ${tipo === t.tipo ? "bg-brand-600/10 ring-1 ring-brand-600/40" : "hover:bg-slate-50"}`}>
               <div className="text-sm font-medium text-slate-700">{t.nombre}</div>
               <div className={`mt-0.5 text-[11px] ${t.activo ? "text-emerald-700" : "text-slate-400"}`}>
                 {t.activo ? `En uso: ${t.plantillas.find((p) => p.id === t.activo.template_id)?.nombre || "personalizado"}` : "En uso: predeterminado"}
@@ -784,11 +784,11 @@ export default function MachotesEditor() {
               {(infoTipo?.plantillas || []).map((p) => <option key={p.id} value={p.id}>{p.nombre} · v{p.version_actual}{infoTipo?.activo?.template_id === p.id ? " — en uso" : ""}</option>)}
             </select>
             {ro ? (
-              <Button size="sm" onClick={() => { setNombre(`${infoTipo?.nombre || "Formato"} personalizado`); setDlg({ tipo: "nueva" }); }} className="bg-[#C1401E] hover:bg-[#a63519]" data-testid="fmt-personalizar">
+              <Button size="sm" onClick={() => { setNombre(`${infoTipo?.nombre || "Formato"} personalizado`); setDlg({ tipo: "nueva" }); }} className="bg-brand-600 hover:bg-brand-700" data-testid="fmt-personalizar">
                 <PenLine className="mr-1 h-4 w-4" />Personalizar
               </Button>
             ) : <>
-              <Button size="sm" disabled={!sucio || ocupado} onClick={() => { setNota(""); setDlg({ tipo: "guardar" }); }} className="bg-[#C1401E] hover:bg-[#a63519]" data-testid="fmt-guardar"><Save className="mr-1 h-4 w-4" />Guardar versión</Button>
+              <Button size="sm" disabled={!sucio || ocupado} onClick={() => { setNota(""); setDlg({ tipo: "guardar" }); }} className="bg-brand-600 hover:bg-brand-700" data-testid="fmt-guardar"><Save className="mr-1 h-4 w-4" />Guardar versión</Button>
               {!plantilla?.en_uso && <Button size="sm" variant="outline" disabled={ocupado} onClick={activar} data-testid="fmt-activar"><CheckCircle2 className="mr-1 h-4 w-4 text-emerald-600" />Usar en documentos</Button>}
               <Button size="sm" variant="ghost" disabled={hist.current.idx <= 0} onClick={deshacer} title="Deshacer (Ctrl+Z)"><Undo2 className="h-4 w-4" /></Button>
               <Button size="sm" variant="ghost" disabled={hist.current.idx >= hist.current.pila.length - 1} onClick={rehacer} title="Rehacer (Ctrl+Y)"><Redo2 className="h-4 w-4" /></Button>
@@ -817,7 +817,7 @@ export default function MachotesEditor() {
                 {!ro && <Button size="sm" variant="outline" onClick={() => setPaleta(true)} data-testid="fmt-agregar"><Plus className="mr-1 h-3.5 w-3.5" />Bloque</Button>}
               </div>
               <div className="flex-1 overflow-y-auto p-2">
-                <div onClick={() => setSel(null)} className={`mb-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm ${sel === null ? "bg-[#C1401E]/10 ring-1 ring-[#C1401E]/40" : "hover:bg-slate-50"}`}>
+                <div onClick={() => setSel(null)} className={`mb-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm ${sel === null ? "bg-brand-600/10 ring-1 ring-brand-600/40" : "hover:bg-slate-50"}`}>
                   <Settings2 className="h-4 w-4 text-slate-500" /><div><div className="text-[13px] font-medium text-slate-700">Página y estilo general</div>
                     <div className="text-[11px] text-slate-400">{cfg?.pagina?.formato} · {cfg?.pagina?.fuente} {cfg?.pagina?.tamano_base}pt</div></div>
                 </div>
@@ -832,7 +832,7 @@ export default function MachotesEditor() {
               </div>
               {bloqueSel && <div className="flex border-b text-xs">
                 {[["contenido", "Contenido"], ["estilo", "Estilo"], ["visibilidad", "Visibilidad"]].map(([k, l]) => (
-                  <button key={k} onClick={() => setTab(k)} className={`flex-1 py-2 ${tab === k ? "border-b-2 border-[#C1401E] font-semibold text-[#C1401E]" : "text-slate-500"}`}>{l}</button>))}
+                  <button key={k} onClick={() => setTab(k)} className={`flex-1 py-2 ${tab === k ? "border-b-2 border-brand-600 font-semibold text-brand-600" : "text-slate-500"}`}>{l}</button>))}
               </div>}
               <div className="flex-1 overflow-y-auto p-3">
                 {cfg && !bloqueSel && <EditorPagina pg={cfg.pagina || {}} set={(pg) => cambiar({ ...cfg, pagina: pg })} ro={ro} />}
@@ -874,7 +874,7 @@ export default function MachotesEditor() {
           <p className="text-sm text-slate-600">{dlg?.tipo === "duplicar" ? "Se crea una copia independiente con su propio historial." : "Se crea una copia editable del formato predeterminado (versión 1). El predeterminado del sistema no cambia y podrás volver a él cuando quieras."}</p>
           <Campo label="Nombre del formato"><Input value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus data-testid="fmt-nombre" /></Campo>
           <DialogFooter><Button variant="outline" onClick={() => setDlg(null)}>Cancelar</Button>
-            <Button disabled={!nombre.trim() || ocupado} onClick={dlg?.tipo === "duplicar" ? duplicar : crearPersonalizado} className="bg-[#C1401E] hover:bg-[#a63519]" data-testid="fmt-crear">Crear</Button></DialogFooter>
+            <Button disabled={!nombre.trim() || ocupado} onClick={dlg?.tipo === "duplicar" ? duplicar : crearPersonalizado} className="bg-brand-600 hover:bg-brand-700" data-testid="fmt-crear">Crear</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -884,7 +884,7 @@ export default function MachotesEditor() {
           <p className="text-sm text-slate-600">La versión anterior queda en el historial y se puede restaurar.{plantilla?.en_uso ? " Este formato está en uso: los documentos nuevos saldrán con esta versión." : ""}</p>
           <Campo label="Nota de la versión (opcional)"><Input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Ej. Logo más grande y QR al final" /></Campo>
           <DialogFooter><Button variant="outline" onClick={() => setDlg(null)}>Cancelar</Button>
-            <Button disabled={ocupado} onClick={guardar} className="bg-[#C1401E] hover:bg-[#a63519]" data-testid="fmt-confirmar-guardar">Guardar</Button></DialogFooter>
+            <Button disabled={ocupado} onClick={guardar} className="bg-brand-600 hover:bg-brand-700" data-testid="fmt-confirmar-guardar">Guardar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 

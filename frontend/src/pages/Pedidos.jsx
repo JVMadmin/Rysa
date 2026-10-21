@@ -137,12 +137,12 @@ export default function Pedidos() {
     <div className="space-y-5" data-testid="pedidos-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-[#C1401E]" /> Pedidos</h1>
+          <h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><ShoppingCart className="w-6 h-6 text-brand-600" /> Pedidos</h1>
           <p className="text-slate-500 text-sm">Órdenes de clientes · conviértelas a venta desde el POS</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" className="h-9" onClick={load}><RefreshCw className="w-4 h-4 mr-1" /> Actualizar</Button>
-          <Button className="h-9 bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setEditing(null); setForm(blank()); setItemSearch(""); setOpen(true); }} data-testid="nuevo-pedido">
+          <Button className="h-9 bg-brand-600 hover:bg-brand-700" onClick={() => { setEditing(null); setForm(blank()); setItemSearch(""); setOpen(true); }} data-testid="nuevo-pedido">
             <Plus className="w-4 h-4 mr-1" /> Nuevo pedido
           </Button>
         </div>
@@ -166,7 +166,7 @@ export default function Pedidos() {
       </div>
 
       {err && <div className="card-soft p-6 text-center text-red-600"><p className="mb-3">{err}</p><Button variant="outline" onClick={load}>Reintentar</Button></div>}
-      {!err && loading && <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>}
+      {!err && loading && <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>}
 
       {!err && !loading && (
         <div className="card-soft overflow-x-auto">
@@ -181,7 +181,7 @@ export default function Pedidos() {
                 const [cls, label] = ESTADOS[p.estado] || ["bg-slate-100 text-slate-600", p.estado];
                 return (
                   <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`pedido-${p.folio}`}>
-                    <td className="p-2 font-medium text-[#C1401E]">{p.folio}</td>
+                    <td className="p-2 font-medium text-brand-600">{p.folio}</td>
                     <td className="p-2">{p.cliente_nombre || "—"}</td>
                     <td className="p-2 text-slate-500">{(p.fecha_pedido || "").slice(0, 10)}</td>
                     <td className="p-2 text-slate-500">{(p.fecha_entrega || "").slice(0, 10) || "—"}</td>
@@ -193,7 +193,7 @@ export default function Pedidos() {
                         <Button size="sm" variant="outline" onClick={() => abrirEditar(p)}><Plus className="w-3.5 h-3.5" /></Button>
                       )}
                       {["borrador", "confirmado", "surtido"].includes(p.estado) && can("venta.crear") && (
-                        <Button size="sm" className="bg-[#C1401E] hover:bg-[#A03316] ml-1" onClick={() => { setConv(p); setConvForm({ condicion: "contado", metodo: "efectivo", monto: "" }); }} data-testid={`convertir-pedido-${p.folio}`}>
+                        <Button size="sm" className="bg-brand-600 hover:bg-brand-700 ml-1" onClick={() => { setConv(p); setConvForm({ condicion: "contado", metodo: "efectivo", monto: "" }); }} data-testid={`convertir-pedido-${p.folio}`}>
                           <ArrowRightCircle className="w-3.5 h-3.5 mr-1" /> Vender
                         </Button>
                       )}
@@ -251,7 +251,7 @@ export default function Pedidos() {
       {/* Crear / editar pedido */}
       <Dialog open={open} onOpenChange={(o) => !o && setOpen(false)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="pedido-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2">{editing ? <Eye className="w-5 h-5 text-[#C1401E]" /> : <Plus className="w-5 h-5 text-[#C1401E]" />} {editing ? `Editar ${editing.folio}` : "Nuevo pedido"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2">{editing ? <Eye className="w-5 h-5 text-brand-600" /> : <Plus className="w-5 h-5 text-brand-600" />} {editing ? `Editar ${editing.folio}` : "Nuevo pedido"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div className="col-span-2">
@@ -274,8 +274,8 @@ export default function Pedidos() {
                   {itemsFiltrados.length === 0 && <div className="p-2 text-xs text-slate-400">Sin resultados</div>}
                   {itemsFiltrados.map((p) => (
                     <button key={p.id} type="button" onClick={() => addItem(p)} className="w-full text-left px-3 py-1.5 hover:bg-slate-50 flex items-center gap-2 text-xs">
-                      <b className="text-[#C1401E]">{p.codigo}</b><span className="flex-1 truncate">{p.descripcion}</span>
-                      <span className="text-slate-400">Precio: {money(p.precio || p.precios?.[0]?.precio_con_iva || 0)}</span><Plus className="w-3.5 h-3.5 text-[#C1401E]" />
+                      <b className="text-brand-600">{p.codigo}</b><span className="flex-1 truncate">{p.descripcion}</span>
+                      <span className="text-slate-400">Precio: {money(p.precio || p.precios?.[0]?.precio_con_iva || 0)}</span><Plus className="w-3.5 h-3.5 text-brand-600" />
                     </button>
                   ))}
                 </div>
@@ -303,7 +303,7 @@ export default function Pedidos() {
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
-              <Button onClick={guardar} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="guardar-pedido">
+              <Button onClick={guardar} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="guardar-pedido">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <><CheckCircle2 className="w-4 h-4 mr-1" /> Guardar pedido</>}
               </Button>
             </DialogFooter>
@@ -314,9 +314,9 @@ export default function Pedidos() {
       {/* Convertir pedido a venta */}
       <Dialog open={!!conv} onOpenChange={(o) => !o && setConv(null)}>
         <DialogContent className="max-w-md" data-testid="convertir-pedido-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ArrowRightCircle className="w-5 h-5 text-[#C1401E]" /> Convertir {conv?.folio} a venta</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ArrowRightCircle className="w-5 h-5 text-brand-600" /> Convertir {conv?.folio} a venta</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            <div className="card-soft p-3 bg-amber-50"><div className="text-xs text-slate-500">Total del pedido</div><div className="font-display text-xl font-black text-[#C1401E]">{money(conv?.total)}</div></div>
+            <div className="card-soft p-3 bg-amber-50"><div className="text-xs text-slate-500">Total del pedido</div><div className="font-display text-xl font-black text-brand-600">{money(conv?.total)}</div></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Condición</Label>
               <Select value={convForm.condicion} onValueChange={(v) => setConvForm((s) => ({ ...s, condicion: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
@@ -338,7 +338,7 @@ export default function Pedidos() {
             )}
             <DialogFooter>
               <Button variant="outline" onClick={() => setConv(null)}>Cancelar</Button>
-              <Button onClick={convertir} disabled={convSaving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="confirmar-convertir-pedido">
+              <Button onClick={convertir} disabled={convSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="confirmar-convertir-pedido">
                 {convSaving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <><ArrowRightCircle className="w-4 h-4 mr-1" /> Convertir a venta</>}
               </Button>
             </DialogFooter>

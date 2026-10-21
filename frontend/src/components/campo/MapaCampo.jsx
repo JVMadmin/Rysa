@@ -152,7 +152,7 @@ export default function MapaCampo({
                       <div className="text-xs space-y-1">
                         <div className="font-bold text-slate-800 flex items-center justify-between gap-2">
                           <span>{isStart ? "🏁 Inicio de ruta" : isEnd ? "📍 Posición más reciente" : `Paso #${i + 1}`}</span>
-                          <span className="font-mono text-[#C1401E]">{timeStr}</span>
+                          <span className="font-mono text-brand-600">{timeStr}</span>
                         </div>
                         <div className="text-slate-500">
                           Hora: <b>{timeStr}</b><br />
@@ -222,7 +222,7 @@ export default function MapaCampo({
       </ErrorBoundaryMapa>
 
       {modoCaptura && (
-        <div className="absolute inset-x-0 bottom-0 z-[500] bg-[#C1401E] text-white text-xs font-semibold px-3 py-2 flex items-center gap-2 pointer-events-none">
+        <div className="absolute inset-x-0 bottom-0 z-[500] bg-brand-600 text-white text-xs font-semibold px-3 py-2 flex items-center gap-2 pointer-events-none">
           <Crosshair className="w-4 h-4" />
           Toca el punto exacto del negocio en el mapa para asignar la ubicación…
         </div>

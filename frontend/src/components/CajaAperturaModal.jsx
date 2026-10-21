@@ -88,12 +88,12 @@ export default function CajaAperturaModal({ open, onOpenChange, onAbierta }) {
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="caja-apertura-modal">
         <DialogHeader>
           <DialogTitle className="font-display text-xl flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-[#C1401E]" /> {cajaActual ? "CAJA ABIERTA" : "ABRIR CAJA"}
+            <Wallet className="w-5 h-5 text-brand-600" /> {cajaActual ? "CAJA ABIERTA" : "ABRIR CAJA"}
           </DialogTitle>
         </DialogHeader>
 
         {loading ? (
-          <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div>
+          <div className="flex justify-center py-16"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>
         ) : cajaActual ? (
           <div className="space-y-4">
             <div className="card-soft p-5 space-y-2">
@@ -132,7 +132,7 @@ export default function CajaAperturaModal({ open, onOpenChange, onAbierta }) {
 
             <div className="flex items-center justify-between gap-3 card-soft p-4">
               <div className="flex items-center gap-2">
-                <Banknote className="w-5 h-5 text-[#C1401E]" />
+                <Banknote className="w-5 h-5 text-brand-600" />
                 <div>
                   <div className="font-semibold text-sm">Registrar denominaciones</div>
                   <div className="text-xs text-slate-400">Recomendado para controlar el conteo físico</div>
@@ -191,7 +191,7 @@ export default function CajaAperturaModal({ open, onOpenChange, onAbierta }) {
               <Button
                 onClick={confirmar}
                 disabled={saving || !(monto > 0) || (usarDenom && diff != null && Math.abs(diff) > 0.009)}
-                className="bg-[#C1401E] hover:bg-[#A03316]"
+                className="bg-brand-600 hover:bg-brand-700"
                 data-testid="caja-apertura-confirm"
               >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <><Unlock className="w-4 h-4 mr-2" /> Confirmar apertura</>}

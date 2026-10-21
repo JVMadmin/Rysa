@@ -328,9 +328,9 @@ export default function CuentasPorCobrar() {
       </div>
 
       {legacyRes?.disponible && (legacyRes.cxc_pendientes > 0 || legacyRes.tickets_legacy > 0) && (
-        <div className="rounded-lg border border-[#C1401E]/30 bg-orange-50/60 px-4 py-3 flex items-center gap-2 text-sm text-slate-700" data-testid="cxc-legacy-banner">
-          <Receipt className="w-4 h-4 text-[#C1401E]" />
-          <span>La cartera incluye <b>{legacyRes.cxc_pendientes}</b> documento(s) histórico(s) <Badge className="bg-[#C1401E] text-white mx-1">LEGACY</Badge> por <b>{money(legacyRes.cxc_saldo)}</b> ({legacyRes.tickets_legacy} tickets históricos consultables). Los pagos se registran con el flujo normal (FIFO).</span>
+        <div className="rounded-lg border border-brand-600/30 bg-orange-50/60 px-4 py-3 flex items-center gap-2 text-sm text-slate-700" data-testid="cxc-legacy-banner">
+          <Receipt className="w-4 h-4 text-brand-600" />
+          <span>La cartera incluye <b>{legacyRes.cxc_pendientes}</b> documento(s) histórico(s) <Badge className="bg-brand-600 text-white mx-1">LEGACY</Badge> por <b>{money(legacyRes.cxc_saldo)}</b> ({legacyRes.tickets_legacy} tickets históricos consultables). Los pagos se registran con el flujo normal (FIFO).</span>
         </div>
       )}
 
@@ -434,7 +434,7 @@ export default function CuentasPorCobrar() {
               { key: "corriente", label: "Corriente", right: true }, { key: "b1_30", label: "1-30", right: true },
               { key: "b31_60", label: "31-60", right: true }, { key: "b61_90", label: "61-90", right: true },
               { key: "b90", label: "+90", right: true }, { key: "dias", label: "Días", center: true }].map((col) => (
-              <th key={col.key} onClick={() => toggleSort(col.key)} className={`p-3 cursor-pointer select-none hover:text-[#C1401E] ${col.right ? "text-right" : col.center ? "text-center" : "text-left"}`}>
+              <th key={col.key} onClick={() => toggleSort(col.key)} className={`p-3 cursor-pointer select-none hover:text-brand-600 ${col.right ? "text-right" : col.center ? "text-center" : "text-left"}`}>
                 <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
                   {col.label}
                   {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
@@ -444,11 +444,11 @@ export default function CuentasPorCobrar() {
             <th className="p-3"></th>
           </tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={12} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-[#C1401E]" /></td></tr>}
+            {loading && <tr><td colSpan={12} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && data.clientes.length === 0 && <tr><td colSpan={12} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin cuentas por cobrar. ¡Todo al día!</td></tr>}
             {!loading && sorted.map((c) => (
               <tr key={c.cliente_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cxc-row-${c.codigo}`}>
-                <td className="p-3"><div className="font-medium text-[#C1401E]">{c.codigo}</div><div className="text-slate-700 max-w-[200px] truncate" title={c.nombre}>{c.nombre}</div></td>
+                <td className="p-3"><div className="font-medium text-brand-600">{c.codigo}</div><div className="text-slate-700 max-w-[200px] truncate" title={c.nombre}>{c.nombre}</div></td>
                 <td className="p-3 text-slate-500 text-xs">{c.telefono || c.celular || "—"}</td>
                 <td className="p-3 text-right font-semibold">{money(c.saldo)}</td>
                 <td className={`p-3 text-right font-semibold ${c.vencido > 0 ? "text-red-600" : "text-slate-300"}`}>{money(c.vencido)}</td>
@@ -461,7 +461,7 @@ export default function CuentasPorCobrar() {
                 <td className="p-3">
                   <div className="flex gap-1 justify-end">
                     <Button size="sm" variant="outline" onClick={() => openDetalle(c)} data-testid={`cxc-detalle-${c.codigo}`}><Receipt className="w-4 h-4 mr-1" /> Ver</Button>
-                    {puedeCobrar && <Button size="sm" className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => openAbono(c)} data-testid={`cxc-abonar-${c.codigo}`}><HandCoins className="w-4 h-4 mr-1" /> Abonar</Button>}
+                    {puedeCobrar && <Button size="sm" className="bg-brand-600 hover:bg-brand-700" onClick={() => openAbono(c)} data-testid={`cxc-abonar-${c.codigo}`}><HandCoins className="w-4 h-4 mr-1" /> Abonar</Button>}
                   </div>
                 </td>
               </tr>
@@ -473,7 +473,7 @@ export default function CuentasPorCobrar() {
       {/* Diálogo de abono */}
       <Dialog open={!!abonoCli} onOpenChange={(o) => !o && setAbonoCli(null)}>
         <DialogContent data-testid="abono-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-[#C1401E]" /> Registrar abono</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-brand-600" /> Registrar abono</DialogTitle></DialogHeader>
           {abonoCli && (
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-md p-3 flex items-center justify-between">
@@ -504,7 +504,7 @@ export default function CuentasPorCobrar() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setAbonoCli(null)}>Cancelar</Button>
-            <Button onClick={guardarAbono} disabled={saving} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="abono-guardar">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
+            <Button onClick={guardarAbono} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="abono-guardar">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Registrar abono"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -513,7 +513,7 @@ export default function CuentasPorCobrar() {
       <Dialog open={!!detCli} onOpenChange={(o) => !o && setDetCli(null)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="detalle-dialog">
           <DialogHeader><DialogTitle className="font-display">Estado de cuenta · {detCli?.nombre}</DialogTitle></DialogHeader>
-          {!detalle ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-[#C1401E]" /></div> : (
+          {!detalle ? <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div> : (
             <div className="space-y-5">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Saldo</div><div className="font-display font-bold text-red-600">{money(detalle.cliente.saldo)}</div></div>
@@ -582,7 +582,7 @@ export default function CuentasPorCobrar() {
                           )}
                           <td className="p-2 font-medium">
                             {v.folio}
-                            {v.source === "LEGACY" && <Badge className="ml-1 bg-[#C1401E] text-white">LEGACY</Badge>}
+                            {v.source === "LEGACY" && <Badge className="ml-1 bg-brand-600 text-white">LEGACY</Badge>}
                             {v.condicion === "contado" && <span className="ml-1 text-[10px] text-slate-400">contado</span>}
                           </td>
                           <td className="p-2 text-slate-500">{(v.fecha || "").slice(0, 10)}</td>
@@ -623,7 +623,7 @@ export default function CuentasPorCobrar() {
                           <td className="p-2 text-slate-500">{a.referencia || "—"}</td>
                           <td className="p-2">
                             <Button size="sm" variant="ghost" onClick={() => setComp({ abono: a, cliente: detCli })} data-testid={`abono-comprobante-${a.folio}`}>
-                              <FileText className="w-4 h-4 text-[#C1401E]" />
+                              <FileText className="w-4 h-4 text-brand-600" />
                             </Button>
                           </td>
                         </tr>
@@ -691,7 +691,7 @@ export default function CuentasPorCobrar() {
               <Button variant="outline" onClick={generarPdf} data-testid="detalle-pdf"><FileText className="w-4 h-4 mr-1" /> PDF de adeudo</Button>
             </>}
             {detCli && puedeCobrar && detalle && detalle.cliente.saldo > 0 &&
-              <Button className="bg-[#C1401E] hover:bg-[#A03316]" onClick={() => { setDetCli(null); openAbono(detCli); }} data-testid="detalle-abonar"><HandCoins className="w-4 h-4 mr-1" /> Registrar abono</Button>}
+              <Button className="bg-brand-600 hover:bg-brand-700" onClick={() => { setDetCli(null); openAbono(detCli); }} data-testid="detalle-abonar"><HandCoins className="w-4 h-4 mr-1" /> Registrar abono</Button>}
             <Button variant="outline" onClick={() => setDetCli(null)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
@@ -771,28 +771,28 @@ export default function CuentasPorCobrar() {
       {/* Comprobante de abono */}
       <Dialog open={!!comp} onOpenChange={(o) => !o && setComp(null)}>
         <DialogContent className="max-w-md" data-testid="comprobante-abono-dialog">
-          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Receipt className="w-5 h-5 text-[#C1401E]" /> Abono registrado correctamente</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Receipt className="w-5 h-5 text-brand-600" /> Abono registrado correctamente</DialogTitle></DialogHeader>
           {comp && (
             <div className="space-y-4">
               <div className="rounded-xl border border-[#E5E0DA] overflow-hidden" data-testid="comprobante-abono-cuerpo">
                 {/* Encabezado RYSA */}
-                <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-[#C1401E]">
+                <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-brand-600">
                   <img src={logo} alt="logo" className="h-12 w-12 object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                   <div className="flex-1">
-                    <div className="font-display font-extrabold text-[#C1401E] leading-none">{empresa_nombre}</div>
+                    <div className="font-display font-extrabold text-brand-600 leading-none">{empresa_nombre}</div>
                     <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400 mt-0.5">Comprobante de Abono</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-lg font-display font-black text-[#C1401E]">{comp.abono.folio}</div>
+                    <div className="text-lg font-display font-black text-brand-600">{comp.abono.folio}</div>
                     <div className="text-[11px] text-slate-500">{(comp.abono.fecha || new Date().toISOString()).slice(0, 10)} {(comp.abono.fecha || "").slice(11, 16)}</div>
                   </div>
                 </div>
                 <div className="p-4 space-y-3">
                   <div className="text-sm"><span className="text-slate-400 text-xs">Cliente:</span> <b>{comp.abono.cliente_nombre || comp.cliente?.nombre}</b></div>
-                  <div className="rounded-lg bg-[#F4ECE7] p-3 space-y-2">
+                  <div className="rounded-lg bg-brand-50 p-3 space-y-2">
                     <div className="flex justify-between text-sm"><span className="text-slate-500">Saldo anterior</span><span className="font-semibold">{money(comp.abono.saldo_anterior)}</span></div>
-                    <div className="flex justify-between text-base font-bold text-[#C1401E] border-t border-[#E5D5CC] pt-2"><span>ABONO</span><span>{money(comp.abono.monto)}</span></div>
-                    <div className="flex justify-between text-base font-black border-t-2 border-[#C1401E] pt-2"><span>SALDO RESTANTE</span><span>{money(comp.abono.saldo_restante)}</span></div>
+                    <div className="flex justify-between text-base font-bold text-brand-600 border-t border-brand-100 pt-2"><span>ABONO</span><span>{money(comp.abono.monto)}</span></div>
+                    <div className="flex justify-between text-base font-black border-t-2 border-brand-600 pt-2"><span>SALDO RESTANTE</span><span>{money(comp.abono.saldo_restante)}</span></div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
                     <div><span className="text-slate-400">Método:</span> <span className="capitalize font-medium text-slate-700">{comp.abono.metodo}</span></div>
@@ -800,7 +800,7 @@ export default function CuentasPorCobrar() {
                     {comp.abono.usuario_nombre && <div><span className="text-slate-400">Usuario:</span> <span className="font-medium text-slate-700">{comp.abono.usuario_nombre}</span></div>}
                     {comp.abono.documento && <div><span className="text-slate-400">Documento:</span> <span className="font-medium text-slate-700">{comp.abono.documento}</span></div>}
                   </div>
-                  <div className="text-center font-bold text-[#C1401E] pt-1">¡GRACIAS POR SU PAGO!</div>
+                  <div className="text-center font-bold text-brand-600 pt-1">¡GRACIAS POR SU PAGO!</div>
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 justify-center">

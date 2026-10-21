@@ -206,7 +206,7 @@ export default function Reportes() {
         <div className="flex rounded-md overflow-hidden border border-slate-200">
           {TABS.map(([k, l, Ic]) => (
             <button key={k} onClick={() => setTab(k)} data-testid={`rep-tab-${k}`}
-              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${tab === k ? "bg-[#C1401E] text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors ${tab === k ? "bg-brand-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
               <Ic className="w-4 h-4" /> {l}
             </button>
           ))}
@@ -216,16 +216,16 @@ export default function Reportes() {
       {tab === "ventas" && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><BarChart3 className="w-6 h-6 text-[#C1401E]" /> Reportes de Ventas y Utilidad</h1></div>
+            <div><h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><BarChart3 className="w-6 h-6 text-brand-600" /> Reportes de Ventas y Utilidad</h1></div>
             <div className="flex flex-wrap items-center gap-2">
               <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-36" data-testid="rep-desde" />
               <span className="text-slate-400">a</span>
               <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-36" data-testid="rep-hasta" />
               <div className="flex rounded-md overflow-hidden border border-slate-200">
-                <button onClick={() => setGroup("dia")} className={`px-3 py-2 text-sm ${group === "dia" ? "bg-[#C1401E] text-white" : "bg-white"}`} data-testid="rep-group-dia">Por día</button>
-                <button onClick={() => setGroup("mes")} className={`px-3 py-2 text-sm ${group === "mes" ? "bg-[#C1401E] text-white" : "bg-white"}`} data-testid="rep-group-mes">Por mes</button>
+                <button onClick={() => setGroup("dia")} className={`px-3 py-2 text-sm ${group === "dia" ? "bg-brand-600 text-white" : "bg-white"}`} data-testid="rep-group-dia">Por día</button>
+                <button onClick={() => setGroup("mes")} className={`px-3 py-2 text-sm ${group === "mes" ? "bg-brand-600 text-white" : "bg-white"}`} data-testid="rep-group-mes">Por mes</button>
               </div>
-              <Button onClick={load} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="rep-aplicar">Aplicar</Button>
+              <Button onClick={load} className="bg-brand-600 hover:bg-brand-700" data-testid="rep-aplicar">Aplicar</Button>
               <Button variant="outline" onClick={() => exportar("excel")} className="gap-1.5" data-testid="rep-export-excel"><FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Excel</Button>
               <Button variant="outline" onClick={() => exportar("pdf")} className="gap-1.5" data-testid="rep-export-pdf"><FileText className="w-4 h-4 text-red-600" /> PDF</Button>
             </div>
@@ -269,14 +269,14 @@ export default function Reportes() {
             <div className="flex flex-wrap gap-2">
               {SECCIONES.map(([k, l]) => (
                 <button key={k} onClick={() => toggleSeccion(k)} data-testid={`rep-seccion-${k}`}
-                  className={`px-3 h-8 rounded-md text-xs font-medium border ${secciones.has(k) ? "border-[#C1401E] bg-[#C1401E]/5 text-[#C1401E]" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
+                  className={`px-3 h-8 rounded-md text-xs font-medium border ${secciones.has(k) ? "border-brand-600 bg-brand-600/5 text-brand-600" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
                   {l}
                 </button>
               ))}
             </div>
           </div>
 
-          {loading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-[#C1401E]" /></div> : (
+          {loading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-brand-600" /></div> : (
             <>
               {secciones.has("totales") && (
               <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
@@ -284,7 +284,7 @@ export default function Reportes() {
                 <Card label="Ingreso neto" value={money(t.ingreso_neto || 0)} icon={TrendingUp} cls="text-blue-700" testid="rep-ingreso" />
                 <Card label="Costo" value={money(t.costo || 0)} icon={Package} cls="text-amber-700" testid="rep-costo" />
                 <Card label="Utilidad" value={money(t.utilidad || 0)} icon={TrendingUp} cls="text-emerald-700" testid="rep-utilidad" />
-                <Card label="Margen" value={`${t.margen || 0}%`} icon={Percent} cls="text-[#C1401E]" testid="rep-margen" />
+                <Card label="Margen" value={`${t.margen || 0}%`} icon={Percent} cls="text-brand-600" testid="rep-margen" />
                 <Card label="Tickets" value={t.tickets || 0} icon={BarChart3} cls="text-slate-500" testid="rep-tickets" />
               </div>
               )}
@@ -308,7 +308,7 @@ export default function Reportes() {
                     <XAxis dataKey="periodo" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(v) => money(v)} />
-                    <Line type="monotone" dataKey="total" stroke="#C1401E" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="total" stroke="#CF090B" strokeWidth={2} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -370,7 +370,7 @@ export default function Reportes() {
                       <XAxis type="number" tick={{ fontSize: 11 }} />
                       <YAxis type="category" dataKey="codigo" width={70} tick={{ fontSize: 10 }} />
                       <Tooltip />
-                      <Bar dataKey="cantidad" fill="#C1401E" radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="cantidad" fill="#CF090B" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -411,7 +411,7 @@ export default function Reportes() {
                     {prods.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-slate-400">Sin resultados para el filtro seleccionado.</td></tr>}
                     {prods.slice(0, 200).map((p, i) => (
                       <tr key={i} className="border-t border-slate-100" data-testid={`rep-prod-${p.codigo}`}>
-                        <td className="p-3 font-medium text-[#C1401E]">{p.codigo}</td>
+                        <td className="p-3 font-medium text-brand-600">{p.codigo}</td>
                         <td className="p-3 max-w-[220px] truncate">{p.descripcion}</td>
                         <td className="p-3 text-right tabular-nums">{p.cantidad}</td>
                         <td className="p-3 text-right tabular-nums">{money(p.precio_neto)}</td>
@@ -435,7 +435,7 @@ export default function Reportes() {
       {tab === "inventario" && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><Warehouse className="w-6 h-6 text-[#C1401E]" /> Inventario Valorizado</h1></div>
+            <div><h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><Warehouse className="w-6 h-6 text-brand-600" /> Inventario Valorizado</h1></div>
             <div className="flex flex-wrap items-center gap-2">
               <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-36" data-testid="inv-desde" />
               <span className="text-slate-400">a</span>
@@ -446,12 +446,12 @@ export default function Reportes() {
                 <option value="baja">Solo baja</option>
                 <option value="todos">Todos los estados</option>
               </select>
-              <Button onClick={loadInventario} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="inv-aplicar">Aplicar</Button>
+              <Button onClick={loadInventario} className="bg-brand-600 hover:bg-brand-700" data-testid="inv-aplicar">Aplicar</Button>
               <Button variant="outline" onClick={exportarInventario} className="gap-1.5" data-testid="inv-export"><FileSpreadsheet className="w-4 h-4 text-emerald-600" /> Excel</Button>
             </div>
           </div>
 
-          {invLoading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-[#C1401E]" /></div> : (
+          {invLoading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-brand-600" /></div> : (
             inv && (
               <>
                 <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
@@ -459,7 +459,7 @@ export default function Reportes() {
                   <Card label="Unidades" value={it.unidades || 0} icon={Package} cls="text-slate-500" testid="inv-unidades" />
                   <Card label="Valor inventario" value={money(it.valor_inventario || 0)} icon={DollarSign} cls="text-blue-700" testid="inv-valor" />
                   <Card label="Venta potencial" value={money(it.venta_potencial || 0)} icon={TrendingUp} cls="text-emerald-700" testid="inv-potencial" />
-                  <Card label="Utilidad potencial" value={money(it.utilidad_potencial || 0)} icon={TrendingUp} cls="text-[#C1401E]" testid="inv-utilidad" />
+                  <Card label="Utilidad potencial" value={money(it.utilidad_potencial || 0)} icon={TrendingUp} cls="text-brand-600" testid="inv-utilidad" />
                   <Card label="Margen prom." value={`${it.margen_promedio || 0}%`} icon={Percent} cls="text-amber-700" testid="inv-margen" />
                 </div>
 
@@ -469,7 +469,7 @@ export default function Reportes() {
                     <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
                       {INV_COLS.map((c, i) => (
                         <th key={c.key} onClick={() => setInvSort((s) => ({ key: c.key, dir: s.key === c.key && s.dir === "asc" ? "desc" : "asc" }))}
-                          className={`p-3 cursor-pointer select-none hover:text-[#C1401E] ${c.right ? "text-right" : ""} ${c.center ? "text-center" : ""}`}
+                          className={`p-3 cursor-pointer select-none hover:text-brand-600 ${c.right ? "text-right" : ""} ${c.center ? "text-center" : ""}`}
                           data-testid={`inv-col-${c.key}`}>
                           <span className="inline-flex items-center gap-1">
                             {c.label}
@@ -482,7 +482,7 @@ export default function Reportes() {
                       {inv.productos.length === 0 && <tr><td colSpan={14} className="p-8 text-center text-slate-400">Sin productos para los filtros seleccionados.</td></tr>}
                       {invSorted.slice(0, 400).map((p, i) => (
                         <tr key={i} className="border-t border-slate-100" data-testid={`inv-fila-${p.codigo}`}>
-                          <td className="p-3 font-medium text-[#C1401E]">{p.codigo}</td>
+                          <td className="p-3 font-medium text-brand-600">{p.codigo}</td>
                           <td className="p-3 max-w-[220px] truncate">{p.descripcion}</td>
                           <td className="p-3 text-slate-500">{p.linea || "—"}</td>
                           <td className="p-3 text-right tabular-nums">{p.existencia}</td>
@@ -510,16 +510,16 @@ export default function Reportes() {
       {tab === "centro" && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><Landmark className="w-6 h-6 text-[#C1401E]" /> Centro de Reportes</h1></div>
+            <div><h1 className="font-display text-2xl font-black tracking-tight flex items-center gap-2"><Landmark className="w-6 h-6 text-brand-600" /> Centro de Reportes</h1></div>
             <div className="flex flex-wrap items-center gap-2">
               <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-36" data-testid="cen-desde" />
               <span className="text-slate-400">a</span>
               <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-36" data-testid="cen-hasta" />
-              <Button onClick={loadCentro} className="bg-[#C1401E] hover:bg-[#A03316]" data-testid="cen-aplicar">Aplicar</Button>
+              <Button onClick={loadCentro} className="bg-brand-600 hover:bg-brand-700" data-testid="cen-aplicar">Aplicar</Button>
             </div>
           </div>
 
-          {centroLoading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-[#C1401E]" /></div> : (
+          {centroLoading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-brand-600" /></div> : (
             centro && (
               <>
                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
@@ -537,7 +537,7 @@ export default function Reportes() {
                   <div className="card-soft p-4 flex flex-col justify-center">
                     <div className="text-xs uppercase tracking-wider text-slate-400">Hora / día pico</div>
                     <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {centro.hora_pico != null && <Badge className="bg-[#C1401E]/10 text-[#C1401E]"><Clock3 className="w-3 h-3 mr-1" /> {String(centro.hora_pico).padStart(2, "0")}:00</Badge>}
+                      {centro.hora_pico != null && <Badge className="bg-brand-600/10 text-brand-600"><Clock3 className="w-3 h-3 mr-1" /> {String(centro.hora_pico).padStart(2, "0")}:00</Badge>}
                       {centro.dia_pico && <Badge className="bg-emerald-100 text-emerald-700"><CalendarDays className="w-3 h-3 mr-1" /> {centro.dia_pico}</Badge>}
                     </div>
                   </div>
@@ -552,7 +552,7 @@ export default function Reportes() {
                         <XAxis dataKey="hora" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
                         <Tooltip />
-                        <Bar dataKey="tickets" fill="#C1401E" radius={[2, 2, 0, 0]} />
+                        <Bar dataKey="tickets" fill="#CF090B" radius={[2, 2, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -586,7 +586,7 @@ export default function Reportes() {
                             <td className="p-3 text-right tabular-nums">{money(m.monto)}</td>
                             <td className="p-3 w-1/3">
                               <div className="flex items-center gap-2">
-                                <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-[#C1401E] rounded-full" style={{ width: `${pct}%` }} /></div>
+                                <div className="h-2 flex-1 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-brand-600 rounded-full" style={{ width: `${pct}%` }} /></div>
                                 <span className="text-xs text-slate-500 w-10 text-right">{pct}%</span>
                               </div>
                             </td>

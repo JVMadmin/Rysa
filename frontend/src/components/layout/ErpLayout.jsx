@@ -200,146 +200,104 @@ export default function ErpLayout() {
 
   const run = (to) => { setSearchOpen(false); nav(to); };
 
-  const iconClass = ({ isActive }) =>
-    `flex items-center justify-center rounded-xl h-11 w-11 mx-auto transition-colors ${
-      isActive
-        ? "bg-terracota text-white"
-        : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-    }`;
+  // Densidad del ERP (87.5 %): solo mientras se está dentro del sistema.
+  useEffect(() => {
+    document.documentElement.classList.add("erp-densidad");
+    return () => document.documentElement.classList.remove("erp-densidad");
+  }, []);
 
   const visibleGrouped = (() => {
-        const groups = {};
-        visible.forEach((n) => {
-          const sec = n.section || "OTHERS";
-          if (!groups[sec]) groups[sec] = [];
-          groups[sec].push(n);
-        });
-        return groups;
-      })();
+    const groups = {};
+    visible.forEach((n) => {
+      const sec = n.section || "OTHERS";
+      if (!groups[sec]) groups[sec] = [];
+      groups[sec].push(n);
+    });
+    return groups;
+  })();
 
-      const sectionsOrder = ["PRINCIPAL", "OPERACIÓN Y VENTAS", "ABASTECIMIENTO", "COMERCIAL", "FUERZA DE VENTAS", "ADMINISTRACIÓN", "SISTEMA"];
-
-      const SECTION_PALETTE = {
-        "PRINCIPAL": {
-          badge: "bg-orange-50/80 text-[#C1401E] border border-orange-200/60",
-          header: "text-[#C1401E]",
-          collapsedIcon: "text-[#C1401E] bg-orange-50 hover:bg-orange-100",
-        },
-        "OPERACIÓN Y VENTAS": {
-          badge: "bg-sky-50/80 text-sky-800 border border-sky-200/60",
-          header: "text-sky-800",
-          collapsedIcon: "text-sky-700 bg-sky-50 hover:bg-sky-100",
-        },
-        "ABASTECIMIENTO": {
-          badge: "bg-amber-50/80 text-amber-900 border border-amber-200/60",
-          header: "text-amber-900",
-          collapsedIcon: "text-amber-800 bg-amber-50 hover:bg-amber-100",
-        },
-        "COMERCIAL": {
-          badge: "bg-indigo-50/80 text-indigo-800 border border-indigo-200/60",
-          header: "text-indigo-800",
-          collapsedIcon: "text-indigo-700 bg-indigo-50 hover:bg-indigo-100",
-        },
-        "FUERZA DE VENTAS": {
-          badge: "bg-emerald-50/80 text-emerald-800 border border-emerald-200/60",
-          header: "text-emerald-800",
-          collapsedIcon: "text-emerald-700 bg-emerald-50 hover:bg-emerald-100",
-        },
-        "ADMINISTRACIÓN": {
-          badge: "bg-slate-100/80 text-slate-800 border border-slate-200/60",
-          header: "text-slate-800",
-          collapsedIcon: "text-slate-700 bg-slate-100 hover:bg-slate-200",
-        },
-        "SISTEMA": {
-          badge: "bg-purple-50/80 text-purple-800 border border-purple-200/60",
-          header: "text-purple-800",
-          collapsedIcon: "text-purple-700 bg-purple-50 hover:bg-purple-100",
-        },
-      };
+  const sectionsOrder = ["PRINCIPAL", "OPERACIÓN Y VENTAS", "ABASTECIMIENTO", "COMERCIAL", "FUERZA DE VENTAS", "ADMINISTRACIÓN", "SISTEMA"];
+  const seccionLabel = (sec) => sec.charAt(0) + sec.slice(1).toLowerCase();
 
   return (
     <div className="min-h-screen flex bg-canvas">
-      {/* Sidebar izquierdo: solo iconos, angosto */}
+      {/* Barra lateral en carbón: marca arriba, secciones en acordeón,
+          indicador rojo en el módulo activo. */}
       <aside
         data-testid="sidebar"
-        className={`${collapsed ? "w-[76px] items-center" : "w-56 items-stretch px-3"} shrink-0 bg-white border-r border-slate-100 flex flex-col py-4 gap-4 transition-[width] duration-200 sticky top-0 h-screen z-30`}
+        className={`${collapsed ? "w-[72px]" : "w-60"} shrink-0 bg-carbon-950 text-slate-300 flex flex-col sticky top-0 h-screen z-30 transition-[width] duration-200 ease-out-rysa`}
       >
-        <div className={`flex items-center justify-center gap-2 ${collapsed ? "mx-auto h-11 w-11" : "px-2"}`}>
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 overflow-hidden ${logoUrl ? "" : "bg-terracota shadow-card"}`}>
+        <div className={`flex items-center h-16 border-b border-white/[0.06] ${collapsed ? "justify-center" : "gap-3 px-5"}`}>
+          <div className="h-9 w-9 shrink-0 rounded-md bg-white flex items-center justify-center overflow-hidden">
             {logoUrl ? (
-              <img src={logoUrl} alt="logo" className="w-full h-full object-contain"
+              <img src={logoUrl} alt="Grupo RYSA" className="h-7 w-7 object-contain"
                 onError={(e) => {
-                  if (!e.currentTarget.src.includes("isotipo1.png")) {
-                    e.currentTarget.src = DEFAULT_LOGO;
-                  } else {
-                    e.currentTarget.style.display = "none";
-                  }
+                  if (!e.currentTarget.src.includes("isotipo1.png")) e.currentTarget.src = DEFAULT_LOGO;
+                  else e.currentTarget.style.display = "none";
                 }} />
-            ) : (
-              <Boxes className="w-5 h-5 text-white" />
-            )}
+            ) : <Boxes className="w-5 h-5 text-brand-600" />}
           </div>
           {!collapsed && (
-          <div className="leading-tight">
-            <div className="font-display font-extrabold text-slate-900 text-lg tracking-tight">RYSA</div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-slate-400">ERP · POS</div>
-          </div>
+            <div className="leading-none">
+              <div className="titular-ancho text-[1.05rem] font-extrabold text-white">RYSA</div>
+              <div className="mt-1 text-2xs uppercase tracking-[0.18em] text-slate-400">ERP · POS</div>
+            </div>
           )}
         </div>
 
-        <nav className={collapsed ? "flex-1 flex flex-col items-center gap-1.5 overflow-y-auto w-full px-1" : "flex-1 space-y-1.5 overflow-y-auto"}>
+        <nav aria-label="Módulos del sistema" className={`flex-1 overflow-y-auto py-3 ${collapsed ? "px-2" : "px-3"}`}>
           {sectionsOrder.map((sec) => {
             const items = visibleGrouped[sec];
             if (!items || items.length === 0) return null;
             const isOpen = openSections[sec] !== false;
-            const pal = SECTION_PALETTE[sec] || SECTION_PALETTE["PRINCIPAL"];
+            const activaAqui = items.some((n) => current?.to === n.to);
             return (
-              <div key={sec} className="w-full">
-                {/* Separador de sección */}
+              <div key={sec} className="mb-1">
                 {collapsed ? (
-                  <div className="w-8 h-px bg-slate-200 my-1 mx-auto" />
+                  <div className="mx-auto my-2 h-px w-6 bg-white/10" />
                 ) : (
                   <button
                     type="button"
                     onClick={() => toggleSection(sec)}
-                    className={`w-full flex items-center justify-between px-2.5 py-1.5 my-1 text-[10.5px] uppercase tracking-wider font-bold rounded-lg transition-all ${pal.badge} ${pal.header}`}
+                    aria-expanded={isOpen}
+                    className="w-full flex items-center justify-between px-2 pt-3 pb-1.5 text-2xs font-semibold uppercase tracking-[0.12em] text-slate-400 hover:text-slate-200 transition-colors"
                   >
-                    <span className="truncate">{sec}</span>
-                    {isOpen ? (
-                      <ChevronDown className="w-3.5 h-3.5 opacity-70 shrink-0" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5 opacity-70 shrink-0" />
-                    )}
+                    <span className="flex items-center gap-2 truncate">
+                      {seccionLabel(sec)}
+                      {!isOpen && activaAqui && <span className="h-1.5 w-1.5 rounded-full bg-brand-500" aria-hidden="true" />}
+                    </span>
+                    <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isOpen ? "" : "-rotate-90"}`} />
                   </button>
                 )}
-                {/* Items del acordeón */}
-                {(!collapsed ? isOpen : true) && (
-                  <div className={collapsed ? "flex flex-col items-center gap-1.5" : "space-y-0.5"}>
+                {(collapsed || isOpen) && (
+                  <ul className={collapsed ? "flex flex-col items-center gap-1" : "space-y-0.5"}>
                     {items.map((n) => (
-                      <NavLink
-                        key={n.to}
-                        to={n.to}
-                        title={n.label}
-                        data-testid={`nav-${n.to.split("/").pop()}`}
-                        className={({ isActive }) =>
-                          collapsed
-                            ? `w-11 h-11 flex items-center justify-center rounded-xl transition-all ${
-                                isActive
-                                  ? "bg-terracota text-white shadow-sm ring-2 ring-[#C1401E]/30"
-                                  : `${pal.collapsedIcon} border border-slate-100/80`
-                              }`
-                            : `flex items-center gap-3 px-3 h-10 rounded-xl text-sm font-medium transition-colors ${
-                                isActive
-                                  ? "bg-terracota text-white shadow-sm font-semibold"
-                                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                              }`
-                        }
-                      >
-                        <n.icon className="w-5 h-5 shrink-0" strokeWidth={2} />
-                        {!collapsed && <span className="truncate">{n.label}</span>}
-                      </NavLink>
+                      <li key={n.to} className={collapsed ? "" : "w-full"}>
+                        <NavLink
+                          to={n.to}
+                          title={n.label}
+                          data-testid={`nav-${n.to.split("/").pop()}`}
+                          className={({ isActive }) =>
+                            collapsed
+                              ? `relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
+                                  isActive ? "bg-white/[0.08] text-white" : "text-slate-400 hover:bg-white/[0.05] hover:text-white"
+                                }`
+                              : `relative flex items-center gap-3 h-9 pl-3 pr-2 rounded-md text-[0.9rem] transition-colors ${
+                                  isActive ? "bg-white/[0.08] text-white font-semibold" : "text-slate-400 hover:bg-white/[0.04] hover:text-white"
+                                }`
+                          }
+                        >
+                          {({ isActive }) => (
+                            <>
+                              {isActive && <span className={`absolute ${collapsed ? "-left-2" : "-left-3"} top-1.5 bottom-1.5 w-[3px] rounded-r bg-brand-500`} aria-hidden="true" />}
+                              <n.icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? "text-brand-400" : ""}`} strokeWidth={1.9} />
+                              {!collapsed && <span className="truncate">{n.label}</span>}
+                            </>
+                          )}
+                        </NavLink>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 )}
               </div>
             );
@@ -348,57 +306,51 @@ export default function ErpLayout() {
 
         <button
           onClick={handleToggleCollapsed}
-          className={`${collapsed ? "h-11 w-11 mx-auto" : "h-11 w-full"} flex items-center justify-center rounded-xl hover:bg-slate-100 transition-colors`}
+          className={`flex items-center gap-2 h-12 border-t border-white/[0.06] text-slate-400 hover:text-white transition-colors ${collapsed ? "justify-center" : "px-5"}`}
           data-testid="toggle-sidebar"
-          title={collapsed ? "Expandir" : "Colapsar"}
+          title={collapsed ? "Expandir menú" : "Colapsar menú"}
+          aria-label={collapsed ? "Expandir menú" : "Colapsar menú"}
         >
-          {collapsed ? <Menu className="w-5 h-5 text-slate-400" /> : <ChevronLeft className="w-5 h-5 text-slate-400" />}
+          {collapsed ? <Menu className="w-5 h-5" /> : <><ChevronLeft className="w-4 h-4" /><span className="text-sm">Colapsar</span></>}
         </button>
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 bg-canvas">
-        {/* Navbar superior: breadcrumb + búsqueda global (sin navegación) */}
-        <header className="sticky top-0 z-20 h-16 bg-white/90 backdrop-blur-md border-b border-slate-100 flex items-center justify-between gap-3 sm:gap-6 px-4 sm:px-6 shadow-[0_1px_2px_rgba(26,26,26,0.03)]">
-          {/* Breadcrumb del módulo actual */}
-          <div className="flex items-center gap-2 shrink-0 min-w-0">
+        {/* Barra superior: módulo actual, búsqueda global, estado y perfil */}
+        <header className="sticky top-0 z-20 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 flex items-center justify-between gap-3 sm:gap-6 px-4 sm:px-6">
+          <div className="flex items-center gap-2.5 shrink-0 min-w-0">
             {current ? (
               <>
-                <current.icon className="w-5 h-5 text-terracota shrink-0" strokeWidth={2} />
-                <span className="font-display font-semibold text-slate-900 truncate">{current.label}</span>
+                <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-50 text-brand-600"><current.icon className="w-[18px] h-[18px]" strokeWidth={2} /></span>
+                <h1 className="font-display text-[1.05rem] font-bold text-slate-900 truncate">{current.label}</h1>
               </>
             ) : (
-              <span className="font-display font-extrabold tracking-tight text-slate-900">Grupo RYSA</span>
+              <h1 className="font-display text-[1.05rem] font-bold text-slate-900">Grupo RYSA</h1>
             )}
-            <span className="hidden md:inline-flex items-center text-xs font-sans font-normal text-slate-400">
-              <ChevronRight className="w-3.5 h-3.5 mx-1 text-slate-300" />
-              Sistema ERP
-            </span>
           </div>
 
-          {/* Búsqueda global */}
           <button
             onClick={() => setSearchOpen(true)}
             data-testid="global-search"
-            className="flex items-center gap-2 flex-1 max-w-md h-10 px-3.5 rounded-full bg-slate-100 text-slate-400 hover:bg-slate-200/70 hover:text-slate-500 transition-colors"
+            className="flex items-center gap-2 flex-1 max-w-md h-10 px-3.5 rounded-md border border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300 hover:bg-white transition-colors"
           >
             <Search className="w-4 h-4 shrink-0" strokeWidth={2} />
-            <span className="text-sm truncate">Buscar módulo o acción·</span>
-            <kbd className="ml-auto hidden sm:inline-flex items-center h-5 px-1.5 rounded-md bg-white border border-slate-200 text-[10px] font-semibold text-slate-400">Ctrl K</kbd>
+            <span className="text-sm truncate">Buscar módulo o acción…</span>
+            <kbd className="ml-auto hidden sm:inline-flex items-center h-5 px-1.5 rounded border border-slate-200 bg-white text-2xs font-semibold text-slate-500">Ctrl K</kbd>
           </button>
 
-          {/* Derecha: caja, timbres, perfil y logout */}
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {cajaOpen !== null && (
               <div
                 title={cajaOpen ? `Caja abierta por ${cajaUser}` : "No hay caja abierta"}
                 data-testid="caja-status"
-                className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tracking-wide transition-all ${
-                  cajaOpen ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"
+                className={`hidden sm:flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold ${
+                  cajaOpen ? "bg-green-50 text-success ring-1 ring-green-200" : "bg-slate-100 text-slate-600"
                 }`}
               >
                 <span className={`dot ${cajaOpen ? "dot-success" : "dot-muted"}`} />
                 <span>{cajaOpen ? "Caja abierta" : "Caja cerrada"}</span>
-                {cajaOpen && cajaUser && <span className="hidden lg:inline opacity-70">· {cajaUser}</span>}
+                {cajaOpen && cajaUser && <span className="hidden lg:inline font-normal opacity-80">· {cajaUser}</span>}
               </div>
             )}
 
@@ -406,35 +358,30 @@ export default function ErpLayout() {
               <div
                 title="Timbres CFDI disponibles"
                 data-testid="timbres-badge"
-                className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tracking-wide transition-all ${
+                className={`hidden sm:flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold ${
                   timbres.alerta ? "rysa-header-badge-alert" : "rysa-header-badge-success"
                 }`}
               >
                 <Stamp className="w-3.5 h-3.5 shrink-0" strokeWidth={2.2} />
-                <span>{timbres.disponibles ?? "·"}</span>
-                <span className="hidden lg:inline">timbres</span>
+                <span className="cifras">{timbres.disponibles ?? "·"}</span>
+                <span className="hidden lg:inline font-normal">timbres</span>
               </div>
             )}
 
-            <div className="flex items-center gap-2.5 sm:gap-3 pl-1 sm:pl-2 border-l border-slate-200/80">
+            <div className="flex items-center gap-2.5 sm:gap-3 pl-2 sm:pl-3 border-l border-slate-200">
               <div className="text-right leading-tight hidden sm:block">
-                <div className="text-xs sm:text-sm font-semibold text-slate-800 tracking-tight" data-testid="user-name">
-                  {user?.name}
-                </div>
-                <div className="inline-block px-1.5 py-0.5 rounded-full text-[10px] uppercase font-bold tracking-wider rysa-header-user-role mt-0.5">
-                  {user?.role}
-                </div>
+                <div className="text-sm font-semibold text-slate-900" data-testid="user-name">{user?.name}</div>
+                <div className="text-2xs uppercase tracking-[0.08em] font-semibold text-slate-500 mt-0.5">{(user?.role || "").replace(/_/g, " ")}</div>
               </div>
-
-              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-gradient-to-br from-terracota to-terracota-dark text-white flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 select-none shadow-card">
+              <div className="w-9 h-9 rounded-md bg-carbon-900 text-white flex items-center justify-center font-display font-bold text-sm shrink-0 select-none">
                 {user?.name?.[0]?.toUpperCase() || "U"}
               </div>
-
               <button
                 onClick={doLogout}
                 data-testid="logout-btn"
                 title="Cerrar sesión"
-                className="h-9 w-9 flex items-center justify-center rounded-full text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                aria-label="Cerrar sesión"
+                className="h-9 w-9 flex items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition-colors"
               >
                 <LogOut className="w-[18px] h-[18px]" strokeWidth={2} />
               </button>
@@ -450,7 +397,7 @@ export default function ErpLayout() {
             <CommandGroup heading="Ir a">
               {visible.map((n) => (
                 <CommandItem key={n.to} value={`${n.label} ${n.to} ir navegar`} onSelect={() => run(n.to)} data-testid={`palette-${n.to.split("/").pop()}`}>
-                  <n.icon className="text-terracota" strokeWidth={2} />
+                  <n.icon className="text-brand-600" strokeWidth={2} />
                   <span>{n.label}</span>
                 </CommandItem>
               ))}

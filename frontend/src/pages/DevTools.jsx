@@ -19,7 +19,7 @@ import {
   Server, ShieldCheck, Sparkles, Trash2, Undo2, Wrench, XCircle,
 } from "lucide-react";
 
-const TERRACOTA = "#C1401E";
+const TERRACOTA = "#CF090B";
 const nf = new Intl.NumberFormat("es-MX");
 
 /* ============================ Componentes base ============================ */
