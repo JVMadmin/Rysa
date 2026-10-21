@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,13 +10,17 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { toast } from "sonner";
-import Usuarios from "@/pages/Usuarios";
 import { ImageUpload } from "@/components/ImageUpload";
 import { fileUrl, API } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
-import { Building2, MapPin, DollarSign, Store, UserCog, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap, HardDrive, Printer as PrinterIcon, Search, RefreshCw, CheckCircle2, XCircle, Landmark, Star, Pencil, Power, AlertTriangle } from "lucide-react";
+import { Building2, MapPin, DollarSign, Store, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap, HardDrive, Printer as PrinterIcon, Search, RefreshCw, CheckCircle2, XCircle, Landmark, Star, Pencil, Power, AlertTriangle } from "lucide-react";
 
 export default function Configuracion() {
+  // La pestaña va en la URL (?tab=…) para poder enlazar directo a
+  // Sucursales, Impresoras o Cuentas bancarias.
+  const PESTANAS = ["empresa", "precios", "sucursales", "cuentas", "ticket", "impresoras", "storage", "datos"];
+  const [params, setParams] = useSearchParams();
+  const pestana = PESTANAS.includes(params.get("tab")) ? params.get("tab") : "empresa";
   const { can } = useAuth();
   const [s, setS] = useState(null);
   const [sErr, setSErr] = useState("");
@@ -132,7 +137,7 @@ export default function Configuracion() {
       if (p.tipo_conexion === "browser") {
         const win = window.open("", "_blank", "width=520,height=360");
         if (!win) throw new Error("popup bloqueado");
-        win.document.write('<html><head><title>Prueba de impresión RYSA</title></head><body style="font-family:sans-serif;font-size:14px;padding:24px"><h2 style="color:#C1401E">Prueba de impresión RYSA</h2><p>Si puedes imprimir esta página, la impresión por navegador funciona correctamente.</p><script>window.print();</' + 'script></body></html>');
+        win.document.write('<html><head><title>Prueba de impresión RYSA</title></head><body style="font-family:sans-serif;font-size:14px;padding:24px"><h2 style="color:#CD0708">Prueba de impresión RYSA</h2><p>Si puedes imprimir esta página, la impresión por navegador funciona correctamente.</p><script>window.print();</' + 'script></body></html>');
         win.document.close();
         setPruebaState((x) => ({ ...x, [p.id]: "ok" }));
         toast.success("Prueba de impresión enviada correctamente.");
@@ -282,7 +287,7 @@ export default function Configuracion() {
         <Button onClick={save} disabled={saving} className="bg-brand-600 hover:bg-brand-700" data-testid="cfg-save"><Save className="w-4 h-4 mr-1" /> {saving ? "Guardando..." : "Guardar"}</Button>
       </div>
 
-      <Tabs defaultValue="empresa">
+      <Tabs value={pestana} onValueChange={(v) => setParams({ tab: v }, { replace: true })}>
         <TabsList className="flex flex-wrap h-auto">
           <TabsTrigger value="empresa" data-testid="tab-empresa"><Building2 className="w-4 h-4 mr-1" /> Empresa / Ubicación</TabsTrigger>
           <TabsTrigger value="precios" data-testid="tab-precios"><DollarSign className="w-4 h-4 mr-1" /> Precios</TabsTrigger>
@@ -290,7 +295,6 @@ export default function Configuracion() {
           <TabsTrigger value="cuentas" data-testid="tab-cuentas"><Landmark className="w-4 h-4 mr-1" /> Cuentas bancarias</TabsTrigger>
           <TabsTrigger value="ticket" data-testid="tab-ticket"><Receipt className="w-4 h-4 mr-1" /> Diseño de ticket</TabsTrigger>
           <TabsTrigger value="impresoras" data-testid="tab-impresoras"><PrinterIcon className="w-4 h-4 mr-1" /> Impresoras</TabsTrigger>
-          <TabsTrigger value="usuarios" data-testid="tab-usuarios"><UserCog className="w-4 h-4 mr-1" /> Usuarios</TabsTrigger>
           <TabsTrigger value="storage" data-testid="tab-storage"><HardDrive className="w-4 h-4 mr-1" /> Almacenamiento</TabsTrigger>
           {can("config") && <TabsTrigger value="datos" data-testid="tab-datos"><DatabaseZap className="w-4 h-4 mr-1" /> Datos</TabsTrigger>}
         </TabsList>
@@ -415,19 +419,19 @@ export default function Configuracion() {
         </TabsContent>
 
         <TabsContent value="ticket" className="pt-4 space-y-4">
-          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center justify-between">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-bold text-indigo-950 flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-indigo-600" />
+              <h3 className="text-sm font-bold text-carbon-900 flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-carbon-800" />
                 Editor de formatos de documentos
               </h3>
-              <p className="text-xs text-indigo-700 mt-0.5">
+              <p className="text-xs text-carbon-900 mt-0.5">
                 Personaliza tickets, notas de venta, cotizaciones, abonos, compras y movimientos de caja con vista previa real. El formato predeterminado siempre se puede restaurar.
               </p>
             </div>
             <a
               href="/app/machotes"
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap"
+              className="px-4 py-2 bg-carbon-900 hover:bg-carbon-800 text-white rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap"
             >
               Abrir editor de formatos →
             </a>
@@ -655,9 +659,6 @@ export default function Configuracion() {
           </div>
         </TabsContent>
 
-        <TabsContent value="usuarios" className="pt-4">
-          <Usuarios embedded />
-        </TabsContent>
 
         <TabsContent value="storage" className="pt-4">
           <div className="card-soft p-5 max-w-xl space-y-5" data-testid="storage-panel">

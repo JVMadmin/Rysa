@@ -33,7 +33,6 @@ import Auditoria from "@/pages/Auditoria";
 import Configuracion from "@/pages/Configuracion";
 import MachotesEditor from "@/pages/MachotesEditor";
 import DevTools from "@/pages/DevTools";
-import EnConstruccion from "@/pages/EnConstruccion";
 import Finanzas from "@/pages/Finanzas";
 import Cotizaciones from "@/pages/Cotizaciones";
 import Pedidos from "@/pages/Pedidos";
@@ -114,9 +113,10 @@ function App() {
             <Route path="/app/visitas" element={<Navigate to="/app/mi-actividad" replace />} />
 
             <Route path="/app/finanzas" element={<RequirePerm perm="finanzas.ver"><Finanzas /></RequirePerm>} />
-            <Route path="/app/sucursales" element={<EnConstruccion titulo="Sucursales" />} />
-            <Route path="/app/impresoras" element={<EnConstruccion titulo="Impresoras" />} />
-            <Route path="/app/cuentas-bancarias" element={<EnConstruccion titulo="Cuentas bancarias" />} />
+            {/* Sucursales, impresoras y cuentas bancarias son pestañas de Configuración. */}
+            <Route path="/app/sucursales" element={<Navigate to="/app/configuracion?tab=sucursales" replace />} />
+            <Route path="/app/impresoras" element={<Navigate to="/app/configuracion?tab=impresoras" replace />} />
+            <Route path="/app/cuentas-bancarias" element={<Navigate to="/app/configuracion?tab=cuentas" replace />} />
             <Route path="/app/usuarios" element={<RequirePerm perm="usuarios.ver"><Usuarios /></RequirePerm>} />
             <Route path="/app/configuracion" element={<Configuracion />} />
             <Route path="/app/machotes" element={<RequirePerm perm="config"><MachotesEditor /></RequirePerm>} />

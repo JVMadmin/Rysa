@@ -184,7 +184,9 @@ MODULES = {
     },
     "recargas": {
         "label": "Recargas",
-        "perms": {"venta.crear", "recargas.ver_todas"},
+        # recargas.usar es el que exige la pantalla de Recargas; sin él el
+        # módulo asignado no daba acceso.
+        "perms": {"venta.crear", "recargas.usar", "recargas.ver_todas"},
     },
     "caja": {
         "label": "Caja",

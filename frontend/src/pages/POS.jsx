@@ -1131,7 +1131,7 @@ export default function POS({ windowId, windowLabel }) {
                             <select
                               value={i.presentacion || i.unidad}
                               onChange={(e) => setPresentacion(i.product_id, e.target.value)}
-                              className="w-20 h-6 px-1 text-center text-[11px] font-bold bg-indigo-50 border border-indigo-300 rounded text-indigo-900 cursor-pointer shadow-sm"
+                              className="w-20 h-6 px-1 text-center text-[11px] font-bold bg-slate-50 border border-slate-300 rounded text-carbon-900 cursor-pointer shadow-sm"
                               data-testid={`cart-pres-${i.codigo}`}
                             >
                               {i.presentaciones.map((pr) => (
@@ -1659,7 +1659,7 @@ export default function POS({ windowId, windowLabel }) {
                     <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/isotipo1.png"} alt="logo" style={{ height: 60 }} className="object-contain" />
                   </div>
                   <div className="text-right" style={{ fontSize: "9pt", color: "#475569" }}>
-                    <div style={{ fontSize: "14pt", fontWeight: 700, color: "#C1401E" }}>{settings.empresa_nombre || "Grupo RYSA"}</div>
+                    <div style={{ fontSize: "14pt", fontWeight: 700, color: "#CD0708" }}>{settings.empresa_nombre || "Grupo RYSA"}</div>
                     <div>{settings.razon_social || "RAYMUNDO GOMEZ DIAZ"}</div>
                     {settings.rfc && <div>RFC: {settings.rfc}</div>}
                     {settings.direccion && <div>{settings.direccion}</div>}
@@ -1671,11 +1671,11 @@ export default function POS({ windowId, windowLabel }) {
                 </div>
 
                 {/* Línea divisoria */}
-                <div style={{ height: 3, background: "#C1401E", marginBottom: 12 }} />
+                <div style={{ height: 3, background: "#CD0708", marginBottom: 12 }} />
 
                 {/* Título */}
                 <div className="text-center mb-5">
-                  <div style={{ fontSize: "18pt", fontWeight: 800, color: "#C1401E", letterSpacing: 2 }}>
+                  <div style={{ fontSize: "18pt", fontWeight: 800, color: "#CD0708", letterSpacing: 2 }}>
                     {ticket.tipo_venta === "cotizacion" ? "COTIZACIN" : "FACTURA"}
                   </div>
                   <div style={{ fontSize: "10pt", color: "#64748B" }}>Folio: {ticket.folio}</div>
@@ -1722,7 +1722,7 @@ export default function POS({ windowId, windowLabel }) {
                       return (
                         <tr key={k}>
                           <td style={{ fontSize: "8pt" }}>{i.codigo}</td>
-                          <td>{i.descripcion}{i.comentario ? <><br /><span style={{ fontSize: "7.5pt", color: "#C1401E" }}>⬢ {i.comentario}</span></> : null}</td>
+                          <td>{i.descripcion}{i.comentario ? <><br /><span style={{ fontSize: "7.5pt", color: "#CD0708" }}>⬢ {i.comentario}</span></> : null}</td>
                           <td>{i.unidad}</td>
                           <td className="text-right">{i.cantidad}</td>
                           <td className="text-right">{money(uniPrecio)}</td>
@@ -1755,7 +1755,7 @@ export default function POS({ windowId, windowLabel }) {
                     {ticket.descuento_total > 0 && (
                       <div className="flex justify-between py-1"><span>Descuento</span><span>-{money(ticket.descuento_total)}</span></div>
                     )}
-                    <div className="flex justify-between py-1" style={{ fontWeight: 700, fontSize: "12pt", color: "#C1401E", borderTop: "2px solid #C1401E" }}>
+                    <div className="flex justify-between py-1" style={{ fontWeight: 700, fontSize: "12pt", color: "#CD0708", borderTop: "2px solid #CD0708" }}>
                       <span>TOTAL</span><span>{money(ticket.total)}</span>
                     </div>
                     {!incluyeIva && <div style={{ fontSize: "8pt", color: "#94a3b8", textAlign: "right" }}>Precios sin IVA</div>}
@@ -1894,7 +1894,7 @@ export default function POS({ windowId, windowLabel }) {
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><HandCoins className="w-5 h-5 text-brand-600" /> Abono registrado correctamente</DialogTitle></DialogHeader>
           {posComp && (
             <div className="space-y-4">
-              <div className="rounded-xl border border-[#E5E0DA] overflow-hidden" data-testid="pos-comprobante-abono-cuerpo">
+              <div className="rounded-xl border border-[#D9DADD] overflow-hidden" data-testid="pos-comprobante-abono-cuerpo">
                 <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-brand-600">
                   <img src={settings.logo_url ? fileUrl(settings.logo_url) : "/brand/isotipo1.png"} alt="logo" className="h-12 w-12 object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                   <div className="flex-1">

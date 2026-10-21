@@ -556,7 +556,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                   <TileLayer url={MAP_THEME} attribution="&copy; OpenStreetMap" />
                   <MapClickPicker onPick={setPos} />
                   {Number.isFinite(Number(f.latitud)) && Number.isFinite(Number(f.longitud)) && Number(f.latitud) !== 0 && Number(f.longitud) !== 0 && (
-                    <Marker position={[f.latitud, f.longitud]} icon={pinIcon("#CF090B")} />
+                    <Marker position={[f.latitud, f.longitud]} icon={pinIcon("#CD0708")} />
                   )}
                 </MapContainer>
               </div>

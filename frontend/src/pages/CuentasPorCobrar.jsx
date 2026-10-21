@@ -519,7 +519,7 @@ export default function CuentasPorCobrar() {
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Saldo</div><div className="font-display font-bold text-red-600">{money(detalle.cliente.saldo)}</div></div>
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Límite</div><div className="font-display font-bold">{money(detalle.cliente.limite_credito)}</div></div>
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Días crédito</div><div className="font-display font-bold">{detalle.cliente.dias_credito}</div></div>
-                <div className="bg-indigo-50/60 rounded p-3 border border-indigo-100"><div className="text-xs text-indigo-600 font-medium">Asesor Asignado</div><div className="font-display font-bold text-indigo-950 text-sm truncate" title={detalle.cliente.vendedor_nombre || detalle.cliente.vendedor || detCli.vendedor_nombre || detCli.vendedor || "No asignado"}>{detalle.cliente.vendedor_nombre || detalle.cliente.vendedor || detCli.vendedor_nombre || detCli.vendedor || "No asignado"}</div></div>
+                <div className="bg-slate-50 rounded p-3 border border-slate-200"><div className="text-xs text-carbon-800 font-medium">Asesor Asignado</div><div className="font-display font-bold text-carbon-900 text-sm truncate" title={detalle.cliente.vendedor_nombre || detalle.cliente.vendedor || detCli.vendedor_nombre || detCli.vendedor || "No asignado"}>{detalle.cliente.vendedor_nombre || detalle.cliente.vendedor || detCli.vendedor_nombre || detCli.vendedor || "No asignado"}</div></div>
               </div>
 
               <div>
@@ -541,7 +541,7 @@ export default function CuentasPorCobrar() {
                       onClick={() => setFiltroDetalleSaldo(false)}
                       className={`px-2.5 py-1 text-xs rounded-md font-bold transition ${
                         !filtroDetalleSaldo
-                          ? "bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm"
+                          ? "bg-slate-50 text-carbon-900 border border-slate-200 shadow-sm"
                           : "text-slate-500 hover:bg-slate-100"
                       }`}
                     >
@@ -774,7 +774,7 @@ export default function CuentasPorCobrar() {
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Receipt className="w-5 h-5 text-brand-600" /> Abono registrado correctamente</DialogTitle></DialogHeader>
           {comp && (
             <div className="space-y-4">
-              <div className="rounded-xl border border-[#E5E0DA] overflow-hidden" data-testid="comprobante-abono-cuerpo">
+              <div className="rounded-xl border border-[#D9DADD] overflow-hidden" data-testid="comprobante-abono-cuerpo">
                 {/* Encabezado RYSA */}
                 <div className="flex items-center gap-3 px-4 py-3 border-b-4 border-brand-600">
                   <img src={logo} alt="logo" className="h-12 w-12 object-contain" onError={(e) => { e.currentTarget.style.display = "none"; }} />

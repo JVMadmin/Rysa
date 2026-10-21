@@ -153,7 +153,7 @@ export default function Categorias() {
                   {c.clave && <div className="text-xs text-slate-400">Clave: {c.clave}</div>}
                   <p className="text-xs text-slate-500 mt-1 line-clamp-2 h-8">{c.descripcion || "Sin descripción."}</p>
                   <div className="flex gap-2 mt-3">
-                    <Button size="sm" variant="outline" className="flex-1" onClick={() => nav("/app/productos", { state: { categoria: c.nombre } })} data-testid={`cat-ver-${c.nombre}`}>
+                    <Button size="sm" variant="outline" className="flex-1" onClick={() => nav("/app/inventario", { state: { categoria: c.nombre } })} data-testid={`cat-ver-${c.nombre}`}>
                       <PackageSearch className="w-4 h-4 mr-1" /> Ver ({c.count})
                     </Button>
                     {editable && <>

@@ -65,7 +65,7 @@ export default function Finanzas() {
     ["Efectivo recibido", money(r?.efectivo), Wallet, "text-brand-600"],
     ["Compras de mercancía", money(r?.compras_total), ArrowDownCircle, "text-blue-700"],
     ["Gastos operativos", money(r?.gastos_total), ArrowDownCircle, "text-amber-700"],
-    ["Cuentas por cobrar", money(r?.cartera_cxc), HandCoins, "text-purple-700"],
+    ["Cuentas por cobrar", money(r?.cartera_cxc), HandCoins, "text-carbon-900"],
     ["Vencido CxC", money(r?.vencido_cxc), HandCoins, "text-red-600"],
     ["Cuentas por pagar", money(r?.cuentas_por_pagar), Receipt, "text-red-600"],
   ];

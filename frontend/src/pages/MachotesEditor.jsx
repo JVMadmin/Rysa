@@ -17,7 +17,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 // ════════════════════════════════════════════════════════════════════════
 // Catálogos
 // ════════════════════════════════════════════════════════════════════════
-const COLORES = ["#C1401E", "#1F1F1F", "#6B7280", "#F4ECE7", "#E5E0DA", "#FFFFFF", "#000000", "#1E3A5F", "#15803D", "#DC2626", "#EA580C", "#FDF4F0"];
+// Muestras de color del editor: familia RYSA (rojo, grafito, neutros) más dos de estado.
+const COLORES = ["#CD0708", "#A3060A", "#2E2F34", "#4A4B50", "#6B6D73", "#D9DADD", "#FDECEC", "#F6F5F2", "#FFFFFF", "#000000", "#15803D", "#B45309"];
 
 const TIPOS_BLOQUE = {
   texto: { label: "Texto", icon: Type, grupo: "Básicos" },
@@ -38,18 +39,18 @@ const TIPOS_BLOQUE = {
 
 // Plantillas rápidas que se insertan desde la paleta.
 const PRESETS = [
-  { label: "Título del documento", grupo: "Básicos", bloque: { tipo: "texto", contenido: "<b>{{doc.titulo}}</b>", estilo: { tamano: 15, color: "#C1401E" } } },
+  { label: "Título del documento", grupo: "Básicos", bloque: { tipo: "texto", contenido: "<b>{{doc.titulo}}</b>", estilo: { tamano: 15, color: "#CD0708" } } },
   { label: "Importe con letra", grupo: "Datos", bloque: { tipo: "texto", contenido: "Son: <b>({{doc.total_letra}})</b>", estilo: { cursiva: true, color: "#6B7280" } } },
-  { label: "Datos del cliente", grupo: "Datos", bloque: { tipo: "campos", titulo: "CLIENTE", titulo_fondo: "#F4ECE7", titulo_color: "#C1401E", columnas: 2, campos: [
+  { label: "Datos del cliente", grupo: "Datos", bloque: { tipo: "campos", titulo: "CLIENTE", titulo_fondo: "#FDECEC", titulo_color: "#CD0708", columnas: 2, campos: [
     { etiqueta: "Nombre", valor: "{{cliente.nombre}}" }, { etiqueta: "RFC", valor: "{{cliente.rfc}}" },
     { etiqueta: "Teléfono", valor: "{{cliente.telefono}}" }, { etiqueta: "Dirección", valor: "{{cliente.direccion_completa}}" }],
-    estilo: { borde: { ancho: 0.6, color: "#E5E0DA" } } } },
+    estilo: { borde: { ancho: 0.6, color: "#D9DADD" } } } },
   { label: "Encabezado de empresa", grupo: "Marca", bloque: { tipo: "columnas", alinear_vertical: "centro", columnas: [
     { ancho: 30, bloques: [{ tipo: "logo", fuente: "oficial", ancho_mm: 48, alto_mm: 24, estilo: { align: "left" } }] },
     { ancho: 70, bloques: [
-      { tipo: "texto", contenido: "<b>{{empresa.nombre}}</b>", estilo: { tamano: 14, color: "#C1401E", align: "right" } },
+      { tipo: "texto", contenido: "<b>{{empresa.nombre}}</b>", estilo: { tamano: 14, color: "#CD0708", align: "right" } },
       { tipo: "texto", contenido: "RFC: {{empresa.rfc}}<br/>{{empresa.direccion_completa}}<br/>Tel: {{empresa.telefono}}", estilo: { tamano: 8.5, color: "#6B7280", align: "right" } }] }] } },
-  { label: "Banda de título", grupo: "Diseño", bloque: { tipo: "texto", contenido: "<b>{{doc.titulo}}</b>", estilo: { align: "center", tamano: 14, color: "#FFFFFF", fondo: "#C1401E", padding: [2.5, 0, 2.5, 0] } } },
+  { label: "Banda de título", grupo: "Diseño", bloque: { tipo: "texto", contenido: "<b>{{doc.titulo}}</b>", estilo: { align: "center", tamano: 14, color: "#FFFFFF", fondo: "#CD0708", padding: [2.5, 0, 2.5, 0] } } },
   { label: "Nota / condiciones", grupo: "Básicos", bloque: { tipo: "texto", contenido: "Precios sujetos a cambio sin previo aviso.", estilo: { tamano: 7.5, color: "#6B7280", align: "center" } } },
 ];
 
@@ -589,10 +590,10 @@ function Paleta({ open, onClose, onElegir }) {
 }
 
 const BLOQUE_NUEVO = {
-  texto: { contenido: "Texto nuevo" }, separador: { linea: "solida", grosor: 0.6, color: "#E5E0DA" }, espacio: { alto_mm: 4 },
+  texto: { contenido: "Texto nuevo" }, separador: { linea: "solida", grosor: 0.6, color: "#D9DADD" }, espacio: { alto_mm: 4 },
   logo: { fuente: "oficial", ancho_mm: 50, alto_mm: 25, estilo: { align: "center" } }, imagen: { ancho_mm: 40 },
   campos: { columnas: 1, campos: [{ etiqueta: "Folio", valor: "{{doc.folio}}" }, { etiqueta: "Fecha", valor: "{{doc.fecha}}" }] },
-  tabla_items: { modo: "tabla", bordes: "cuadricula", color_borde: "#E5E0DA", encabezado: { visible: true, fondo: "#C1401E", color: "#FFFFFF" },
+  tabla_items: { modo: "tabla", bordes: "cuadricula", color_borde: "#D9DADD", encabezado: { visible: true, fondo: "#CD0708", color: "#FFFFFF" },
     columnas: [{ campo: "cantidad", titulo: "Cant.", ancho: 12 }, { campo: "descripcion", titulo: "Descripción", ancho: 50 }, { campo: "precio", titulo: "Precio", ancho: 18 }, { campo: "importe", titulo: "Importe", ancho: 20 }] },
   totales: { posicion: "derecha", ancho_pct: 50, filas: [{ campo: "subtotal" }, { campo: "descuento" }, { campo: "iva" }, { campo: "total", destacar: true }] },
   qr: { contenido: "{{doc.qr_verificar}}", tamano_mm: 22, estilo: { align: "center" } }, firmas: { firmas: ["Entregó", "Recibió"], espacio_mm: 12 },

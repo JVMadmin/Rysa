@@ -96,7 +96,7 @@ const Card = ({ label, value, icon: Ic, iconCls = "text-slate-500", valueCls = "
   </div>
 );
 
-const TIPO = { compra: ["Compra", "bg-blue-100 text-blue-700"], gasto: ["Gasto", "bg-amber-100 text-amber-700"], mixto: ["Mixta", "bg-purple-100 text-purple-700"] };
+const TIPO = { compra: ["Compra", "bg-blue-100 text-blue-700"], gasto: ["Gasto", "bg-amber-100 text-amber-700"], mixto: ["Mixta", "bg-slate-200 text-carbon-900"] };
 const ESTADO = { confirmada: ["Confirmada", "bg-green-100 text-green-700"], cancelada: ["Cancelada", "bg-red-100 text-red-700"] };
 
 export default function Compras() {
@@ -587,7 +587,7 @@ export default function Compras() {
         <Card label="Pendientes (compras)" value={money(r.compras_pendientes || 0)} icon={Clock} iconCls="text-red-500" valueCls="text-red-700" testid="compras-pendientes" />
         <Card label="Pendientes (gastos)" value={money(r.gastos_pendientes || 0)} icon={Clock} iconCls="text-orange-500" valueCls="text-orange-700" testid="gastos-pendientes" />
         <Card label="Facturas" value={r.facturas || 0} icon={FileCheck} iconCls="text-green-500" valueCls="text-green-700" testid="compras-facturas" />
-        <Card label="Mejor proveedor" value={r.mejor_proveedor || "—"} icon={Wallet} iconCls="text-purple-500" valueCls="text-sm text-purple-700 truncate" testid="compras-mejor-prov" />
+        <Card label="Mejor proveedor" value={r.mejor_proveedor || "—"} icon={Wallet} iconCls="text-slate-500" valueCls="text-sm text-carbon-900 truncate" testid="compras-mejor-prov" />
         <Card label="Categoría mayor" value={r.mejor_categoria || "—"} icon={Wallet} iconCls="text-pink-500" valueCls="text-sm text-pink-700 truncate" testid="compras-mejor-cat" />
       </div>
       </>

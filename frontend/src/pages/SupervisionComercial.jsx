@@ -748,20 +748,20 @@ export default function SupervisionComercial() {
                     <div className="card-soft p-4 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs uppercase tracking-wider text-slate-400 font-medium">Visitas en Campo</span>
-                        <CheckCircle2 className="w-4 h-4 text-indigo-600" />
+                        <CheckCircle2 className="w-4 h-4 text-carbon-800" />
                       </div>
                       <div className="font-display font-black text-2xl text-slate-900">
                         {metasData.totales?.visitas_reales || 0}
                       </div>
                       <div className="flex items-center justify-between text-xs text-slate-500">
                         <span>Obj: {metasData.totales?.meta_visitas || 0} visitas</span>
-                        <span className="font-bold text-indigo-600">
+                        <span className="font-bold text-carbon-800">
                           {metasData.totales?.avance_visitas_pct || 0}%
                         </span>
                       </div>
                       <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                          className="h-full bg-carbon-800 rounded-full transition-all duration-500"
                           style={{ width: `${Math.min(100, metasData.totales?.avance_visitas_pct || 0)}%` }}
                         />
                       </div>

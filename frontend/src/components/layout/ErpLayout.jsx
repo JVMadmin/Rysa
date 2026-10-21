@@ -2,42 +2,45 @@ import React from "react";
 import { NavLink, Outlet, useNavigate, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { useBranding, DEFAULT_LOGO } from "@/hooks/useBranding";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
-  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Boxes, Settings, Tags, HandCoins, FileText, Stamp, BarChart3, Smartphone, Bug, Wrench,
-  Search, ChevronRight, ChevronDown, Radar, Route as RouteIcon, ShoppingBag, Truck, Images,
+  UserCog, ScrollText, LogOut, Menu, ChevronLeft, Settings, HandCoins, FileText, Stamp, BarChart3, Smartphone, Wrench,
+  Search, ChevronDown, Radar, Route as RouteIcon, ShoppingBag, Truck, Images, ClipboardList, FileSignature, PieChart,
+  CreditCard, ShieldCheck,
 } from "lucide-react";
 import {
-  Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
+  CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 
+// Cada módulo aparece UNA sola vez y con el mismo permiso que exige su ruta
+// en App.js, para que nadie vea un acceso que luego lo rechaza.
+// Sucursales, impresoras y cuentas bancarias viven en Configuración (pestañas);
+// Categorías vive dentro de Inventario (botón en la cabecera de Productos).
 const NAV = [
   // PRINCIPAL
   { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, section: "PRINCIPAL" },
-  
+
   // OPERACIÓN Y VENTAS
   { to: "/app/pos", label: "Punto de venta", icon: ShoppingCart, perm: "venta.crear", section: "OPERACIÓN Y VENTAS" },
   { to: "/app/ventas", label: "Ventas", icon: Receipt, perm: "venta.crear", section: "OPERACIÓN Y VENTAS" },
   { to: "/app/catalogo", label: "Catálogo", icon: Images, perm: "catalogo.ver", section: "OPERACIÓN Y VENTAS" },
   { to: "/app/inventario", label: "Inventario", icon: Package, perm: "producto.crear", section: "OPERACIÓN Y VENTAS" },
-  // Categorías vive DENTRO de Inventario (botón en la cabecera de Productos).
   { to: "/app/clientes", label: "Clientes", icon: Users, perm: "clientes.gestionar", section: "OPERACIÓN Y VENTAS" },
   { to: "/app/cxc", label: "Cuentas por cobrar", icon: HandCoins, perm: "cxc.ver", section: "OPERACIÓN Y VENTAS" },
-  { to: "/app/recargas", label: "Recargas y Servicios", icon: Smartphone, perm: "recargas.usar", section: "OPERACIÓN Y VENTAS" },
-  
-  // ASAUSTECIMIENTO
+  { to: "/app/recargas", label: "Recargas y servicios", icon: Smartphone, perm: "recargas.usar", section: "OPERACIÓN Y VENTAS" },
+
+  // ABASTECIMIENTO
   { to: "/app/compras", label: "Compras y gastos", icon: ShoppingBag, perm: "compra.ver", section: "ABASTECIMIENTO" },
   { to: "/app/proveedores", label: "Proveedores", icon: Truck, perm: "proveedor.ver", section: "ABASTECIMIENTO" },
-  { to: "/app/cxp", label: "Cuentas por pagar", icon: Wallet, perm: "cxp.ver", section: "ABASTECIMIENTO" },
-  
+  { to: "/app/cxp", label: "Cuentas por pagar", icon: CreditCard, perm: "cxp.pagar", section: "ABASTECIMIENTO" },
+
   // COMERCIAL
-  { to: "/app/cotizaciones", label: "Cotizaciones", icon: Receipt, section: "COMERCIAL" },
-  { to: "/app/pedidos", label: "Pedidos", icon: ShoppingCart, section: "COMERCIAL" },
-  { to: "/app/facturacion", label: "Facturación", icon: FileText, section: "COMERCIAL" },
-  
+  { to: "/app/cotizaciones", label: "Cotizaciones", icon: FileSignature, perm: "venta.crear", section: "COMERCIAL" },
+  { to: "/app/pedidos", label: "Pedidos", icon: ClipboardList, perm: "pedido.gestionar", section: "COMERCIAL" },
+  { to: "/app/facturacion", label: "Facturación", icon: FileText, perm: "venta.facturar", section: "COMERCIAL" },
+
   // FUERZA DE VENTAS · consolidada en 2 módulos por rol (regla 1):
   //   · Supervisión Comercial: solo admin/dueño/supervisor (supervision.ver)
   //   · Mi Actividad de Campo: solo vendedores de campo (visita.*), oculta si
@@ -48,23 +51,19 @@ const NAV = [
   
   // ADMINISTRACIÓN
   { to: "/app/caja", label: "Caja", icon: Wallet, perm: "caja.ver", section: "ADMINISTRACIÓN" },
-  { to: "/app/finanzas", label: "Finanzas", icon: BarChart3, perm: "finanzas.ver", section: "ADMINISTRACIÓN" },
+  { to: "/app/finanzas", label: "Finanzas", icon: PieChart, perm: "finanzas.ver", section: "ADMINISTRACIÓN" },
   { to: "/app/reportes", label: "Reportes", icon: BarChart3, perm: "reportes.ver", section: "ADMINISTRACIÓN" },
-  
+
   // SISTEMA
   { to: "/app/usuarios", label: "Usuarios y permisos", icon: UserCog, perm: "usuarios.ver", section: "SISTEMA" },
-  { to: "/app/sucursales", label: "Sucursales", icon: LayoutDashboard, perm: "config", section: "SISTEMA" },
-  { to: "/app/impresoras", label: "Impresoras", icon: Settings, perm: "config", section: "SISTEMA" },
   { to: "/app/configuracion", label: "Configuración", icon: Settings, perm: "config", section: "SISTEMA" },
-  { to: "/app/machotes", label: "Formatos de documentos", icon: FileText, perm: "config", section: "SISTEMA" },
-  { to: "/app/cuentas-bancarias", label: "Cuentas bancarias", icon: Wallet, perm: "cuentas.ver", section: "SISTEMA" },
+  { to: "/app/machotes", label: "Formatos de documentos", icon: ScrollText, perm: "config", section: "SISTEMA" },
+  { to: "/app/auditoria", label: "Auditoría", icon: ShieldCheck, perm: "auditoria.ver", section: "SISTEMA" },
   { to: "/app/devtools", label: "Desarrollador", icon: Wrench, perm: "dev.errores", dev: true, section: "SISTEMA" },
 ];
 
 export default function ErpLayout() {
   const { user, logout, can } = useAuth();
-  const { logo } = useBranding();
-  const logoUrl = logo || "";
   const nav = useNavigate();
   const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(() => {
@@ -189,15 +188,6 @@ export default function ErpLayout() {
       .filter((n) => pathname === n.to || pathname.startsWith(n.to + "/"))
       .sort((a, b) => b.to.length - a.to.length)[0] || null;
 
-  const ACTIONS = [
-    { to: "/app/pos", label: "Nueva venta", icon: ShoppingCart, perm: "venta.crear" },
-    { to: "/app/recargas", label: "Registrar recarga", icon: Smartphone, perm: "venta.crear" },
-    { to: "/app/caja", label: "Abrir / cerrar caja", icon: Wallet, perm: "caja.abrir" },
-    { to: "/app/inventario", label: "Nuevo producto", icon: Package },
-    { to: "/app/clientes", label: "Registrar cliente", icon: Users },
-    { to: "/app/configuracion", label: "Ajustes del sistema", icon: Settings, perm: "config" },
-  ].filter((a) => !a.perm || can(a.perm));
-
   const run = (to) => { setSearchOpen(false); nav(to); };
 
   // Densidad del ERP (87.5 %): solo mientras se está dentro del sistema.
@@ -225,23 +215,15 @@ export default function ErpLayout() {
           indicador rojo en el módulo activo. */}
       <aside
         data-testid="sidebar"
-        className={`${collapsed ? "w-[72px]" : "w-60"} shrink-0 bg-carbon-950 text-slate-300 flex flex-col sticky top-0 h-screen z-30 transition-[width] duration-200 ease-out-rysa`}
+        className={`${collapsed ? "w-[72px]" : "w-60"} grafito grano shrink-0 text-slate-300 flex flex-col sticky top-0 h-screen z-30 transition-[width] duration-200 ease-out-rysa`}
       >
-        <div className={`flex items-center h-16 border-b border-white/[0.06] ${collapsed ? "justify-center" : "gap-3 px-5"}`}>
-          <div className="h-9 w-9 shrink-0 rounded-md bg-white flex items-center justify-center overflow-hidden">
-            {logoUrl ? (
-              <img src={logoUrl} alt="Grupo RYSA" className="h-7 w-7 object-contain"
-                onError={(e) => {
-                  if (!e.currentTarget.src.includes("isotipo1.png")) e.currentTarget.src = DEFAULT_LOGO;
-                  else e.currentTarget.style.display = "none";
-                }} />
-            ) : <Boxes className="w-5 h-5 text-brand-600" />}
-          </div>
-          {!collapsed && (
-            <div className="leading-none">
-              <div className="titular-ancho text-[1.05rem] font-extrabold text-white">RYSA</div>
-              <div className="mt-1 text-2xs uppercase tracking-[0.18em] text-slate-400">ERP · POS</div>
-            </div>
+        {/* Logotipo oficial para fondo oscuro (el mismo del sitio); colapsado,
+            solo la "R" del isotipo. */}
+        <div className={`flex items-center h-16 border-b border-white/[0.06] ${collapsed ? "justify-center" : "px-5"}`}>
+          {collapsed ? (
+            <img src="/brand/isotipo-oscuro.webp" alt="Grupo RYSA" width="240" height="161" className="h-7 w-auto" />
+          ) : (
+            <img src="/brand/logotipo-oscuro.webp" alt="Grupo RYSA" width="900" height="424" className="h-10 w-auto" />
           )}
         </div>
 
@@ -399,15 +381,6 @@ export default function ErpLayout() {
                 <CommandItem key={n.to} value={`${n.label} ${n.to} ir navegar`} onSelect={() => run(n.to)} data-testid={`palette-${n.to.split("/").pop()}`}>
                   <n.icon className="text-brand-600" strokeWidth={2} />
                   <span>{n.label}</span>
-                </CommandItem>
-              ))}
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup heading="Acciones rápidas">
-              {ACTIONS.map((a) => (
-                <CommandItem key={a.label} value={`${a.label} acción hacer`} onSelect={() => run(a.to)}>
-                  <a.icon className="text-slate-400" strokeWidth={2} />
-                  <span>{a.label}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

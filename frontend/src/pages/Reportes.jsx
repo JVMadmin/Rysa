@@ -308,7 +308,7 @@ export default function Reportes() {
                     <XAxis dataKey="periodo" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(v) => money(v)} />
-                    <Line type="monotone" dataKey="total" stroke="#CF090B" strokeWidth={2} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="total" stroke="#CD0708" strokeWidth={2} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -370,7 +370,7 @@ export default function Reportes() {
                       <XAxis type="number" tick={{ fontSize: 11 }} />
                       <YAxis type="category" dataKey="codigo" width={70} tick={{ fontSize: 10 }} />
                       <Tooltip />
-                      <Bar dataKey="cantidad" fill="#CF090B" radius={[0, 4, 4, 0]} />
+                      <Bar dataKey="cantidad" fill="#CD0708" radius={[0, 4, 4, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -552,7 +552,7 @@ export default function Reportes() {
                         <XAxis dataKey="hora" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
                         <Tooltip />
-                        <Bar dataKey="tickets" fill="#CF090B" radius={[2, 2, 0, 0]} />
+                        <Bar dataKey="tickets" fill="#CD0708" radius={[2, 2, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>

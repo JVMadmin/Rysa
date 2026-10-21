@@ -35,11 +35,11 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex bg-white">
-      <aside className="relative hidden w-[46%] flex-col justify-between overflow-hidden bg-carbon-900 p-12 text-white lg:flex">
+      <aside className="grafito grano relative hidden w-[46%] flex-col justify-between overflow-hidden p-12 text-white lg:flex">
         <img src="/images/categorias/hero.webp" alt="" className="absolute inset-0 h-full w-full object-cover opacity-35" />
         <div className="absolute inset-0 bg-gradient-to-t from-carbon-900 via-carbon-900/70 to-carbon-900/30" aria-hidden="true" />
         <Link to="/" className="relative z-10" aria-label="Grupo RYSA, ir al sitio">
-          <img src="/brand/logotipo-Photoroom.png" alt="Grupo RYSA" className="h-14 w-auto invert" />
+          <img src="/brand/logotipo-oscuro.webp" alt="Grupo RYSA" width="900" height="424" className="h-14 w-auto" />
         </Link>
         <div className="relative z-10 max-w-md">
           <p className="etiqueta text-brand-400">Sistema interno</p>

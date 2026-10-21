@@ -16,7 +16,7 @@ import {
   Loader2, Lock, RefreshCw, RotateCcw, ShieldAlert, Sparkles, Upload, Users,
 } from "lucide-react";
 
-const TERRACOTA = "#CF090B";
+const TERRACOTA = "#CD0708";
 const nf = new Intl.NumberFormat("es-MX");
 const money = (v) => "$" + new Intl.NumberFormat("es-MX", { minimumFractionDigits: 2 }).format(v || 0);
 

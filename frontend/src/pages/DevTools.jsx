@@ -19,7 +19,7 @@ import {
   Server, ShieldCheck, Sparkles, Trash2, Undo2, Wrench, XCircle,
 } from "lucide-react";
 
-const TERRACOTA = "#CF090B";
+const TERRACOTA = "#CD0708";
 const nf = new Intl.NumberFormat("es-MX");
 
 /* ============================ Componentes base ============================ */
@@ -234,7 +234,7 @@ function TabImagenesCatalogo() {
         </div>
         <div className="card-soft p-5">
           <div className="text-xs uppercase tracking-wider text-slate-400">Familias Detectadas</div>
-          <div className="text-xl font-bold text-purple-700 mt-1">
+          <div className="text-xl font-bold text-carbon-900 mt-1">
             {cargando ? "..." : nf.format(resumen?.grupos_similares ?? 0)}
           </div>
         </div>
