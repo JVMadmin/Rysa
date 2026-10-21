@@ -180,6 +180,53 @@ html.erp-densidad { font-size: 87.5%; }
 .etiqueta { font-family: 'IBM Plex Sans', sans-serif; font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
 .cifras { font-variant-numeric: tabular-nums; }
 
+/* ---- Sitio público: industrial refinado -------------------------------- */
+/* Titular fino: Archivo apenas expandido y en peso medio (más sobrio que el
+   expandido extra negro del ERP). */
+.titular-fino { font-family: 'Archivo Variable', 'Archivo', sans-serif; font-stretch: 108%; font-weight: 500; letter-spacing: -0.022em; line-height: 1.06; }
+/* Rejilla de líneas verticales casi invisibles sobre el grafito. */
+.rejilla {
+  background-image: linear-gradient(to right, rgba(255,255,255,0.045) 1px, transparent 1px);
+  background-size: calc(100% / 6) 100%;
+}
+
+/* Grafito con profundidad: luz cenital fría arriba a la izquierda, un
+   resplandor rojo RYSA muy tenue abajo a la derecha y un degradado vertical,
+   en lugar de un solo valor plano. */
+.grafito {
+  background-color: #2A2B30;
+  background-image:
+    radial-gradient(70rem 36rem at 12% -12%, rgba(255,255,255,0.10), transparent 62%),
+    radial-gradient(52rem 30rem at 104% 112%, rgba(205,7,8,0.16), transparent 64%),
+    linear-gradient(180deg, #313237 0%, #26272B 100%);
+}
+/* Grano fino (ruido SVG) para quitar el aspecto digital del color sólido. */
+.grano { position: relative; isolation: isolate; }
+.grano::after {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 0.09; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* Brillo metálico de la "G" del isotipo aplicado a titulares sobre grafito. */
+.metal { background: linear-gradient(180deg, #FFFFFF 0%, #E6E7EA 55%, #A9ABB1 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+/* Texto gigante de contorno. */
+.contorno { color: transparent; -webkit-text-stroke: 1px rgba(255,255,255,0.28); }
+/* Blanco cálido tipo papel para alternar con el blanco puro. */
+.papel { background-color: #F6F5F2; }
+
+/* Tarjeta con giro 3D (TarjetaFlip). Solo gira con cursor real o foco de teclado. */
+.flip { perspective: 1600px; }
+.flip-interior { position: relative; height: 100%; transform-style: preserve-3d; transition: transform 0.9s var(--ease-out); }
+.flip-cara, .flip-reverso { position: absolute; inset: 0; -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+.flip-reverso { transform: rotateY(180deg); }
+@media (hover: hover) { .flip:hover .flip-interior { transform: rotateY(180deg); } }
+.flip:focus-visible .flip-interior { transform: rotateY(180deg); }
+
+/* Marquesina de marcas. */
+@keyframes marquesina { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.marquesina { display: flex; width: max-content; animation: marquesina 38s linear infinite; }
+.marquesina:hover { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .marquesina { animation: none; } }
+
 /* ---- Mapas (Leaflet) ---------------------------------------------------- */
 /* Contenedor acotado: evita que los paneles de Leaflet tapen menús/modales. */
 .leaflet-container { z-index: 0; background: #eef1f4; }

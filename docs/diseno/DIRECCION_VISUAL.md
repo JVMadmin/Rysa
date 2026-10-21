@@ -72,6 +72,17 @@ Altura de línea: titulares 1.02–1.1, texto 1.55. Tracking: titulares expandid
 - Sombras: dos niveles (`card`, `raised`) con base carbón.
 - Movimiento: 150 ms (hover), 240 ms (entradas), `cubic-bezier(.2,.7,.2,1)`. Se respeta `prefers-reduced-motion`.
 
+### Sitio público: industrial refinado (2026-10-20)
+
+- Encabezado, hero y pie en grafito; titulares en `.titular-fino` (Archivo 108 %, peso 500) en lugar del expandido extra negro; acentos con líneas rojas de 1 px; botones de esquina recta (`rounded-sm`), primario rojo y secundario de contorno con barrido de relleno.
+- Logotipo sobre grafito: `logotipo-oscuro.webp` (letras blancas, "R" y líneas en rojo), derivado de `logotipo-color.webp`.
+- Movimiento con framer-motion (`components/sitio/motion.jsx`): titulares palabra por palabra, reglas rojas que se dibujan, revelado al hacer scroll, imágenes con cortina (clip-path), parallax, contadores, galería del hero con cortina y acercamiento lento, subrayado del menú que sigue al cursor, menú móvil animado y fundido entre páginas.
+- Tarjetas de categoría con giro 3D (`TarjetaFlip`): frente con foto y reverso con los tipos de artículo; solo giran con cursor real o foco de teclado. Marquesina de marcas que se pausa al pasar el cursor.
+- Profundidad: el grafito usa `.grafito` (luz cenital, resplandor rojo tenue, degradado) con `.grano` (ruido SVG); titulares sobre grafito con `.metal`; secciones claras alternan blanco y `.papel` (#F6F5F2). El encabezado es transparente sobre el hero y pasa a vidrio grafito al hacer scroll.
+- Banda de marca: el giro del logotipo en letra gigante de contorno ligada al scroll y la tira de íconos de línea (`iconos-linea.webp`, recortada del logotipo).
+- Categorías en la portada: mosaico de borde a borde (`MosaicoCategorias`) inspirado en la composición de Reyma, con la familia de color RYSA (rojo, grafito, papel, gris, rosa, vino). La foto se funde en el color del cuadro y al pasar el cursor recupera su color. Siguiente paso: fotos propias de producto recortado sobre fondo blanco para que floten en cada cuadro.
+- Todo respeta `prefers-reduced-motion` (`MotionConfig reducedMotion="user"`, parallax y galería se detienen).
+
 ## 6. Fotografía
 
 Fotos de uso libre de Unsplash (licencia que permite uso comercial) que corresponden con la familia. Se usan como **imagen representativa de la familia**, nunca como foto de un artículo concreto.

@@ -1,7 +1,10 @@
 import { useEffect } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Check, Mail, MessageCircle } from "lucide-react";
-import SitioLayout, { cotizarUrl, useContacto } from "@/components/sitio/SitioLayout";
+import { motion } from "framer-motion";
+import { ArrowLeft, Mail, MessageCircle } from "lucide-react";
+import SitioLayout, { BOTON_CONTORNO_CLARO, BOTON_PRIMARIO, cotizarUrl, useContacto } from "@/components/sitio/SitioLayout";
+import TarjetaFlip from "@/components/sitio/TarjetaFlip";
+import { Cortina, EASE, Elemento, Escalonar, Regla, Revelar, TitularPalabras } from "@/components/sitio/motion";
 import { CATEGORIAS, aproximado, porSlug } from "@/data/categorias";
 
 export default function Categoria() {
@@ -18,88 +21,86 @@ export default function Categoria() {
 
   const indice = CATEGORIAS.indexOf(cat);
   const otras = CATEGORIAS.filter((x) => x.slug !== cat.slug);
+  const entrar = (delay) => ({ initial: { opacity: 0, y: 16 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.8, ease: EASE, delay } });
 
   return (
     <SitioLayout>
-      <section aria-labelledby="categoria-titulo" className="bg-carbon-900 text-white">
-        <div className="mx-auto grid max-w-[1240px] lg:grid-cols-2">
-          <div className="px-5 pb-14 pt-10 sm:px-8 sm:pt-14 lg:py-24 lg:pr-14">
-            <nav aria-label="Ruta" className="text-sm text-slate-400">
+      <section aria-labelledby="categoria-titulo" className="grafito grano relative text-white">
+        <div className="rejilla pointer-events-none absolute inset-0" aria-hidden="true" />
+        <div className="relative grid lg:min-h-[640px] lg:grid-cols-2">
+          <div className="flex flex-col justify-center px-5 pb-14 pt-[7.5rem] sm:px-8 sm:pt-[8.5rem] lg:pb-24 lg:pt-[9rem] lg:pl-[max(2rem,calc((100vw-1240px)/2+2rem))] lg:pr-14">
+            <nav aria-label="Ruta" className="text-sm text-slate-300">
               <Link to="/" className="hover:text-white">Inicio</Link> <span aria-hidden="true">/</span>{" "}
               <Link to="/productos" className="hover:text-white">Productos</Link> <span aria-hidden="true">/</span>{" "}
-              <span className="text-slate-300">{cat.corto}</span>
+              <span className="text-white">{cat.corto}</span>
             </nav>
-            <p className="mt-8 font-display text-sm font-semibold tabular-nums text-brand-400">
+            <motion.p {...entrar(0.05)} className="mt-10 font-display text-xs tabular-nums uppercase tracking-[0.2em] text-brand-300">
               {String(indice + 1).padStart(2, "0")} / {String(CATEGORIAS.length).padStart(2, "0")} · {aproximado(cat.articulos)} artículos
-            </p>
-            <h1 id="categoria-titulo" className="titular-ancho mt-3 text-[2.3rem] font-extrabold sm:text-display lg:text-display-lg">{cat.nombre}</h1>
-            <p className="mt-6 max-w-xl text-[1.075rem] leading-7 text-slate-300">{cat.descripcion}</p>
-            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-              <a href={cotizarUrl(c, cat.nombre)} target={c.waUrl ? "_blank" : undefined} rel="noreferrer"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-brand-600 px-6 text-[0.95rem] font-semibold text-white transition-colors hover:bg-brand-700">
+            </motion.p>
+            <TitularPalabras key={cat.slug} id="categoria-titulo" texto={cat.nombre} delay={0.1} palabra="metal"
+              className="titular-fino mt-5 text-[2.3rem] sm:text-[3.2rem] lg:text-[3.6rem]" />
+            <motion.span aria-hidden="true" className="mt-8 block h-px w-20 origin-left bg-brand-500"
+              initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 1, ease: EASE, delay: 0.5 }} />
+            <motion.p {...entrar(0.55)} className="mt-8 max-w-xl text-[1.05rem] leading-7 text-slate-300">{cat.descripcion}</motion.p>
+            <motion.div {...entrar(0.65)} className="mt-10 flex flex-col gap-3 sm:flex-row">
+              <a href={cotizarUrl(c, cat.nombre)} target={c.waUrl ? "_blank" : undefined} rel="noreferrer" className={BOTON_PRIMARIO}>
                 {c.waUrl ? <MessageCircle className="h-4 w-4" /> : <Mail className="h-4 w-4" />} Cotizar {cat.corto.toLowerCase()}
               </a>
-              <Link to="/productos" className="inline-flex h-12 items-center justify-center gap-2 rounded-md border border-white/25 px-6 text-[0.95rem] font-semibold text-white transition-colors hover:border-white">
-                <ArrowLeft className="h-4 w-4" /> Todas las categorías
+              <Link to="/productos" className={BOTON_CONTORNO_CLARO}>
+                <span className="relative inline-flex items-center gap-2"><ArrowLeft className="h-4 w-4" /> Todas las categorías</span>
               </Link>
-            </div>
+            </motion.div>
           </div>
-          <div className="relative min-h-[300px] sm:min-h-[380px]">
-            <img src={cat.imagen} alt={cat.imagenAlt} decoding="async" className="absolute inset-0 h-full w-full object-cover" />
-            <p className="absolute bottom-3 right-3 rounded bg-carbon-900/70 px-2 py-1 text-[0.7rem] text-white/80">Imagen representativa de la categoría</p>
+          <div className="relative min-h-[320px] sm:min-h-[420px]">
+            <Cortina key={cat.slug} src={cat.imagen} alt={cat.imagenAlt} className="absolute inset-0" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-carbon-950/70 to-transparent" aria-hidden="true" />
+            <p className="absolute bottom-3 right-3 rounded-sm bg-carbon-900/70 px-2 py-1 text-[0.7rem] text-white/80">Imagen representativa de la categoría</p>
           </div>
         </div>
       </section>
 
-      <section aria-label="Detalle de la categoría" className="mx-auto max-w-[1240px] px-5 py-16 sm:px-8 sm:py-20">
-        <div className="grid gap-14 lg:grid-cols-[1.4fr_1fr]">
+      <section aria-label="Detalle de la categoría" className="mx-auto max-w-[1240px] px-5 py-20 sm:px-8 sm:py-28">
+        <div className="grid gap-16 lg:grid-cols-[1.4fr_1fr]">
           <div>
-            <h2 className="etiqueta text-brand-600">Qué encuentras</h2>
-            <ul className="mt-6 grid gap-x-8 gap-y-3.5 sm:grid-cols-2">
+            <Revelar as="h2" className="flex items-center gap-4 text-xs uppercase tracking-[0.2em] text-brand-600"><Regla ancho="w-10" />Qué encuentras</Revelar>
+            <Escalonar as="ul" paso={0.05} className="mt-8 grid gap-x-10 sm:grid-cols-2">
               {cat.tipos.map((t) => (
-                <li key={t} className="flex items-start gap-3 border-b border-slate-200 pb-3.5 text-[1.02rem]">
-                  <Check className="mt-1 h-4 w-4 shrink-0 text-brand-600" aria-hidden="true" />{t}
-                </li>
+                <Elemento as="li" key={t} y={14} className="group flex items-center gap-4 border-b border-slate-200 py-4 text-[1.02rem]">
+                  <span className="h-px w-3 shrink-0 bg-brand-500 transition-all duration-500 ease-out-rysa group-hover:w-6" aria-hidden="true" />{t}
+                </Elemento>
               ))}
-            </ul>
-            <p className="mt-8 max-w-xl text-sm leading-6 text-slate-500">
+            </Escalonar>
+            <Revelar as="p" delay={0.1} className="mt-8 max-w-xl text-sm leading-6 text-slate-500">
               Manejamos varias medidas, presentaciones y empaques de cada artículo. Si buscas algo específico, envíanos la
               descripción o el código y te confirmamos disponibilidad.
-            </p>
+            </Revelar>
           </div>
-          <aside className="space-y-8">
+          <aside className="space-y-10">
             {cat.marcas?.length > 0 && (
-              <div className="rounded-lg border border-slate-200 p-6">
-                <h2 className="etiqueta text-slate-500">Marcas en esta categoría</h2>
-                <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
-                  {cat.marcas.map((m) => <li key={m} className="titular text-lg font-bold text-carbon-900">{m}</li>)}
+              <Revelar delay={0.1} className="border-t border-carbon-900 pt-6">
+                <h2 className="text-xs uppercase tracking-[0.2em] text-slate-500">Marcas en esta categoría</h2>
+                <ul className="mt-5 flex flex-wrap gap-x-6 gap-y-2">
+                  {cat.marcas.map((m) => <li key={m} className="titular-fino text-[1.35rem] text-carbon-900">{m}</li>)}
                 </ul>
-              </div>
+              </Revelar>
             )}
             {cat.imagenSecundaria && (
-              <figure className="overflow-hidden rounded-lg">
-                <img src={cat.imagenSecundaria} alt={cat.imagenSecundariaAlt} loading="lazy" decoding="async" className="aspect-[4/3] w-full object-cover" />
-              </figure>
+              <Cortina src={cat.imagenSecundaria} alt={cat.imagenSecundariaAlt} loading="lazy" desde="abajo" className="aspect-[4/3] rounded-sm" />
             )}
           </aside>
         </div>
       </section>
 
-      <section aria-labelledby="otras-titulo" className="border-t border-slate-200 bg-slate-50 py-14 sm:py-16">
+      <section aria-labelledby="otras-titulo" className="papel border-t border-slate-200 py-20 sm:py-24">
         <div className="mx-auto max-w-[1240px] px-5 sm:px-8">
-          <h2 id="otras-titulo" className="titular text-[1.5rem] font-extrabold">Otras categorías</h2>
-          <ul className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <Revelar as="h2" id="otras-titulo" className="titular-fino text-[1.75rem]">Otras categorías</Revelar>
+          <Escalonar as="ul" className="mt-9 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {otras.map((o) => (
-              <li key={o.slug}>
-                <Link to={`/productos/${o.slug}`} className="group flex h-full flex-col overflow-hidden rounded-lg border border-slate-200 bg-white transition-shadow hover:shadow-card-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600">
-                  <img src={o.imagen} alt="" loading="lazy" decoding="async" className="aspect-[16/10] w-full object-cover" />
-                  <span className="flex flex-1 items-center justify-between gap-3 p-4 text-[0.95rem] font-semibold text-carbon-900">
-                    {o.nombre}<ArrowRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-600" />
-                  </span>
-                </Link>
-              </li>
+              <Elemento as="li" key={o.slug}>
+                <TarjetaFlip cat={o} indice={CATEGORIAS.indexOf(o)} alto="h-[280px]" compacta />
+              </Elemento>
             ))}
-          </ul>
+          </Escalonar>
         </div>
       </section>
     </SitioLayout>
