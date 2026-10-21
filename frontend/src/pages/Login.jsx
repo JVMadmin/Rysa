@@ -35,9 +35,9 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex bg-white">
-      <aside className="relative hidden w-[46%] flex-col justify-between overflow-hidden bg-carbon-950 p-12 text-white lg:flex">
+      <aside className="relative hidden w-[46%] flex-col justify-between overflow-hidden bg-carbon-900 p-12 text-white lg:flex">
         <img src="/images/categorias/hero.webp" alt="" className="absolute inset-0 h-full w-full object-cover opacity-35" />
-        <div className="absolute inset-0 bg-gradient-to-t from-carbon-950 via-carbon-950/70 to-carbon-950/30" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-t from-carbon-900 via-carbon-900/70 to-carbon-900/30" aria-hidden="true" />
         <Link to="/" className="relative z-10" aria-label="Grupo RYSA, ir al sitio">
           <img src="/brand/logotipo-Photoroom.png" alt="Grupo RYSA" className="h-14 w-auto invert" />
         </Link>
@@ -54,7 +54,7 @@ export default function Login() {
       <main className="flex flex-1 items-center justify-center bg-slate-50 p-6 sm:p-10">
         <form onSubmit={submit} className="w-full max-w-sm animate-fade-up" data-testid="login-form" aria-labelledby="login-titulo">
           <Link to="/" className="mb-10 block lg:hidden" aria-label="Grupo RYSA, ir al sitio">
-            <img src="/brand/logotipo-Photoroom.png" alt="Grupo RYSA" className="h-12 w-auto" />
+            <img src="/brand/logotipo-color.webp" alt="Grupo RYSA" className="h-12 w-auto" />
           </Link>
           <h1 id="login-titulo" className="titular text-[2rem] font-extrabold text-carbon-900">Iniciar sesión</h1>
           <p className="mt-2 mb-8 text-[0.95rem] text-slate-600">Ingresa con tu correo y contraseña de usuario.</p>

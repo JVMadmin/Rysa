@@ -34,20 +34,24 @@ Unidad: pieza. Precio mediano: $69 (el 50 % central entre $32 y $287).
 
 ## 3. Paleta
 
+Medida sobre los logos oficiales (isotipo "GR" y logotipo a color). El gris del isotipo **no es negro**: es un grafito metálico que va de `#494A4E` (brillo) a `#1F2024`; el rojo va de `#EB0F11` (brillo) a `#CD0708` (base), con sombra `#950000`. Las superficies oscuras usan el grafito medio, no el tono más profundo, para no sentirse pesadas. (Se descartaron el negro casi puro y una variante con vino tinto.)
+
 | Token | Valor | Uso |
 |---|---|---|
-| `brand-600` (rojo RYSA) | `#CF090B` | Botón primario, acentos, familia activa |
-| `brand-700` | `#A8070A` | Hover/pressed |
-| `brand-50 / 100` | `#FEF2F2 / #FDE3E3` | Fondos de selección y badges |
-| `carbon-900` | `#1F2023` | Texto principal, superficies oscuras |
-| `carbon-950` | `#141517` | Hero y pie |
-| Neutros (escala `slate` reajustada) | fríos, derivados del carbón | Bordes, fondos y texto secundario |
-| `success` | `#15803D` | Confirmaciones |
-| `warning` | `#B45309` | Alertas |
-| `danger` | `#B42318` | Errores: más oscuro que la marca y siempre con icono, para no confundirse con el rojo RYSA |
-| `info` | `#1D4ED8` | Información |
+| `brand-500` | `#EB0F11` | Brillo de la "R": indicador activo, acentos sobre grafito |
+| `brand-600` (rojo RYSA) | `#CD0708` | Botón primario, etiquetas, familia activa |
+| `brand-700` / `800` | `#A3060A` / `#7A0A0E` | Hover y presionado / sombra |
+| `brand-50` / `100` / `300` | `#FDECEC` / `#FBD3D3` / `#F27A7C` | Fondos de selección, badges, etiquetas sobre grafito |
+| `carbon-900` (grafito) | `#2E2F34` | Hero, pie, paneles oscuros, botón secundario oscuro |
+| `carbon-950` | `#232428` | Menú lateral del ERP |
+| `carbon-700` / `800` | `#4A4B50` / `#3D3E43` | Brillo del grafito, hovers |
+| Neutros (`slate`) | `#F5F5F6` → `#18191D` | Fondos, bordes y texto. Texto principal `#18191D` |
+| `success` / `warning` / `info` | `#15803D` / `#B45309` / `#1D4ED8` | Estados |
+| `danger` | `#B42318` | Errores: siempre con icono, para no confundirse con el rojo de marca |
 
-Contraste: texto `carbon-900` sobre blanco 16:1; blanco sobre `brand-600` 5.6:1 (cumple AA).
+Contraste (WCAG AA): blanco sobre `brand-600` 5.8:1; blanco sobre grafito 900 13.4:1; `slate-200` sobre grafito 9.6:1; `brand-300` sobre grafito 5.0:1; texto `#18191D` sobre blanco 17.6:1.
+
+Logotipo: `logotipo-color.webp` sobre fondos claros (encabezado, login móvil) y `logotipo-Photoroom.png` invertido a blanco sobre grafito.
 
 ## 4. Tipografía
 

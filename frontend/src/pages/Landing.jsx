@@ -39,7 +39,7 @@ function TarjetaCategoria({ cat, indice, grande = false }) {
       className={`group relative isolate flex flex-col justify-end overflow-hidden rounded-lg bg-carbon-900 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 ${grande ? "min-h-[420px] lg:min-h-[520px]" : "min-h-[300px]"}`}>
       <img src={cat.imagen} alt="" loading="lazy" decoding="async"
         className="absolute inset-0 -z-20 h-full w-full object-cover transition-transform duration-700 ease-out-rysa group-hover:scale-[1.04]" />
-      <div className="absolute inset-0 -z-10 bg-gradient-to-t from-carbon-950 via-carbon-950/55 to-carbon-950/0" />
+      <div className="absolute inset-0 -z-10 bg-gradient-to-t from-carbon-900 via-carbon-900/55 to-carbon-900/0" />
       <span className="absolute left-5 top-5 font-display text-sm font-semibold tabular-nums text-white/80">{String(indice + 1).padStart(2, "0")}</span>
       <div className="p-6 sm:p-7">
         <p className="etiqueta text-white/70">{aproximado(cat.articulos)} artículos</p>
@@ -69,7 +69,7 @@ export default function Landing() {
   return (
     <SitioLayout>
       {/* ── Hero ─────────────────────────────────────────────────────── */}
-      <section aria-labelledby="hero-titulo" className="relative bg-carbon-950 text-white">
+      <section aria-labelledby="hero-titulo" className="relative bg-carbon-900 text-white">
         <div className="mx-auto grid max-w-[1240px] lg:grid-cols-[1.05fr_.95fr]">
           <div className="relative z-10 px-5 pb-14 pt-14 sm:px-8 sm:pt-20 lg:pb-24 lg:pr-12 lg:pt-28">
             <p className="etiqueta flex items-center gap-3 text-brand-400 animate-fade-up">
@@ -92,16 +92,16 @@ export default function Landing() {
               </a>
             </div>
             <dl className="mt-14 grid max-w-lg grid-cols-3 gap-6 border-t border-white/10 pt-7">
-              <div><dt className="text-xs text-slate-400">Artículos</dt><dd className="titular mt-1 text-2xl font-bold tabular-nums">+{(Math.floor((TOTAL_ARTICULOS - 1) / 100) * 100).toLocaleString("es-MX")}</dd></div>
-              <div><dt className="text-xs text-slate-400">Categorías</dt><dd className="titular mt-1 text-2xl font-bold tabular-nums">{CATEGORIAS.length}</dd></div>
-              <div><dt className="text-xs text-slate-400">Venta</dt><dd className="titular mt-1 text-[1.05rem] font-bold leading-tight sm:text-lg">Pieza y<br />mayoreo</dd></div>
+              <div><dt className="text-xs text-slate-300">Artículos</dt><dd className="titular mt-1 text-2xl font-bold tabular-nums">+{(Math.floor((TOTAL_ARTICULOS - 1) / 100) * 100).toLocaleString("es-MX")}</dd></div>
+              <div><dt className="text-xs text-slate-300">Categorías</dt><dd className="titular mt-1 text-2xl font-bold tabular-nums">{CATEGORIAS.length}</dd></div>
+              <div><dt className="text-xs text-slate-300">Venta</dt><dd className="titular mt-1 text-[1.05rem] font-bold leading-tight sm:text-lg">Pieza y<br />mayoreo</dd></div>
             </dl>
           </div>
           <div className="relative min-h-[320px] sm:min-h-[420px] lg:min-h-full">
             <img src="/images/categorias/hero.webp" alt="Cubetas, palanganas y una escoba de plástico en colores rojo, naranja y amarillo"
               width="2400" height="1600" fetchpriority="high"
               className="absolute inset-0 h-full w-full object-cover lg:[clip-path:polygon(8%_0,100%_0,100%_100%,0_100%)]" />
-            <div className="absolute inset-y-0 left-0 hidden w-24 bg-gradient-to-r from-carbon-950 to-transparent lg:block" aria-hidden="true" />
+            <div className="absolute inset-y-0 left-0 hidden w-24 bg-gradient-to-r from-carbon-900 to-transparent lg:block" aria-hidden="true" />
             <Link to="/productos/recipientes" className="absolute bottom-5 right-5 inline-flex items-center gap-2 rounded-md bg-white/95 px-3.5 py-2 text-xs font-semibold text-carbon-900 shadow-raised backdrop-blur transition-colors hover:bg-white">
               Recipientes y artículos plásticos <ArrowUpRight className="h-3.5 w-3.5" />
             </Link>
@@ -154,7 +154,7 @@ export default function Landing() {
       </Seccion>
 
       {/* ── Nosotros ─────────────────────────────────────────────────── */}
-      <section id="nosotros" aria-labelledby="nosotros-titulo" className="scroll-mt-20 bg-carbon-950 text-white">
+      <section id="nosotros" aria-labelledby="nosotros-titulo" className="scroll-mt-20 bg-carbon-900 text-white">
         <div className="mx-auto grid max-w-[1240px] items-stretch lg:grid-cols-2">
           <div className="relative min-h-[300px] lg:min-h-[560px]">
             <img src="/images/categorias/limpieza.webp" alt="Escobas de colores en exhibición" loading="lazy" decoding="async"

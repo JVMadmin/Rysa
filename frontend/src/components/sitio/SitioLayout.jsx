@@ -4,7 +4,10 @@ import { ArrowUpRight, Mail, MapPin, Menu, MessageCircle, Phone, X } from "lucid
 import { useBranding } from "@/hooks/useBranding";
 import { CATEGORIAS } from "@/data/categorias";
 
+// Monocromático (se invierte a blanco sobre grafito) y versión a color para
+// fondos claros, con la "R" y las líneas en rojo RYSA.
 const LOGOTIPO = "/brand/logotipo-Photoroom.png";
+const LOGOTIPO_COLOR = "/brand/logotipo-color.webp";
 
 // Enlaces de contacto a partir de Configuración. Los datos vacíos no se muestran.
 export function useContacto() {
@@ -65,7 +68,7 @@ export function SitioHeader() {
       </a>
       <div className="mx-auto flex h-[72px] max-w-[1240px] items-center justify-between gap-6 px-5 sm:px-8">
         <Link to="/" aria-label="Grupo RYSA, ir al inicio" className="shrink-0">
-          <img src={LOGOTIPO} alt="Grupo RYSA — Plásticos, empaques, desechables, suministros" width="148" height="70"
+          <img src={LOGOTIPO_COLOR} alt="Grupo RYSA — Plásticos, empaques, desechables, suministros" width="148" height="70"
             className="h-12 w-auto sm:h-[52px]" />
         </Link>
 
@@ -118,7 +121,7 @@ export function SitioHeader() {
 export function SitioFooter() {
   const c = useContacto();
   return (
-    <footer className="bg-carbon-950 text-slate-400">
+    <footer className="bg-carbon-900 text-slate-400">
       <div className="mx-auto grid max-w-[1240px] gap-12 px-5 py-16 sm:px-8 md:grid-cols-[1.3fr_1fr_1fr]">
         <div>
           <img src={LOGOTIPO} alt="Grupo RYSA" width="148" height="70" className="h-14 w-auto invert" />

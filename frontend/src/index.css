@@ -28,37 +28,37 @@ html.erp-densidad { font-size: 87.5%; }
 
 @layer base {
   :root {
-    /* ── Marca (medida sobre el isotipo oficial) ───────────────────── */
-    --brand-50: #FEF2F2;
-    --brand-100: #FDE3E3;
-    --brand-200: #FBC8C8;
-    --brand-500: #E3191C;
-    --brand-600: #CF090B;   /* rojo RYSA */
-    --brand-700: #A8070A;
-    --brand-800: #860609;
-    --carbon-900: #1F2023;  /* carbón RYSA */
-    --carbon-950: #141517;
+    /* ── Marca (medida sobre los logos oficiales) ──────────────────── */
+    --brand-50: #FDECEC;
+    --brand-100: #FBD3D3;
+    --brand-200: #F7B2B3;
+    --brand-500: #EB0F11;   /* brillo de la "R" */
+    --brand-600: #CD0708;   /* rojo RYSA */
+    --brand-700: #A3060A;
+    --brand-800: #7A0A0E;   /* sombra de la "R" */
+    --carbon-900: #2E2F34;  /* grafito de la "G" (superficies oscuras) */
+    --carbon-950: #232428;  /* grafito profundo (menú del ERP) */
 
     /* ── Tokens semánticos (shadcn, en HSL) ───────────────────────── */
-    --background: 240 6% 97%;          /* #F6F6F7 fondo general */
-    --foreground: 225 6% 13%;          /* #1F2023 texto principal */
+    --background: 240 4% 96%;          /* #F5F5F6 fondo general */
+    --foreground: 228 8% 10%;          /* #18191D texto principal */
     --card: 0 0% 100%;
-    --card-foreground: 225 6% 13%;
+    --card-foreground: 228 8% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 225 6% 13%;
-    --primary: 360 92% 42%;            /* #CF090B rojo RYSA */
+    --popover-foreground: 228 8% 10%;
+    --primary: 0 93% 42%;              /* #CD0708 rojo RYSA */
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 94%;
-    --secondary-foreground: 225 6% 13%;
-    --muted: 240 5% 95%;
-    --muted-foreground: 225 5% 45%;    /* #6E717A */
-    --accent: 0 86% 97%;               /* tinte rojo suave */
-    --accent-foreground: 359 92% 34%;
-    --destructive: 4 76% 40%;          /* #B42318: más oscuro que la marca */
+    --secondary: 240 4% 93%;
+    --secondary-foreground: 228 8% 10%;
+    --muted: 240 4% 94%;
+    --muted-foreground: 228 4% 44%;    /* #6B6D73 */
+    --accent: 0 82% 96%;               /* tinte rojo suave */
+    --accent-foreground: 358 93% 34%;
+    --destructive: 4 76% 40%;          /* #B42318: más oscuro que la marca y siempre con icono */
     --destructive-foreground: 0 0% 100%;
-    --border: 225 7% 89%;
-    --input: 225 7% 86%;
-    --ring: 360 92% 42%;
+    --border: 228 4% 87%;
+    --input: 228 4% 84%;
+    --ring: 0 93% 42%;
     --radius: 0.75rem;                 /* 12 px */
 
     /* Estados */
@@ -73,17 +73,17 @@ html.erp-densidad { font-size: 87.5%; }
 
     /* Encabezado del ERP */
     --header-bg: rgba(255, 255, 255, 0.92);
-    --header-border: #E2E3E6;
-    --header-text-primary: #1F2023;
-    --header-text-secondary: #6E717A;
+    --header-border: #D9DADD;
+    --header-text-primary: #18191D;
+    --header-text-secondary: #6B6D73;
     --header-brand-oxido: var(--brand-600);
     --header-brand-oxido-hover: var(--brand-700);
     --header-brand-oxido-light: var(--brand-50);
     --header-brand-oxido-border: var(--brand-200);
-    --header-grey-dark: #3C3E44;
-    --header-grey-medium: #6E717A;
-    --header-grey-light: #F7F7F8;
-    --header-grey-hover: #EFEFF1;
+    --header-grey-dark: #3D3E43;
+    --header-grey-medium: #6B6D73;
+    --header-grey-light: #F5F5F6;
+    --header-grey-hover: #ECECEE;
     --header-radius-sm: 6px;
     --header-radius-md: 8px;
     --header-radius-full: 9999px;
@@ -123,7 +123,7 @@ html.erp-densidad { font-size: 87.5%; }
 .rysa-header-avatar {
   background: linear-gradient(135deg, var(--header-brand-oxido) 0%, var(--header-brand-oxido-hover) 100%);
   color: #ffffff;
-  box-shadow: 0 2px 4px rgba(207, 9, 11, 0.22);
+  box-shadow: 0 2px 4px rgba(205, 7, 8, 0.22);
 }
 
 .rysa-header-badge-success {
@@ -156,9 +156,9 @@ html.erp-densidad { font-size: 87.5%; }
 /* Ayudantes compartidos */
 .card-soft {
   background-color: #fff;
-  border: 1px solid #E8E9EC;
+  border: 1px solid #E3E4E6;
   border-radius: var(--radius);
-  box-shadow: 0 1px 2px rgba(31,32,35,0.04), 0 6px 18px rgba(31,32,35,0.05);
+  box-shadow: 0 1px 2px rgba(24,25,29,0.04), 0 6px 18px rgba(24,25,29,0.05);
 }
 .dot {
   width: 8px; height: 8px; border-radius: 9999px; display: inline-block;
@@ -194,8 +194,8 @@ html.erp-densidad { font-size: 87.5%; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: #CBCDD2; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #9A9DA5; }
+::-webkit-scrollbar-thumb { background: #BFC0C4; border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: #8A8C92; }
 
 @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 .animate-fade-up { animation: fadeUp 0.5s var(--ease-out) both; }

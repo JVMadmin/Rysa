@@ -280,10 +280,10 @@ export default function ErpLayout() {
                           className={({ isActive }) =>
                             collapsed
                               ? `relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-                                  isActive ? "bg-white/[0.08] text-white" : "text-slate-400 hover:bg-white/[0.05] hover:text-white"
+                                  isActive ? "bg-white/[0.08] text-white" : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
                                 }`
                               : `relative flex items-center gap-3 h-9 pl-3 pr-2 rounded-md text-[0.9rem] transition-colors ${
-                                  isActive ? "bg-white/[0.08] text-white font-semibold" : "text-slate-400 hover:bg-white/[0.04] hover:text-white"
+                                  isActive ? "bg-white/[0.08] text-white font-semibold" : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
                                 }`
                           }
                         >

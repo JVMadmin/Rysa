@@ -49,34 +49,37 @@ module.exports = {
         success: 'hsl(var(--success))',
         warning: 'hsl(var(--warning))',
         info: 'hsl(var(--info))',
-        // Marca medida sobre el isotipo oficial (rojo + carbón).
+        // Rojo RYSA medido sobre el degradado de la "R" del logotipo:
+        // 500 = brillo, 600 = rojo RYSA, 800 = sombra.
         brand: {
-          50: '#FEF2F2', 100: '#FDE3E3', 200: '#FBC8C8', 300: '#F79A9B', 400: '#EF5A5C',
-          500: '#E3191C', 600: '#CF090B', 700: '#A8070A', 800: '#860609', 900: '#5E0406',
-          DEFAULT: '#CF090B',
+          50: '#FDECEC', 100: '#FBD3D3', 200: '#F7B2B3', 300: '#F27A7C', 400: '#EE4A4C',
+          500: '#EB0F11', 600: '#CD0708', 700: '#A3060A', 800: '#7A0A0E', 900: '#520709',
+          DEFAULT: '#CD0708',
         },
+        // Grafito metálico de la "G" del isotipo (no negro): 900 para
+        // superficies oscuras grandes (hero, pie), 950 para el menú del ERP.
         carbon: {
-          700: '#3C3E44', 800: '#2A2B30', 900: '#1F2023', 950: '#141517', DEFAULT: '#1F2023',
+          600: '#5A5B60', 700: '#4A4B50', 800: '#3D3E43', 900: '#2E2F34', 950: '#232428', DEFAULT: '#2E2F34',
         },
         // Neutros derivados del carbón. Reemplazan la escala `slate` de
         // Tailwind para armonizar los ~2,000 usos del ERP sin reescribirlos.
         slate: {
-          50: '#F7F7F8', 100: '#EFEFF1', 200: '#E2E3E6', 300: '#CBCDD2', 400: '#9A9DA5',
-          500: '#6E717A', 600: '#52555D', 700: '#3C3E44', 800: '#2A2B30', 900: '#1F2023', 950: '#141517',
+          50: '#F5F5F6', 100: '#ECECEE', 200: '#D9DADD', 300: '#BFC0C4', 400: '#8A8C92',
+          500: '#6B6D73', 600: '#52545A', 700: '#3D3E43', 800: '#2E2F34', 900: '#18191D', 950: '#101115',
         },
-        ink: '#1F2023',
-        canvas: '#F6F6F7',
+        ink: '#18191D',
+        canvas: '#F5F5F6',
         // Alias heredado: el ERP usaba "terracota"; ahora apunta a la marca.
         terracota: {
-          DEFAULT: '#CF090B',
-          dark: '#A8070A',
+          DEFAULT: '#CD0708',
+          dark: '#A3060A',
         },
         chart: {
-          '1': '#CF090B',
-          '2': '#1F2023',
+          '1': '#CD0708',
+          '2': '#2E2F34',
           '3': '#B45309',
           '4': '#15803D',
-          '5': '#6E717A'
+          '5': '#6B6D73'
         }
       },
       fontFamily: {

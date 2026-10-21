@@ -21,7 +21,7 @@ export default function Categoria() {
 
   return (
     <SitioLayout>
-      <section aria-labelledby="categoria-titulo" className="bg-carbon-950 text-white">
+      <section aria-labelledby="categoria-titulo" className="bg-carbon-900 text-white">
         <div className="mx-auto grid max-w-[1240px] lg:grid-cols-2">
           <div className="px-5 pb-14 pt-10 sm:px-8 sm:pt-14 lg:py-24 lg:pr-14">
             <nav aria-label="Ruta" className="text-sm text-slate-400">
@@ -46,7 +46,7 @@ export default function Categoria() {
           </div>
           <div className="relative min-h-[300px] sm:min-h-[380px]">
             <img src={cat.imagen} alt={cat.imagenAlt} decoding="async" className="absolute inset-0 h-full w-full object-cover" />
-            <p className="absolute bottom-3 right-3 rounded bg-carbon-950/70 px-2 py-1 text-[0.7rem] text-white/80">Imagen representativa de la categoría</p>
+            <p className="absolute bottom-3 right-3 rounded bg-carbon-900/70 px-2 py-1 text-[0.7rem] text-white/80">Imagen representativa de la categoría</p>
           </div>
         </div>
       </section>
