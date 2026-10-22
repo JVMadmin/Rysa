@@ -15,7 +15,26 @@ import { fileUrl, API } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { Building2, MapPin, DollarSign, Store, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap, HardDrive, Printer as PrinterIcon, Search, RefreshCw, CheckCircle2, XCircle, Landmark, Star, Pencil, Power, AlertTriangle } from "lucide-react";
 
+const LOGOS_OFICIALES = [
+  { clave: "color", nombre: "A color", vista: "/brand/logotipo-color.webp" },
+  { clave: "monocromo", nombre: "Monocromo", vista: "/brand/logotipo-Photoroom.png" },
+  { clave: "isotipo", nombre: "Isotipo GR", vista: "/brand/isotipo1.png" },
+];
+
 export default function Configuracion() {
+  const [logoOficialBusy, setLogoOficialBusy] = useState("");
+  const usarLogoOficial = async (l) => {
+    setLogoOficialBusy(l.clave);
+    try {
+      const { data } = await api.post("/settings/logo-oficial", { variante: l.clave });
+      setS((x) => ({ ...x, logo_url: data.url }));
+      toast.success(`Logo actualizado: ${data.nombre}`);
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || "No se pudo usar el logotipo");
+    } finally {
+      setLogoOficialBusy("");
+    }
+  };
   // La pestaña va en la URL (?tab=…) para poder enlazar directo a
   // Sucursales, Impresoras o Cuentas bancarias.
   const PESTANAS = ["empresa", "precios", "sucursales", "cuentas", "ticket", "impresoras", "storage", "datos"];
@@ -443,6 +462,21 @@ export default function Configuracion() {
               <div>
                 <Label className="text-xs uppercase tracking-wider text-slate-500 mb-1 block">Logo del negocio</Label>
                 <ImageUpload value={s.logo_url} onChange={(v) => set("logo_url", v)} testid="cfg-logo-upload" heightClass="h-28" />
+                {/* Logotipos oficiales: se copian al almacenamiento y quedan como logo. */}
+                <div className="mt-3">
+                  <div className="text-[11px] text-slate-500 mb-1.5">O usa un logotipo oficial de Grupo RYSA:</div>
+                  <div className="grid grid-cols-3 gap-2" data-testid="cfg-logos-oficiales">
+                    {LOGOS_OFICIALES.map((l) => (
+                      <button key={l.clave} type="button" onClick={() => usarLogoOficial(l)} disabled={!!logoOficialBusy}
+                        className="flex flex-col items-center gap-1.5 rounded-md border border-slate-200 p-2 text-[11px] text-slate-600 transition-colors hover:border-brand-600 hover:text-brand-700 disabled:opacity-60">
+                        <span className="flex h-10 w-full items-center justify-center rounded bg-white">
+                          {logoOficialBusy === l.clave ? <Loader2 className="h-4 w-4 animate-spin" /> : <img src={l.vista} alt="" className="max-h-9 max-w-full object-contain" />}
+                        </span>
+                        {l.nombre}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
               <div>
                 <Label className="text-xs uppercase tracking-wider text-slate-500">Tamaño de papel</Label>

@@ -5,13 +5,15 @@ Construye la infraestructura de importación controlada del histórico Legacy
 ejecuta sola: solo mediante POST /legacy/import con doble confirmación,
 validaciones previas en verde y capas de permiso.
 
-Protecciones (todas obligatorias para importar):
-    1. ENVIRONMENT != production  (404 en producción, igual que /dev/*)
-    2. DEVELOPER_MODE = true
-    3. LEGACY_MIGRATION_ENABLED = true (interruptor específico de migración)
-    4. Usuario autenticado con rol 'admin_desarrollador'
-    5. Confirmación textual exacta: "IMPORTAR LEGACY"
-    6. Validaciones pre-import (staging íntegro, identidad, mapping, backup)
+Protecciones (todas obligatorias para importar). La migración existe para
+llevar el histórico a PRODUCCIÓN, así que no depende del entorno:
+    1. LEGACY_MIGRATION_ENABLED = true (interruptor específico; se apaga al
+       terminar la migración)
+    2. Usuario autenticado con rol 'admin_desarrollador' + permiso developer_tools
+    3. Confirmación textual exacta: "IMPORTAR LEGACY"
+    4. Validaciones pre-import (staging íntegro, identidad, mapping, backup)
+La consulta (estado, revisión, conciliación, validación en seco) solo exige
+el rol admin_desarrollador, también en producción.
 
 Garantías de la importación (V2, auditoría forense 2026-08-30):
     * SOLO toca: sales (docs source=LEGACY, capa documental/histórica con su
@@ -60,18 +62,17 @@ CONFIRMACION_ROLLBACK = "REVERTIR LEGACY"
 # Guardas                                                                     #
 # --------------------------------------------------------------------------- #
 async def legacy_read(user: dict = Depends(require_permission("dev.info"))):
-    """Lectura del módulo: permiso dev.info; 404 en producción."""
-    if _APP_ENV == "production":
-        raise HTTPException(status_code=404, detail="No encontrado")
+    """Lectura del módulo (estado, revisión, conciliación, validación en
+    seco): permiso dev.info, solo admin_desarrollador. También en producción."""
     return user
 
 
 async def legacy_admin(user: dict = Depends(require_permission("developer_tools"))):
-    """Operaciones de importación: TODAS las capas deben cumplirse."""
-    if _APP_ENV == "production":
-        raise HTTPException(status_code=404, detail="No encontrado")
-    if not DEVELOPER_MODE:
-        raise HTTPException(status_code=403, detail="DEVELOPER_MODE está desactivado")
+    """Importación / reversión. La migración es justamente para llevar los
+    datos históricos a PRODUCCIÓN, así que el interruptor es específico:
+    LEGACY_MIGRATION_ENABLED=true (se apaga al terminar) + rol
+    admin_desarrollador + frase de confirmación en cada operación. Cada lote
+    queda respaldado y es reversible."""
     if not LEGACY_ENABLED:
         raise HTTPException(status_code=403, detail=(
             "LEGACY_MIGRATION_ENABLED=false: la importación Legacy está "
@@ -211,12 +212,11 @@ async def _status_payload(conn) -> dict:
         "entorno": _APP_ENV,
         "etapas": etapas,
         "import_habilitado": all([etapas["staging"], etapas["dry_run"],
-                                  LEGACY_ENABLED, DEVELOPER_MODE,
-                                  _APP_ENV != "production", not importado]),
+                                  LEGACY_ENABLED, not importado]),
         "importado": importado,
         "import_incremental_habilitado": all([
             etapas["staging"], etapas["dry_run"], importado,
-            LEGACY_ENABLED, DEVELOPER_MODE, _APP_ENV != "production",
+            LEGACY_ENABLED,
             (delta["nuevos"] + delta["actualizables"]) > 0]),
         "delta": delta,
         "batch": batch,
@@ -1249,11 +1249,9 @@ async def legacy_estado_cuenta(codigo: str,
 # la carpeta legacy_data desde la UI, para ejecutar las fases de migración    #
 # en el momento que se requiera sin copias manuales (docker cp / scp).        #
 #                                                                             #
-# NOTA de seguridad: a diferencia de las fases destructivas (import/rollback, #
-# 404 en producción), este endpoint SOLO despliega ARCHIVOS en la carpeta     #
-# legacy_data: no toca la base de datos. Por eso está disponible también en   #
-# producción, siempre con las capas 2-4 (DEVELOPER_MODE + LEGACY_ENABLED +    #
-# rol admin_desarrollador + permiso developer_tools). Cada despliegue queda   #
+# NOTA de seguridad: este endpoint SOLO despliega ARCHIVOS en la carpeta     #
+# legacy_data: no toca la base de datos. Exige LEGACY_MIGRATION_ENABLED +     #
+# rol admin_desarrollador + permiso developer_tools. Cada despliegue queda    #
 # auditado en legacy_import_audit (kind='data_deploy').                       #
 # --------------------------------------------------------------------------- #
 _LEGACY_EXT_OK = {".dbf", ".cdx", ".fpt", ".bdf", ".dbt", ".mdx", ".ndx", ".tmp"}
@@ -1296,8 +1294,6 @@ def _move_file(src: Path, dst: Path) -> None:
 async def legacy_data_admin(user: dict = Depends(require_permission("developer_tools"))):
     """Despliegue de datos legacy: mismo rol/permiso que las fases, PERO
     disponible también en producción (no escribe en la BD)."""
-    if not DEVELOPER_MODE:
-        raise HTTPException(status_code=403, detail="DEVELOPER_MODE está desactivado")
     if not LEGACY_ENABLED:
         raise HTTPException(status_code=403, detail=(
             "LEGACY_MIGRATION_ENABLED=false: el módulo Legacy está "
@@ -1337,7 +1333,7 @@ def _legacy_dir_summary(d: Path) -> dict:
 
 
 @router.get("/legacy/data/status")
-async def legacy_data_status(user: dict = Depends(legacy_data_admin)):
+async def legacy_data_status(user: dict = Depends(legacy_read)):
     d = _legacy_data_dir()
     s = _legacy_dir_summary(d)
     prev = sorted(d.parent.glob(f"{d.name}_prev_*"))

@@ -425,11 +425,12 @@ export default function DevTools() {
   const { can } = useAuth();
   const puedeInfo = can("dev.info");
   const puedeMant = can("dev.mantenimiento");
+  const [status, setStatus] = useState(null);
+  const enProduccion = status?.entorno === "production";
   const puedeErrores = can("dev.errores");
   const puedeDev = can("developer_tools");
 
   const [cargando, setCargando] = useState(true);
-  const [status, setStatus] = useState(null);
   const [diagFull, setDiagFull] = useState(null);
   const [diag, setDiag] = useState(null);       // diagnóstico clásico (integridad)
   const [info, setInfo] = useState(null);       // colecciones clásicas
@@ -594,13 +595,14 @@ export default function DevTools() {
     puedeInfo && { id: "basedatos", label: "Base de datos" },
     puedeDev && { id: "legacy", label: "Migración Legacy" },
     puedeDev && { id: "imagenes", label: "Imágenes Catálogo (IA)" },
-    puedeDev && { id: "limpieza", label: "Limpieza de datos" },
-    puedeMant && { id: "pruebas", label: "Datos de prueba" },
+    // La limpieza borra datos: el backend no la expone en producción.
+    puedeDev && !enProduccion && { id: "limpieza", label: "Limpieza de datos" },
+    // Generar/purgar datos demo no existe en producción (el backend responde 404).
+    puedeMant && !enProduccion && { id: "pruebas", label: "Datos de prueba" },
     puedeMant && { id: "preproduccion", label: "Pre-producción" },
     puedeInfo && { id: "auditoria", label: "Auditoría" },
   ].filter(Boolean);
 
-  const enProduccion = status?.entorno === "production";
   const logsItems = (logs?.items || []).filter(
     (l) => !estadoFiltro || l.estado === estadoFiltro);
   const erroresFiltrados = errores.filter(
@@ -888,7 +890,7 @@ export default function DevTools() {
         )}
 
         {/* ========================= LIMPIEZA DE DATOS ========================== */}
-        {puedeDev && (
+        {puedeDev && !enProduccion && (
           <TabsContent value="limpieza" className="space-y-6 mt-4">
             <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
@@ -954,7 +956,7 @@ export default function DevTools() {
         )}
 
         {/* =========================== DATOS DE PRUEBA ========================== */}
-        {puedeMant && (
+        {puedeMant && !enProduccion && (
           <TabsContent value="pruebas" className="space-y-6 mt-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="card-soft p-6 flex flex-col">

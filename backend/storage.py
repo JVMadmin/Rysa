@@ -46,7 +46,8 @@ def get_safe_local_path(storage_path: str) -> str:
 _ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 _ASSET_LOGO = os.path.join(_ASSETS_DIR, "logotipo.png")
 _ASSET_ISOTIPO = os.path.join(_ASSETS_DIR, "isotipo1.png")
-LOGO_VARIANTES = {"logotipo": _ASSET_LOGO, "isotipo": _ASSET_ISOTIPO}
+_ASSET_LOGO_COLOR = os.path.join(_ASSETS_DIR, "logotipo_color.png")   # "R" y líneas en rojo RYSA
+LOGO_VARIANTES = {"logotipo": _ASSET_LOGO, "monocromo": _ASSET_LOGO, "isotipo": _ASSET_ISOTIPO, "color": _ASSET_LOGO_COLOR}
 
 
 def _logo_configurado(settings: dict) -> str | None:
@@ -69,10 +70,13 @@ def logo_local(settings: dict, variante: str = "") -> str | None:
                                   si en Configuración se subió un logo propio,
                                   ese tiene prioridad)
       "isotipo"                -> isotipo "GR"
+      "color"                  -> logotipo oficial a color
+      "monocromo"              -> logotipo oficial monocromo (aunque haya logo propio)
       "configuracion"          -> solo el logo subido en Configuración
     Devuelve None si no hay ninguno disponible."""
-    if variante == "isotipo":
-        return _ASSET_ISOTIPO if os.path.isfile(_ASSET_ISOTIPO) else None
+    if variante in ("isotipo", "color", "monocromo"):
+        ruta = LOGO_VARIANTES[variante]
+        return ruta if os.path.isfile(ruta) else None
     propio = _logo_configurado(settings)
     if variante == "configuracion":
         return propio

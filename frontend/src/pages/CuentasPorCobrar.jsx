@@ -519,7 +519,7 @@ export default function CuentasPorCobrar() {
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Saldo</div><div className="font-display font-bold text-red-600">{money(detalle.cliente.saldo)}</div></div>
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Límite</div><div className="font-display font-bold">{money(detalle.cliente.limite_credito)}</div></div>
                 <div className="bg-slate-50 rounded p-3"><div className="text-xs text-slate-400">Días crédito</div><div className="font-display font-bold">{detalle.cliente.dias_credito}</div></div>
-                <div className="bg-slate-50 rounded p-3 border border-slate-200"><div className="text-xs text-carbon-800 font-medium">Asesor Asignado</div><div className="font-display font-bold text-carbon-900 text-sm truncate" title={detalle.cliente.vendedor_nombre || detalle.cliente.vendedor || detCli.vendedor_nombre || detCli.vendedor || "No asignado"}>{detalle.cliente.vendedor_nombre || detalle.cliente.vendedor || detCli.vendedor_nombre || detCli.vendedor || "No asignado"}</div></div>
+                <div className="bg-slate-50 rounded p-3 border border-slate-200"><div className="text-xs text-carbon-800 font-medium">Asesor Asignado</div><div className="font-display font-bold text-carbon-900 text-sm truncate" title={detalle.cliente?.vendedor_nombre || detCli?.vendedor_nombre || detCli?.vendedor || "No asignado"}>{detalle.cliente?.vendedor_nombre || detCli?.vendedor_nombre || detCli?.vendedor || "No asignado"}</div></div>
               </div>
 
               <div>

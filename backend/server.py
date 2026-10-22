@@ -3687,7 +3687,9 @@ async def cxc_detail(client_id: str, modo: Optional[str] = "activo",
                     "telefono": cli.get("telefono"), "celular": cli.get("celular"),
                     "limite_credito": round(float(cli.get("limite_credito", 0)), 2),
                     "dias_credito": cli.get("dias_credito", 0),
-                    "saldo": round(float(cli.get("saldo", 0)), 2)},
+                    "saldo": round(float(cli.get("saldo", 0)), 2),
+                    "vendedor_id": cli.get("vendedor_id"),
+                    "vendedor_nombre": cli.get("vendedor_nombre") or cli.get("vendedor")},
         "ventas": ventas_ret,
         "ventas_activas": ventas_activas,
         "ventas_historial": ventas_historial,
@@ -6214,9 +6216,15 @@ async def audit(user: dict = Depends(require_permission("auditoria.ver"))):
 
 # =========================================================================
 # HERRAMIENTAS DE DESARROLLADOR / MANTENIMIENTO (solo admin_desarrollador)
-# En producción estos endpoints NO existen (404), independientemente del rol.
+# La lectura y el diagnóstico funcionan también en producción: dev.errores
+# solo lo tiene el rol admin_desarrollador (no lo hereda "*"). Lo que crea o
+# borra datos de prueba NO existe en producción (404).
 # =========================================================================
 def _dev_only(user: dict = Depends(require_permission("dev.errores"))):
+    return user
+
+
+def _dev_no_prod(user: dict = Depends(_dev_only)):
     if _APP_ENV == "production":
         raise HTTPException(status_code=404, detail="No encontrado")
     return user
@@ -6275,7 +6283,7 @@ _DEMO_CLIENTES = [
 
 
 @api.post("/dev/seed-campo")
-async def dev_seed_campo(regenerar_track: bool = True, user: dict = Depends(_dev_only)):
+async def dev_seed_campo(regenerar_track: bool = True, user: dict = Depends(_dev_no_prod)):
     """SIMULACIÓN (solo desarrollo): vendedores, clientes con GPS en Palenque,
     track de ubicaciones de HOY y visitas. No crea ventas ni afecta finanzas."""
     import random
@@ -6504,7 +6512,7 @@ async def dev_preproduccion(user: dict = Depends(_dev_only)):
 
 # --- Limpieza de datos de prueba (SOLO DEV) -------------------------------------
 @api.delete("/dev/datos-prueba")
-async def dev_purgar_datos_prueba(user: dict = Depends(_dev_only)):
+async def dev_purgar_datos_prueba(user: dict = Depends(_dev_no_prod)):
     """Elimina TODOS los datos generados para pruebas: cuentas demo (@rysa.dev)
     con sus ubicaciones GPS, clientes DEMO-* y las visitas asociadas."""
     resumen = {"usuarios_eliminados": 0, "ubicaciones_eliminadas": 0,
@@ -6636,6 +6644,48 @@ async def update_settings(data: SettingsInput, user: dict = Depends(require_perm
     aplicar_storage_config(doc)
     await log_audit(user, "editar", "configuracion", "app", "Actualización de configuración")
     return doc
+
+
+# Logotipos oficiales de Grupo RYSA para elegir en Configuración y en el
+# Editor de formatos: clave -> (nombre, archivo en assets/, vista previa pública).
+LOGOS_OFICIALES = {
+    "color": ("Logotipo a color", "logotipo_color.png", "/brand/logotipo-color.webp"),
+    "monocromo": ("Logotipo monocromo", "logotipo.png", "/brand/logotipo-Photoroom.png"),
+    "isotipo": ("Isotipo GR", "isotipo1.png", "/brand/isotipo1.png"),
+}
+
+
+class LogoOficialInput(BaseModel):
+    variante: str
+
+
+@api.get("/marca/logos")
+async def marca_logos(user: dict = Depends(get_current_user)):
+    return [{"clave": k, "nombre": n, "vista_previa": v} for k, (n, _, v) in LOGOS_OFICIALES.items()]
+
+
+@api.post("/settings/logo-oficial")
+async def usar_logo_oficial(data: LogoOficialInput, user: dict = Depends(require_permission("config"))):
+    """Copia el logotipo oficial elegido al almacenamiento (queda respaldado
+    con los demás archivos) y lo deja como logo de la empresa."""
+    info = LOGOS_OFICIALES.get(data.variante)
+    if not info:
+        raise HTTPException(400, "Logotipo desconocido")
+    with open(os.path.join(storage._ASSETS_DIR, info[1]), "rb") as f:
+        contenido = f.read()
+    path = f"uploads/marca/{data.variante}.png"
+    result = storage.put_object(path, contenido, "image/png")
+    stored = result.get("path", path)
+    if not await db.files.find_one({"storage_path": stored}):
+        await db.files.insert_one({
+            "id": uid(), "storage_path": stored, "original_filename": info[1],
+            "content_type": "image/png", "size": len(contenido),
+            "is_deleted": False, "created_at": iso_now(),
+        })
+    url = f"/api/files/{stored}"
+    await db.settings.update_one({"_id": "app"}, {"$set": {"logo_url": url}}, upsert=True)
+    await log_audit(user, "editar", "configuracion", "logo", f"Logo de la empresa: {info[0]}")
+    return {"url": url, "nombre": info[0]}
 
 # =========================================================================
 # ARCHIVOS / OBJECT STORAGE (imágenes de productos/categorías, PDFs de ticket)

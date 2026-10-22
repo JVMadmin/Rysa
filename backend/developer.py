@@ -76,9 +76,16 @@ def record_request_error(entry: dict):
 # Dependencias de autorización                                                 #
 # --------------------------------------------------------------------------- #
 async def dev_read(user: dict = Depends(require_permission("dev.info"))):
-    """Lectura/diagnóstico: requiere permiso dev.info; 404 en producción."""
-    if _APP_ENV == "production":
-        raise HTTPException(status_code=404, detail="No encontrado")
+    """Lectura/diagnóstico: permiso dev.info (solo admin_desarrollador).
+    Disponible también en producción: no modifica datos."""
+    return user
+
+
+async def dev_mantenimiento(user: dict = Depends(require_permission("developer_tools"))):
+    """Mantenimiento NO destructivo (respaldo de la BD, plan de limpieza en
+    modo consulta): rol admin_desarrollador, también en producción."""
+    if user.get("role") != DEV_ROLE:
+        raise HTTPException(status_code=403, detail="Se requiere el rol admin_desarrollador")
     return user
 
 
@@ -650,7 +657,7 @@ async def dev_limpiar_logs(user: dict = Depends(dev_read)):
 
 
 @router.post("/dev/backup")
-async def dev_backup(user: dict = Depends(dev_destructive)):
+async def dev_backup(user: dict = Depends(dev_mantenimiento)):
     """Backup best-effort con pg_dump (si está disponible en el sistema)."""
     url = os.environ.get("DATABASE_URL", "")
     m = re.match(r"postgresql(?:\+asyncpg)?://([^:@]+):([^@]+)@([^:/]+)(?::(\d+))?/(\w+)", url)
@@ -685,7 +692,7 @@ async def dev_backup(user: dict = Depends(dev_destructive)):
 
 # --- Plan de limpieza (contadores para la UI) --------------------------------
 @router.get("/dev/clean/plan")
-async def dev_clean_plan(user: dict = Depends(dev_destructive)):
+async def dev_clean_plan(user: dict = Depends(dev_mantenimiento)):
     async with pgstore.get_engine().connect() as conn:
         conteos = await snapshot_contadores(conn)
     plan = []

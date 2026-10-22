@@ -17,6 +17,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 // ════════════════════════════════════════════════════════════════════════
 // Catálogos
 // ════════════════════════════════════════════════════════════════════════
+// Logotipos oficiales (assets del backend; la vista previa sale de /brand).
+const LOGOS_OFICIALES = [
+  { clave: "color", nombre: "A color", vista: "/brand/logotipo-color.webp" },
+  { clave: "monocromo", nombre: "Monocromo", vista: "/brand/logotipo-Photoroom.png" },
+  { clave: "isotipo", nombre: "Isotipo GR", vista: "/brand/isotipo1.png" },
+];
 // Muestras de color del editor: familia RYSA (rojo, grafito, neutros) más dos de estado.
 const COLORES = ["#CD0708", "#A3060A", "#2E2F34", "#4A4B50", "#6B6D73", "#D9DADD", "#FDECEC", "#F6F5F2", "#FFFFFF", "#000000", "#15803D", "#B45309"];
 
@@ -109,7 +115,7 @@ function resumen(b) {
     case "campos": return (b.titulo ? b.titulo + " · " : "") + (b.campos || []).map((c) => c.etiqueta).filter(Boolean).slice(0, 4).join(", ");
     case "tabla_items": return b.modo === "lista" ? "Lista estilo ticket" : (b.columnas || []).map((c) => c.titulo || CAMPOS_ITEM[c.campo]).join(" · ");
     case "totales": return (b.filas || []).map((f) => f.etiqueta || CAMPOS_TOTAL[f.campo]).join(", ");
-    case "logo": return { oficial: "Logotipo oficial", isotipo: "Isotipo GR", configuracion: "Logo de Configuración", imagen: "Imagen subida" }[b.fuente || "oficial"];
+    case "logo": return { color: "Logotipo a color", monocromo: "Logotipo monocromo", isotipo: "Isotipo GR", oficial: "Logo de la empresa", configuracion: "Logo de Configuración", imagen: "Imagen subida" }[b.fuente || "oficial"];
     case "qr": return quitar(b.contenido) || "{{doc.qr_verificar}}";
     case "separador": return { solida: "Línea sólida", punteada: "Punteada", guiones: "Guiones", doble: "Doble" }[b.linea || "solida"];
     case "espacio": return `${b.alto_mm || 4} mm`;
@@ -246,7 +252,26 @@ function EditorContenido({ b, set, tipo, ro }) {
     case "logo":
     case "imagen":
       return <div className="space-y-3">
-        {b.tipo === "logo" && <Campo label="Origen del logotipo"><Sel disabled={ro} value={b.fuente || "oficial"} onChange={p("fuente")} opciones={{ oficial: "Logotipo oficial Grupo RYSA", isotipo: "Isotipo GR", configuracion: "Logo de Configuración", imagen: "Imagen subida" }} /></Campo>}
+        {b.tipo === "logo" && <Campo label="Origen del logotipo">
+          {/* Los tres logotipos oficiales se eligen viéndolos; abajo, el de
+              Configuración o una imagen propia. */}
+          <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Logotipo">
+            {LOGOS_OFICIALES.map((l) => {
+              const activo = b.fuente === l.clave;
+              return (
+                <button key={l.clave} type="button" disabled={ro} role="radio" aria-checked={activo} onClick={() => p("fuente")(l.clave)}
+                  className={`flex flex-col items-center gap-1.5 rounded-md border p-2 text-[11px] transition-colors ${activo ? "border-brand-600 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}>
+                  <span className="flex h-10 w-full items-center justify-center rounded bg-white"><img src={l.vista} alt="" className="max-h-9 max-w-full object-contain" /></span>
+                  {l.nombre}
+                </button>
+              );
+            })}
+          </div>
+          {/* "oficial" = logo de la empresa (Configuración; si no hay, el
+              monocromo). Es el que usan los formatos predeterminados. */}
+          <div className="mt-2"><Sel disabled={ro} value={LOGOS_OFICIALES.some((l) => l.clave === b.fuente) ? "" : (b.fuente || "oficial")} onChange={(v) => v && p("fuente")(v)}
+            opciones={{ "": "Otro origen…", oficial: "Logo de la empresa (Configuración)", configuracion: "Solo el logo de Configuración", imagen: "Imagen subida" }} /></div>
+        </Campo>}
         {(b.tipo === "imagen" || b.fuente === "imagen") && <Campo label="Imagen">
           {b.imagen_url && <img src={b.imagen_url} alt="" className="mb-2 max-h-24 rounded border" />}
           {!ro && <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50">
