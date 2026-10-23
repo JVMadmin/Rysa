@@ -1,13 +1,22 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 import SitioLayout from "@/components/sitio/SitioLayout";
 import { Cortina, EASE, Revelar, TitularPalabras } from "@/components/sitio/motion";
 import { CATEGORIAS, aproximado } from "@/data/categorias";
+import { MARCAS_SITIO } from "@/data/marcas";
+import { api } from "@/lib/api";
+import { Elemento, Escalonar } from "@/components/sitio/motion";
 
 export default function Categorias() {
   useEffect(() => { document.title = "Productos — Grupo RYSA"; window.scrollTo(0, 0); }, []);
+  // Marcas con productos activos (conteo real del inventario).
+  const [conteo, setConteo] = useState({});
+  useEffect(() => {
+    api.get("/publico/marcas").then((r) => setConteo(Object.fromEntries((r.data || []).map((m) => [m.slug, m.productos])))).catch(() => {});
+  }, []);
+  const marcas = MARCAS_SITIO.filter((m) => !Object.keys(conteo).length || conteo[m.slug]);
 
   return (
     <SitioLayout>
@@ -23,6 +32,28 @@ export default function Categorias() {
             Seis categorías que cubren lo que consume un negocio de alimentos, una tienda o un hogar. Pregunta por cualquier
             artículo aunque no lo veas aquí: nuestro inventario es más amplio que lo que cabe en una página.
           </motion.p>
+        </div>
+      </section>
+
+      {/* Compra por marca: cada una abre su catálogo con precios RYSA */}
+      <section aria-labelledby="marcas-titulo" className="papel border-b border-slate-200">
+        <div className="mx-auto max-w-[1240px] px-5 py-14 sm:px-8 sm:py-16">
+          <h2 id="marcas-titulo" className="flex items-center gap-4 text-xs uppercase tracking-[0.2em] text-brand-600"><span className="h-px w-10 bg-brand-500" aria-hidden="true" />Compra por marca</h2>
+          <Escalonar as="ul" paso={0.04} className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {marcas.map((m) => (
+              <Elemento as="li" key={m.slug} y={14}>
+                <Link to={`/productos/marca/${m.slug}`}
+                  className="group flex h-full flex-col items-center justify-between gap-3 rounded-sm border border-slate-200 bg-white p-4 text-center transition-all hover:-translate-y-0.5 hover:border-carbon-900 hover:shadow-card-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600">
+                  <span className="flex h-14 w-full items-center justify-center">
+                    {m.logo
+                      ? <img src={m.logo} alt="" className="max-h-12 max-w-[85%] object-contain opacity-70 grayscale transition duration-300 group-hover:opacity-100 group-hover:grayscale-0" />
+                      : <span className="titular-fino text-[1.35rem] text-slate-500 transition-colors group-hover:text-carbon-900">{m.nombre}</span>}
+                  </span>
+                  <span className="text-xs text-slate-500">{m.logo ? `${m.nombre} · ` : ""}{conteo[m.slug] ? `${conteo[m.slug]} productos` : "Ver catálogo"}</span>
+                </Link>
+              </Elemento>
+            ))}
+          </Escalonar>
         </div>
       </section>
 

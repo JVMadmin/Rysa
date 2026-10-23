@@ -10,6 +10,7 @@ import ErpLayout from "@/components/layout/ErpLayout";
 import Landing from "@/pages/Landing";
 import SitioCategorias from "@/pages/sitio/Categorias";
 import SitioCategoria from "@/pages/sitio/Categoria";
+import SitioMarca from "@/pages/sitio/Marca";
 import Login from "@/pages/Login";
 import PagoComprobante from "@/pages/PagoComprobante";
 import Dashboard from "@/pages/Dashboard";
@@ -74,6 +75,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/productos" element={<SitioCategorias />} />
+          <Route path="/productos/marca/:slug" element={<SitioMarca />} />
           <Route path="/productos/:slug" element={<SitioCategoria />} />
           <Route path="/login" element={<Login />} />
           <Route path="/pago/:token" element={<PagoComprobante />} />

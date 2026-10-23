@@ -8033,6 +8033,10 @@ app.include_router(catalog_images.router)
 # Editor de formatos (machotes) v2: plantillas versionadas por tipo de documento.
 app.include_router(formatos_api.router)
 
+# Catálogo público por marca (sitio /productos/marca/:slug) con precios RYSA.
+import marcas as _marcas  # noqa: E402
+app.include_router(_marcas.init(db))
+
 # Configuración dinámica de CORS
 env = os.environ.get("ENVIRONMENT", "development").lower()
 cors_origins_env = os.environ.get("CORS_ORIGINS", "")

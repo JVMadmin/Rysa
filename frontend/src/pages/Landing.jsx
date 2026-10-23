@@ -6,10 +6,8 @@ import SitioLayout, { BOTON_CONTORNO, BOTON_CONTORNO_CLARO, BOTON_PRIMARIO, coti
 import MosaicoCategorias from "@/components/sitio/MosaicoCategorias";
 import { Contador, EASE, Elemento, Escalonar, Parallax, Regla, Revelar, TitularPalabras } from "@/components/sitio/motion";
 import { CATEGORIAS, TOTAL_ARTICULOS } from "@/data/categorias";
+import { MARCAS_SITIO } from "@/data/marcas";
 
-// Marcas presentes en el inventario real (ver data/categorias.js). Se muestran
-// como texto, sin reproducir logotipos de terceros.
-const MARCAS = ["REYMA", "Chiaplast", "INIX", "Politab", "PRIMO", "Aguirey", "Dinastía", "Truper", "Serviplastic", "Garduño", "Cubasa", "Ideal"];
 
 // Ventajas que el propio sistema de Grupo RYSA respalda (listas de precio por
 // volumen, facturación CFDI 4.0, cuentas por cobrar y vendedores en ruta).
@@ -211,9 +209,19 @@ export default function Landing() {
           <div className="marquesina">
             {[0, 1].map((copia) => (
               <ul key={copia} aria-hidden={copia === 1 ? "true" : undefined} className="flex shrink-0 items-center">
-                {MARCAS.map((m) => (
-                  <li key={m} className="flex items-center gap-10 pr-10">
-                    <span className="titular-fino whitespace-nowrap text-[1.6rem] text-slate-500 transition-colors duration-300 hover:text-carbon-900">{m}</span>
+                {/* Logotipo en gris como el texto; a color al pasar el cursor.
+                    Cada marca abre su catálogo con precios RYSA. */}
+                {MARCAS_SITIO.map((m) => (
+                  <li key={m.slug} className="flex items-center gap-10 pr-10">
+                    <Link to={`/productos/marca/${m.slug}`} tabIndex={copia === 1 ? -1 : undefined}
+                      className="group flex h-12 items-center" aria-label={`Catálogo ${m.nombre}`}>
+                      {m.logo ? (
+                        <img src={m.logo} alt={m.nombre} loading="lazy"
+                          className="h-10 w-auto object-contain opacity-60 grayscale transition duration-300 group-hover:opacity-100 group-hover:grayscale-0" />
+                      ) : (
+                        <span className="titular-fino whitespace-nowrap text-[1.6rem] text-slate-500 transition-colors duration-300 group-hover:text-carbon-900">{m.nombre}</span>
+                      )}
+                    </Link>
                     <span className="h-1 w-1 rounded-full bg-brand-500" aria-hidden="true" />
                   </li>
                 ))}
