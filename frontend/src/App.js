@@ -42,6 +42,7 @@ import Pedidos from "@/pages/Pedidos";
 import SupervisionComercial from "@/pages/SupervisionComercial";
 import MiActividadCampo from "@/pages/MiActividadCampo";
 import Catalogo from "@/pages/Catalogo";
+import MiCuenta from "@/pages/MiCuenta";
 import { ShieldX as ShieldXIcon } from "lucide-react";
 
 /** Guarda REAL de ruta: aunque el menú se oculte, escribir la URL no da acceso. */
@@ -85,6 +86,8 @@ function App() {
           <Route element={<ProtectedRoute><ErpLayout /></ProtectedRoute>}>
             <Route path="/app" element={<Navigate to="/app/dashboard" replace />} />
             <Route path="/app/dashboard" element={<Dashboard />} />
+            {/* Mi cuenta: se abre desde el nombre del usuario en la barra superior. */}
+            <Route path="/app/mi-cuenta" element={<MiCuenta />} />
             <Route path="/app/inventario" element={<RequirePerm perm="producto.crear"><Productos /></RequirePerm>} />
             <Route path="/app/categorias" element={<RequirePerm perm="producto.editar"><Categorias /></RequirePerm>} />
             <Route path="/app/clientes" element={<RequirePerm perm="clientes.gestionar"><Clientes /></RequirePerm>} />

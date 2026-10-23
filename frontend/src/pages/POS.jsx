@@ -12,6 +12,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import CajaAperturaModal from "@/components/CajaAperturaModal";
 import ReporteRapido from "@/components/ReporteRapido";
+import CodigoAutorizacionInput from "@/components/CodigoAutorizacionInput";
 import { toast } from "sonner";
 import { LISTAS_PCT_DEFAULT, REDONDEO_DEFAULT, precioNetoLista as calcListPrice } from "@/lib/precios";
 import {
@@ -19,7 +20,7 @@ import {
   Banknote, ArrowLeftRight, CreditCard,   Tag, Printer, Hash, Keyboard, FileText,
   Smartphone, Landmark, Gift, DollarSign, User as UserIcon, Check, Tags, MessageCircle, Loader2,
   Star, Flame, LayoutGrid, HandCoins, UserPlus, AlertTriangle, Share2, Download, RefreshCw,
-  Wallet as Wallet2, Mail, Send as SendIcon,
+  Wallet as Wallet2, Mail, Send as SendIcon, PencilLine, Lock, ShieldCheck,
 } from "lucide-react";
 
 const METODOS = [
@@ -123,6 +124,15 @@ export default function POS({ windowId, windowLabel }) {
   const [linePrice, setLinePrice] = useState(null);
   const [selProd, setSelProd] = useState(null);
   const [libreVal, setLibreVal] = useState("");
+  // Precio manual (F6): administradores/dueño lo aplican directo; los demás
+  // necesitan el código de 6 dígitos de alguien autorizado.
+  const [manualOpen, setManualOpen] = useState(false);
+  const [autzPend, setAutzPend] = useState(null); // { vista, neto } esperando código
+  const [autzCodigo, setAutzCodigo] = useState("");
+  const [autzError, setAutzError] = useState("");
+  const [autzBusy, setAutzBusy] = useState(false);
+  const autzBusyRef = useRef(false);
+  const precioManualDirecto = can("venta.precio_manual");
   const [payOpen, setPayOpen] = useState(false);
   const [invOverride, setInvOverride] = useState(null); // {motivo} dialog de inventario insuficiente
   const [invReason, setInvReason] = useState("");
@@ -567,13 +577,14 @@ export default function POS({ windowId, windowLabel }) {
   };
 
   // Agrega un producto al carrito con un precio elegido explícitamente
-  const addToCartWithPrice = (p, precio) => {
+  // (`marca`: datos de precio manual de la línea, ver setLinePrecio).
+  const addToCartWithPrice = (p, precio, marca = {}) => {
     const pid = p.product_id || p.id;
     setSelProd(p);
     setCart((c) => {
       const ex = c.find((i) => i.product_id === pid);
-      if (ex) return c.map((i) => (i.product_id === pid ? { ...i, precio: Number(precio) || 0 } : i));
-      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa ?? 8, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
+      if (ex) return c.map((i) => (i.product_id === pid ? { ...i, precio: Number(precio) || 0, ...marca } : i));
+      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa ?? 8, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0), ...marca }];
     });
     setSelected(pid);
     setQ(""); qRef.current = ""; setResults([]);
@@ -583,7 +594,8 @@ export default function POS({ windowId, windowLabel }) {
   const applyLista = (l) => {
     setLista(l);
     // También los productos sin precio capturado: su precio sale del costo y el % de la lista.
-    setCart((c) => c.map((i) => (i.precios?.length || i.costo > 0 ? { ...i, precio: priceFromList({ precios: i.precios, precio_minimo: i.precio_minimo, costo: i.costo, iva_tasa: i.iva_tasa }, l) } : i)));
+    // Las líneas con precio manual conservan el precio que se autorizó.
+    setCart((c) => c.map((i) => (!i.precio_manual && (i.precios?.length || i.costo > 0) ? { ...i, precio: priceFromList({ precios: i.precios, precio_minimo: i.precio_minimo, costo: i.costo, iva_tasa: i.iva_tasa }, l) } : i)));
   };
   // Alterna un producto en los favoritos del usuario
   const toggleFav = async (e, pid) => {
@@ -646,18 +658,51 @@ export default function POS({ windowId, windowLabel }) {
       return tokens.every((tk) => hay.includes(tk));
     }).slice(0, 100);
   }, [clients, clientQuery]);
-  const setLinePrecio = (item, precioVista) => {
-    // El carrito guarda SIEMPRE el precio neto (así se envía al backend con el
-    // flag precios_incluyen_iva). Si el toggle "Precios incluyen IVA" está
-    // activo, lo que el cajero ve y captura es precio CON IVA: aquí se
-    // convierte a neto antes de guardar.
-    const tasa = Number(item?.iva_tasa || 0);
-    const f = incluyeIva ? 1 + tasa / 100 : 1;
-    const precio = +((Number(precioVista) || 0) / f).toFixed(4);
+  // El carrito guarda SIEMPRE el precio neto (así se envía al backend con el
+  // flag precios_incluyen_iva). Si el toggle "Precios incluyen IVA" está
+  // activo, lo que el cajero ve y captura es precio CON IVA: aquí se
+  // convierte a neto antes de guardar.
+  const netoDeVista = (item, precioVista) => {
+    const f = incluyeIva ? 1 + Number(item?.iva_tasa || 0) / 100 : 1;
+    return +((Number(precioVista) || 0) / f).toFixed(4);
+  };
+  const cerrarLinePrice = () => {
+    setLinePrice(null); setLibreVal(""); setManualOpen(false);
+    setAutzPend(null); setAutzCodigo(""); setAutzError("");
+  };
+  // `manual`: { autorizacion_id, autorizado_por } cuando es precio manual.
+  // Elegir un precio de la lista quita la marca de precio manual.
+  const setLinePrecio = (item, precioVista, manual = null) => {
+    const precio = netoDeVista(item, precioVista);
+    const marca = manual
+      ? { precio_manual: true, autorizacion_id: manual.autorizacion_id || null, autorizado_por: manual.autorizado_por || "" }
+      : { precio_manual: false, autorizacion_id: null, autorizado_por: "" };
     const inCart = cart.some((i) => i.product_id === item.product_id);
-    if (inCart) setCart((c) => c.map((i) => (i.product_id === item.product_id ? { ...i, precio } : i)));
-    else addToCartWithPrice(item, precio);
-    setLinePrice(null); setLibreVal("");
+    if (inCart) setCart((c) => c.map((i) => (i.product_id === item.product_id ? { ...i, precio, ...marca } : i)));
+    else addToCartWithPrice(item, precio, marca);
+    cerrarLinePrice();
+  };
+  const aplicarPrecioManual = () => {
+    const vista = Number(libreVal);
+    if (!(vista > 0)) return toast.error("Escribe un precio mayor a cero");
+    if (precioManualDirecto) return setLinePrecio(linePrice, vista, { autorizado_por: user?.name });
+    setAutzPend({ vista, neto: netoDeVista(linePrice, vista) });
+    setAutzCodigo(""); setAutzError("");
+  };
+  const autorizarPrecioManual = async (codigo) => {
+    if (!autzPend || !linePrice || String(codigo).length !== 6 || autzBusyRef.current) return;
+    autzBusyRef.current = true; setAutzBusy(true); setAutzError("");
+    try {
+      const { data } = await api.post("/autorizaciones", {
+        codigo, accion: "precio_manual", product_id: linePrice.product_id,
+        precio: autzPend.neto, precio_anterior: Number(linePrice.precio) || null,
+      });
+      toast.success(`Precio manual autorizado por ${data.autorizador_nombre}`);
+      setLinePrecio(linePrice, autzPend.vista, { autorizacion_id: data.id, autorizado_por: data.autorizador_nombre });
+    } catch (e) {
+      setAutzError(formatApiError(e.response?.data?.detail));
+      setAutzCodigo("");
+    } finally { autzBusyRef.current = false; setAutzBusy(false); }
   };
   const updateQty = (id, d) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Math.max(0.001, +(i.cantidad + d).toFixed(3)) } : i)));
   const setQty = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Number(v) || 0 } : i)));
@@ -680,6 +725,8 @@ export default function POS({ windowId, windowLabel }) {
           unidad: pres.nombre,
           factor: Number(pres.factor || 1.0),
           precio: nuevoPrecio,
+          // El precio cambió: ya no es el precio manual que se autorizó.
+          precio_manual: false, autorizacion_id: null, autorizado_por: "",
         };
       })
     );
@@ -730,6 +777,8 @@ export default function POS({ windowId, windowLabel }) {
       else if (e.key === "F9") { const t = target(); if (t) { updateQty(t, -1); setSelected(t); } }
       else if (e.key === "F7") { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }
       else if (e.key === "F6") {
+        // F6 con la lista de precios abierta = precio manual.
+        if (linePrice) { if (!autzPend) setManualOpen(true); return; }
         const t = target();
         const item = t ? cart.find((i) => i.product_id === t) : null;
         const prod = item || selProd;
@@ -744,7 +793,7 @@ export default function POS({ windowId, windowLabel }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, cart, selProd, lista, listasPct, redondeo, incluyeIva]);
+  }, [selected, cart, selProd, lista, listasPct, redondeo, incluyeIva, linePrice, autzPend]);
 
   const pcSearch = async (val) => {
     setPcQuery(val);
@@ -807,6 +856,10 @@ export default function POS({ windowId, windowLabel }) {
     setLinePrice(null);
     setSelProd(null);
     setLibreVal("");
+    setManualOpen(false);
+    setAutzPend(null);
+    setAutzCodigo("");
+    setAutzError("");
     setPayOpen(false);
     setInvOverride(null);
     setInvReason("");
@@ -837,7 +890,7 @@ export default function POS({ windowId, windowLabel }) {
     try {
       const payload = {
         cliente_id: clienteId || null,
-        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", presentacion: i.presentacion || i.unidad || "PZA", factor: Number(i.factor || 1.0), precio: Number(i.precio) || 0, iva_tasa: incluyeIva ? Number(i.iva_tasa ?? 8) : 0, descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
+        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", presentacion: i.presentacion || i.unidad || "PZA", factor: Number(i.factor || 1.0), precio: Number(i.precio) || 0, iva_tasa: incluyeIva ? Number(i.iva_tasa ?? 8) : 0, descuento: Number(i.descuento || 0), comentario: i.comentario || "", precio_manual: !!i.precio_manual, autorizacion_id: i.precio_manual ? (i.autorizacion_id || null) : null })),
         descuento_global: totals.descGlobalTotal,
         condicion,
         pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0), ...(p.metodo === "tarjeta" && p.card_type ? { card_type: p.card_type } : {}) })) : [],
@@ -1163,6 +1216,12 @@ export default function POS({ windowId, windowLabel }) {
                             className="underline decoration-dotted hover:text-brand-600" data-testid={`cart-price-${i.codigo}`}>
                             {money(precioVista)}
                           </button>
+                          {i.precio_manual && (
+                            <div className="text-[9px] font-semibold uppercase tracking-wide text-amber-700" data-testid={`cart-manual-${i.codigo}`}
+                              title={i.autorizado_por ? `Precio manual · autorizó ${i.autorizado_por}` : "Precio manual"}>
+                              Manual{i.autorizado_por ? ` · ${i.autorizado_por.split(" ")[0]}` : ""}
+                            </div>
+                          )}
                         </td>
                         <td className="px-1.5 py-1 text-right font-semibold tabular-nums whitespace-nowrap">
                           {!(i.descuento > 0) && money(importeVista)}
@@ -1274,7 +1333,7 @@ export default function POS({ windowId, windowLabel }) {
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F8</kbd> +cantidad</span>
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F9</kbd> −cantidad</span>
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F7</kbd> verificar precio</span>
-                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F6</kbd> precios del producto</span>
+                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F6</kbd> precios del producto (otra vez: precio manual)</span>
                 </div>
               </div>
             ) : (
@@ -1418,10 +1477,37 @@ export default function POS({ windowId, windowLabel }) {
       </Dialog>
 
       {/* Selector de precio por línea */}
-      <Dialog open={!!linePrice} onOpenChange={(o) => { if (!o) { setLinePrice(null); setLibreVal(""); } }}>
+      <Dialog open={!!linePrice} onOpenChange={(o) => { if (!o) cerrarLinePrice(); }}>
         <DialogContent data-testid="line-price-dialog">
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Tag className="w-5 h-5" /> Precio · {linePrice?.descripcion}</DialogTitle></DialogHeader>
-          {linePrice && (
+          {linePrice && autzPend && (
+            // Paso 2 del precio manual: quien autoriza teclea su código aquí.
+            <div className="space-y-4" data-testid="autorizacion-panel">
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                <div className="flex items-center gap-1.5 font-semibold"><ShieldCheck className="w-4 h-4" /> Se necesita autorización</div>
+                <div className="mt-1">
+                  Precio manual: <b className="cifras">{money(autzPend.vista)}</b>{incluyeIva ? " con IVA" : ""}
+                  <span className="text-amber-800/80"> · antes {money(Number(linePrice.precio || 0) * fDlg)}</span>
+                </div>
+              </div>
+              <div className="space-y-2 text-center">
+                <Label className="text-xs uppercase tracking-wider text-slate-500">Código de quien autoriza</Label>
+                <CodigoAutorizacionInput value={autzCodigo} onChange={(v) => { setAutzCodigo(v); setAutzError(""); }}
+                  onComplete={autorizarPrecioManual} autoFocus testId="autorizacion-codigo" />
+                {autzError
+                  ? <p className="text-sm text-red-600" data-testid="autorizacion-error">{autzError}</p>
+                  : <p className="text-xs text-slate-400">Administrador, dueño o usuario con permiso para autorizar.</p>}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => { setAutzPend(null); setAutzCodigo(""); setAutzError(""); }} data-testid="autorizacion-regresar">Regresar</Button>
+                <Button onClick={() => autorizarPrecioManual(autzCodigo)} disabled={autzCodigo.length !== 6 || autzBusy}
+                  className="bg-brand-600 hover:bg-brand-700" data-testid="autorizacion-confirmar">
+                  {autzBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Autorizar"}
+                </Button>
+              </div>
+            </div>
+          )}
+          {linePrice && !autzPend && (
             <div className="space-y-3">
               {/* Lista de precios (F6): Precio 1…n y mínimo, sin y con IVA, ya
                   redondeados. Flechas para moverse, Enter o doble clic para elegir. */}
@@ -1461,22 +1547,36 @@ export default function POS({ windowId, windowLabel }) {
                         </tbody>
                       </table>
                     </div>
-                    <div className="mt-3 flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setLinePrice(null)} data-testid="line-precio-cancelar">Cancelar</Button>
+                    <div className="mt-3 flex items-center gap-2">
+                      <Button variant="outline" onClick={() => setManualOpen((v) => !v)} data-testid="line-precio-manual-btn"
+                        title={precioManualDirecto ? "Capturar un precio distinto a la lista" : "Capturar un precio distinto a la lista (requiere autorización)"}
+                        className={manualOpen ? "border-brand-600 text-brand-600" : ""}>
+                        <PencilLine className="w-4 h-4 mr-1" /> Precio manual
+                        {!precioManualDirecto && <Lock className="w-3 h-3 ml-1 text-slate-400" />}
+                        <kbd className="ml-1.5 text-[9px] bg-slate-100 text-slate-500 px-1 rounded">F6</kbd>
+                      </Button>
+                      <Button variant="outline" onClick={cerrarLinePrice} className="ml-auto" data-testid="line-precio-cancelar">Cancelar</Button>
                       <Button onClick={() => elegir(filas[sel])} disabled={!(filas[sel]?.neto > 0)} className="bg-brand-600 hover:bg-brand-700" data-testid="line-precio-seleccionar">Seleccionar</Button>
                     </div>
                   </div>
                 );
               })()}
-              <div className="border-t pt-3">
-                <Label className="text-xs uppercase tracking-wider text-slate-500">{incluyeIva ? "Precio libre (c/IVA)" : "Precio libre"}</Label>
-                {can("producto.precio") ? (
+              {manualOpen && (
+                <div className="border-t pt-3" data-testid="line-precio-manual">
+                  <Label className="text-xs uppercase tracking-wider text-slate-500">{incluyeIva ? "Precio manual (con IVA)" : "Precio manual (sin IVA)"}</Label>
                   <div className="flex gap-2 mt-1">
-                    <Input type="number" value={libreVal} onChange={(e) => setLibreVal(e.target.value)} placeholder="0.00" data-testid="line-precio-libre-input" />
-                    <Button onClick={() => setLinePrecio(linePrice, libreVal)} className="bg-brand-600 hover:bg-brand-700" data-testid="line-precio-libre-apply">Aplicar</Button>
+                    <Input type="number" inputMode="decimal" step="any" min="0" autoFocus value={libreVal}
+                      onChange={(e) => setLibreVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); aplicarPrecioManual(); } }}
+                      onFocus={(e) => e.target.select()} placeholder="0.00" data-testid="line-precio-manual-input" />
+                    <Button onClick={aplicarPrecioManual} className="bg-brand-600 hover:bg-brand-700 shrink-0" data-testid="line-precio-manual-aplicar">
+                      {precioManualDirecto ? "Aplicar" : <><Lock className="w-4 h-4 mr-1" /> Pedir autorización</>}
+                    </Button>
                   </div>
-                ) : <p className="text-xs text-slate-400 mt-1">No tienes permiso para capturar precio libre.</p>}
-              </div>
+                  {!precioManualDirecto && (
+                    <p className="text-xs text-slate-500 mt-1.5">Después teclea su código un administrador, el dueño o alguien con permiso para autorizar.</p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

@@ -250,6 +250,13 @@ MODULES = {
         "label": "Pedidos",
         "perms": {"pedido.gestionar"},
     },
+    # Para usuarios que no son administradores ni dueño: definen un código de
+    # 6 dígitos en Mi cuenta y con él autorizan movimientos de otros (p. ej.
+    # precio manual en el POS). Ver autorizaciones.py.
+    "autorizaciones": {
+        "label": "Autorizar movimientos con código",
+        "perms": {"autorizacion.otorgar"},
+    },
 }
 
 def role_permissions(role: str) -> set:

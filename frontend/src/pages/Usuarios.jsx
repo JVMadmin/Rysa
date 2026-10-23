@@ -10,7 +10,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Plus, Loader2, UserCog, Pencil } from "lucide-react";
+import { Plus, Loader2, UserCog, Pencil, KeyRound } from "lucide-react";
 
 const FALLBACK_ROLES = [
   ["admin", "Administrador"],
@@ -32,6 +32,7 @@ const FALLBACK_MODULOS = [
   ["usuarios", "Usuarios"],
   ["auditoria", "Auditoría"],
   ["configuracion", "Configuración"],
+  ["autorizaciones", "Autorizar movimientos con código"],
 ];
 
 const ADMIN_ROLES = ["admin", "admin_propietario", "admin_desarrollador"];
@@ -125,12 +126,18 @@ export default function Usuarios({ embedded = false }) {
                 </td>
                 <td className="p-3">
                   <div className="flex flex-wrap gap-1">
-                    {(u.modulos || []).length === 0 && <span className="text-xs text-slate-400">—</span>}
+                    {(u.modulos || []).length === 0 && !u.codigo_autorizacion && <span className="text-xs text-slate-400">—</span>}
                     {(u.modulos || []).map((m) => (
                       <span key={m} className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                         {MODULOS.find(([k]) => k === m)?.[1] || m}
                       </span>
                     ))}
+                    {u.codigo_autorizacion && (
+                      <span title="Tiene código de autorización activo" data-testid={`codigo-activo-${u.email}`}
+                        className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-green-50 text-[10px] font-semibold uppercase tracking-wide text-green-700 ring-1 ring-green-200">
+                        <KeyRound className="w-3 h-3" /> Código activo
+                      </span>
+                    )}
                   </div>
                 </td>
                 <td className="p-3"><Switch checked={u.active !== false} onCheckedChange={() => toggleActive(u)} /></td>
@@ -172,6 +179,9 @@ export default function Usuarios({ embedded = false }) {
                     </label>
                   ))}
                 </div>
+                {f.modulos.includes("autorizaciones") && (
+                  <p className="text-[11px] text-slate-500 mt-2">Esta persona define su código de 6 dígitos en <b>Mi cuenta</b> (clic en su nombre, arriba a la derecha) y con él autoriza movimientos como el precio manual del POS.</p>
+                )}
               </div>
             )}
           </div>

@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
   UserCog, ScrollText, LogOut, Menu, ChevronLeft, Settings, HandCoins, FileText, Stamp, BarChart3, Smartphone, Wrench,
   Search, ChevronDown, Radar, Route as RouteIcon, ShoppingBag, Truck, Images, ClipboardList, FileSignature, PieChart,
-  CreditCard, ShieldCheck,
+  CreditCard, ShieldCheck, UserRound,
 } from "lucide-react";
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -61,6 +61,9 @@ const NAV = [
   { to: "/app/auditoria", label: "Auditoría", icon: ShieldCheck, perm: "auditoria.ver", section: "SISTEMA" },
   { to: "/app/devtools", label: "Desarrollador", icon: Wrench, perm: "dev.errores", dev: true, section: "SISTEMA" },
 ];
+
+// Mi cuenta no va en el menú: se abre desde el nombre del usuario (barra superior).
+const MI_CUENTA = { to: "/app/mi-cuenta", label: "Mi cuenta", icon: UserRound };
 
 export default function ErpLayout() {
   const { user, logout, can } = useAuth();
@@ -183,7 +186,7 @@ export default function ErpLayout() {
   const visible = NAV.filter((n) =>
     (!n.perm || can(n.perm)) && !(n.ocultoConPerm && can(n.ocultoConPerm)));
 
-  const current =
+  const current = pathname === MI_CUENTA.to ? MI_CUENTA :
     visible
       .filter((n) => pathname === n.to || pathname.startsWith(n.to + "/"))
       .sort((a, b) => b.to.length - a.to.length)[0] || null;
@@ -350,14 +353,21 @@ export default function ErpLayout() {
               </div>
             )}
 
-            <div className="flex items-center gap-2.5 sm:gap-3 pl-2 sm:pl-3 border-l border-slate-200">
-              <div className="text-right leading-tight hidden sm:block">
-                <div className="text-sm font-semibold text-slate-900" data-testid="user-name">{user?.name}</div>
-                <div className="text-2xs uppercase tracking-[0.08em] font-semibold text-slate-500 mt-0.5">{(user?.role || "").replace(/_/g, " ")}</div>
-              </div>
-              <div className="w-9 h-9 rounded-md bg-carbon-900 text-white flex items-center justify-center font-display font-bold text-sm shrink-0 select-none">
-                {user?.name?.[0]?.toUpperCase() || "U"}
-              </div>
+            <div className="flex items-center gap-1.5 sm:gap-2 pl-2 sm:pl-3 border-l border-slate-200">
+              <NavLink
+                to={MI_CUENTA.to}
+                title="Mi cuenta"
+                data-testid="mi-cuenta-link"
+                className="flex items-center gap-2.5 sm:gap-3 rounded-md px-1.5 py-1 hover:bg-slate-100 transition-colors"
+              >
+                <div className="text-right leading-tight hidden sm:block">
+                  <div className="text-sm font-semibold text-slate-900" data-testid="user-name">{user?.name}</div>
+                  <div className="text-2xs uppercase tracking-[0.08em] font-semibold text-slate-500 mt-0.5">{(user?.role || "").replace(/_/g, " ")}</div>
+                </div>
+                <div className="w-9 h-9 rounded-md bg-carbon-900 text-white flex items-center justify-center font-display font-bold text-sm shrink-0 select-none">
+                  {user?.name?.[0]?.toUpperCase() || "U"}
+                </div>
+              </NavLink>
               <button
                 onClick={doLogout}
                 data-testid="logout-btn"

@@ -56,6 +56,7 @@ import pac_provider
 import moneycalc
 import developer as _devmod
 import legacyadmin as _legacymod
+import autorizaciones as _autz
 
 _APP_ENV = os.environ.get("ENVIRONMENT", "development").lower()
 logging.basicConfig(level=logging.DEBUG if _APP_ENV == "development" else logging.INFO)
@@ -796,6 +797,10 @@ class SaleItem(BaseModel):
     descuento: float = Field(default=0.0, ge=0)  # monto de descuento por linea
     comentario: str = Field(default="", max_length=300)
     costo: Optional[float] = None  # costo unitario tomado del producto (snapshot)
+    # Precio manual (F6): sin autorización solo administradores/dueño; los demás
+    # envían la autorización que emitió POST /autorizaciones (ver autorizaciones.py).
+    precio_manual: bool = False
+    autorizacion_id: Optional[str] = Field(default=None, max_length=64)
 
 class Pago(BaseModel):
     metodo: str  # efectivo | tarjeta | transferencia | deposito | otros
@@ -1255,6 +1260,9 @@ def _validar_modulos(modulos: List[str]):
 @api.get("/users")
 async def list_users(user: dict = Depends(require_permission("usuarios.ver"))):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(500)
+    con_codigo = await _autz.usuarios_con_codigo()
+    for u in users:
+        u["codigo_autorizacion"] = u.get("id") in con_codigo
     return users
 
 @api.post("/users")
@@ -2906,6 +2914,9 @@ async def _crear_venta(user: dict, data: SaleInput):
         if existing:
             return existing
 
+    # Precio manual: autorización de un solo uso si no es administrador/dueño.
+    autorizaciones_usadas = await _autz.validar_precios_manuales(user, items)
+
     if es_cotizacion:
         folio = await next_counter("cotizacion", "COT", 6)
         estado = "cotizacion"
@@ -2953,6 +2964,7 @@ async def _crear_venta(user: dict, data: SaleInput):
             override_inv=override_inv)
     except _pgpos.VentaError as e:
         raise HTTPException(status_code=e.status, detail=e.message)
+    await _autz.registrar_precios_manuales(user, creada, items, autorizaciones_usadas)
 
     # Generador ÚNICO de documentos: pre-genera ticket + carta UNA vez aquí;
     # vista previa / descarga / impresión / WhatsApp / correo usarán SIEMPRE
@@ -8191,6 +8203,9 @@ app.include_router(catalog_images.router)
 
 # Editor de formatos (machotes) v2: plantillas versionadas por tipo de documento.
 app.include_router(formatos_api.router)
+
+# Códigos de autorización (Mi cuenta) y autorizaciones de movimientos (precio manual).
+app.include_router(_autz.router)
 
 # Catálogo público por marca (sitio /productos/marca/:slug) con precios RYSA.
 import marcas as _marcas  # noqa: E402

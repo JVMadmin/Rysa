@@ -41,6 +41,8 @@ KNOWN_COLLECTIONS = [
     "catalog_image_snapshots",
     # Jornadas de la app de vendedores (inicio al login, cierre del día)
     "jornadas",
+    # Códigos de autorización (hash por usuario) y autorizaciones emitidas
+    "codigos_autorizacion", "autorizaciones",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.
