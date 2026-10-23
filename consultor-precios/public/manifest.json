@@ -3,8 +3,8 @@
   "name": "RYSA Consultor de Precios",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#8B3A1A",
-  "theme_color": "#8B3A1A",
+  "background_color": "#2A2B30",
+  "theme_color": "#2A2B30",
   "orientation": "any",
   "icons": [
     {

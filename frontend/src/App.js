@@ -11,6 +11,7 @@ import Landing from "@/pages/Landing";
 import SitioCategorias from "@/pages/sitio/Categorias";
 import SitioCategoria from "@/pages/sitio/Categoria";
 import SitioMarca from "@/pages/sitio/Marca";
+import SitioFacturacion from "@/pages/sitio/Facturacion";
 import Login from "@/pages/Login";
 import PagoComprobante from "@/pages/PagoComprobante";
 import Dashboard from "@/pages/Dashboard";
@@ -77,6 +78,7 @@ function App() {
           <Route path="/productos" element={<SitioCategorias />} />
           <Route path="/productos/marca/:slug" element={<SitioMarca />} />
           <Route path="/productos/:slug" element={<SitioCategoria />} />
+          <Route path="/facturacion" element={<SitioFacturacion />} />
           <Route path="/login" element={<Login />} />
           <Route path="/pago/:token" element={<PagoComprobante />} />
           <Route path="/verificar/:saleId" element={<TicketVerificar />} />

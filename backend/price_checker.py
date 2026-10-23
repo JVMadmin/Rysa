@@ -47,6 +47,7 @@ if str(_BASE) not in sys.path:
     sys.path.insert(0, str(_BASE))
 
 import pgstore  # noqa: E402
+import moneycalc  # noqa: E402
 
 # --------------------------------------------------------------------------- #
 # Configuracion
@@ -114,18 +115,20 @@ def _public_dto(p: dict, settings: dict) -> Optional[dict]:
       - `precio_con_iva` (bruto) es el PRECIO PUBLICO FINAL.
       - `precio_sin_iva` (neto)  es el subtotal.
       - `iva_importe` = bruto - neto  (nunca se vuelve a sumar IVA).
-    Ambas se leen de la lista publica `precios[0]` (Precio 1) del ERP. Si el
+    Ambas salen de la lista 1 del ERP (moneycalc.precios_lista). Si el
     producto no tiene precio publico se excluye (no se podria responder).
     El indicador `incluye_iva` solo informa como se desglosa; el precio final
     no cambia y el impuesto nunca se duplica.
     """
     if not p:
         return None
-    precios = p.get("precios") or []
-    p1 = precios[0] if precios else {}
-    bruto = float(p.get("precio_con_iva") or 0) or float(p1.get("precio_con_iva") or 0)
-    neto = float(p.get("precio_sin_iva") or 0) or float(p1.get("precio_sin_iva") or 0)
-    iva_tasa = float(p.get("iva_tasa") or 0)
+    # Precio 1 con la MISMA regla que el POS y el sitio (moneycalc): precio
+    # capturado o % de la lista sobre el costo, con el redondeo configurado.
+    lista1 = moneycalc.precios_lista(p, settings.get("listas_precios_pct") or None,
+                                     settings.get("redondeo_precios") or moneycalc.REDONDEO_DEFAULT)[0]
+    bruto = float(lista1["precio_con_iva"] or 0)
+    neto = float(lista1["precio"] or 0)
+    iva_tasa = float(p.get("iva_tasa") or p.get("impuesto") or 8)
     if neto <= 0 and bruto > 0:
         neto = round(bruto / (1 + iva_tasa / 100), 2) if iva_tasa > 0 else bruto
     if bruto <= 0 and neto > 0:

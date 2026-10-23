@@ -109,26 +109,38 @@ function HeroGaleria() {
   );
 }
 
-// Banda de marca: el giro del logotipo en letra gigante de contorno que se
-// desliza con el scroll, y la tira de íconos de línea del propio logotipo.
+// Banda de marca: el giro del logotipo en letra gigante de contorno que corre
+// sola de forma continua (cada línea en sentido contrario) y, además, se
+// desplaza un poco con el scroll; en medio, la tira de íconos del logotipo.
+function LineaGiro({ x, reversa, children }) {
+  const linea = "titular-fino contorno whitespace-nowrap pr-[0.3em] text-[17vw] leading-[0.95] sm:text-[10.5vw]";
+  return (
+    <motion.div style={{ x }} aria-hidden="true">
+      <div className={`marquesina-giro${reversa ? " reversa" : ""}`}>
+        <p className={linea}>{children}</p>
+        <p className={linea}>{children}</p>
+      </div>
+    </motion.div>
+  );
+}
+
 function BandaGiro() {
   const ref = useRef(null);
   const reducir = useReducedMotion();
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
-  const x1 = useTransform(scrollYProgress, [0, 1], reducir ? ["-10%", "-10%"] : ["0%", "-28%"]);
-  const x2 = useTransform(scrollYProgress, [0, 1], reducir ? ["-18%", "-18%"] : ["-28%", "0%"]);
-  const linea = "titular-fino contorno whitespace-nowrap text-[17vw] leading-[0.95] sm:text-[10.5vw]";
+  const x1 = useTransform(scrollYProgress, [0, 1], reducir ? ["0%", "0%"] : ["4%", "-8%"]);
+  const x2 = useTransform(scrollYProgress, [0, 1], reducir ? ["0%", "0%"] : ["-8%", "4%"]);
   return (
     <section ref={ref} aria-label="Plásticos, empaques, desechables y suministros" className="grafito grano overflow-hidden py-20 text-white sm:py-28">
-      <motion.p style={{ x: x1 }} aria-hidden="true" className={linea}>
-        Plásticos · <span className="text-brand-500 [-webkit-text-stroke:0]">Empaques</span> · Desechables · Suministros · Plásticos ·
-      </motion.p>
+      <LineaGiro x={x1}>
+        Plásticos · <span className="text-brand-500 [-webkit-text-stroke:0]">Empaques</span> · Desechables · Suministros ·
+      </LineaGiro>
       <Revelar className="mx-auto my-12 max-w-[1240px] px-5 sm:my-16 sm:px-8">
         <img src="/brand/iconos-linea.webp" alt="" width="860" height="92" loading="lazy" className="mx-auto w-full max-w-4xl opacity-90" />
       </Revelar>
-      <motion.p style={{ x: x2 }} aria-hidden="true" className={linea}>
-        Mayoreo · Menudeo · <span className="metal [-webkit-text-stroke:0]">Factura</span> · Crédito · Mayoreo · Menudeo ·
-      </motion.p>
+      <LineaGiro x={x2} reversa>
+        Mayoreo · Menudeo · <span className="metal [-webkit-text-stroke:0]">Factura</span> · Crédito ·
+      </LineaGiro>
     </section>
   );
 }

@@ -12,6 +12,7 @@ import { cacheSet, cacheGet, lastSync } from "./lib/cache";
 import { useBarcodeKeys, canScanCamera } from "./lib/scanner";
 import ProductCard from "./components/ProductCard";
 import CameraScanner from "./components/CameraScanner";
+import Icono from "./components/Icono";
 
 const AUTO_REFRESH_MS = 15 * 60 * 1000;
 
@@ -26,6 +27,12 @@ export default function App() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraReady, setCameraReady] = useState(canScanCamera());
   const [bump, setBump] = useState(0);
+  const [ahora, setAhora] = useState(() => new Date());
+
+  useEffect(() => {
+    const iv = setInterval(() => setAhora(new Date()), 15000);
+    return () => clearInterval(iv);
+  }, []);
 
   const refreshOnline = useCallback(async () => {
     const ok = await health().catch(() => false);
@@ -174,22 +181,25 @@ export default function App() {
 
   const syncLabel = useMemo(() => {
     const ts = lastSync();
-    if (!ts) return "aun sin sincronizacion";
+    if (!ts) return "sin sincronizar aún";
     return "Actualizado " + new Date(ts).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
   }, [bump, online]);
 
   return (
     <div className={"rysa-app" + (online ? "" : " rc-offline")}>
       <header className="rc-header">
-        <img src="/brand/ISOTIPO-Photoroom.png" alt="RYSA" className="rc-logo" data-testid="logo" />
+        <img src="/brand/logotipo-oscuro.webp" alt="Grupo RYSA" className="rc-logo" data-testid="logo" />
         <div className="rc-header-txt">
-          <h1>RYSA</h1>
-          <span>CONSULTOR DE PRECIOS</span>
+          <h1>Consultor de precios</h1>
+          {SUCURSAL && <span>Sucursal {SUCURSAL}</span>}
         </div>
         <div className="rc-header-right">
-          {SUCURSAL && <span className="rc-sucursal">{SUCURSAL}</span>}
-          <button type="button" className="rc-iconbtn" onClick={toggleFullscreen} title="Pantalla completa" data-testid="fullscreen">
-            ⛶
+          <span className={"rc-estado" + (online ? "" : " off")} title={online ? "Conectado" : "Sin conexión"}>
+            <i aria-hidden="true" />{online ? "En línea" : "Sin conexión"}
+          </span>
+          <span className="rc-reloj">{ahora.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</span>
+          <button type="button" className="rc-iconbtn" onClick={toggleFullscreen} title="Pantalla completa" aria-label="Pantalla completa" data-testid="fullscreen">
+            <Icono nombre="pantalla" />
           </button>
         </div>
       </header>
@@ -197,19 +207,19 @@ export default function App() {
       <main className="rc-main">
         {!online && phase !== "offline" && (
           <div className="rc-banner rc-banner-err" data-testid="banner-offline">
-            <b>Sin conexion con RYSA</b> — la informacion puede estar desactualizada.
+            <Icono nombre="alerta" /> <span><b>Sin conexión con RYSA.</b> La información puede estar desactualizada.</span>
           </div>
         )}
 
         {cacheHit && selected && (
           <div className="rc-banner rc-banner-cache" data-testid="banner-cache">
-            Mostrando informacion almacenada (solo lectura) · {selected.savedAt ? new Date(selected.savedAt).toLocaleString("es-MX") : syncLabel}.
+            Mostrando información guardada en este equipo · {selected.savedAt ? new Date(selected.savedAt).toLocaleString("es-MX") : syncLabel}.
           </div>
         )}
 
         <section className="rc-search-zone">
           <div className="rc-search-row">
-            <span className="rc-search-icon">🔍</span>
+            <Icono nombre="buscar" className="rc-ico rc-search-icon" />
             <input
               className="rc-search"
               data-testid="buscar"
@@ -219,7 +229,7 @@ export default function App() {
               autoComplete="off"
               autoCorrect="off"
               spellCheck="false"
-              placeholder="Buscar por nombre, codigo o codigo de barras…"
+              placeholder="Nombre, código o código de barras"
               onChange={(e) => {
                 setQ(e.target.value);
                 runSearch(e.target.value);
@@ -230,15 +240,15 @@ export default function App() {
           </div>
           <div className="rc-actions">
             <button type="button" className="rc-btn rc-btn-min" data-testid="scan" onClick={() => (cameraReady ? setCameraOpen(true) : handleCode(q))}>
-              📷 ESCANEAR
+              <Icono nombre="escanear" /> Escanear
             </button>
             <button type="button" className="rc-btn rc-btn-min outline" onClick={actualizar} data-testid="actualizar">
-              ⟳ Actualizar
+              <Icono nombre="actualizar" /> Actualizar
             </button>
           </div>
         </section>
 
-        {phase === "loading" && <div className="rc-state">Consultando precio…</div>}
+        {phase === "loading" && <div className="rc-state"><span className="rc-spinner grande" /> Consultando precio…</div>}
 
         {!selected && phase === "done" && results.length > 0 && (
           <section className="rc-results" data-testid="results">
@@ -252,6 +262,7 @@ export default function App() {
                   </span>
                 </div>
                 <div className="rc-result-price">{formatMoney(p.precio_publico)}</div>
+                <Icono nombre="flecha" className="rc-ico rc-result-go" />
               </button>
             ))}
           </section>
@@ -259,11 +270,11 @@ export default function App() {
 
         {phase === "notfound" && !selected && (
           <section className="rc-state" data-testid="no-results">
-            <p className="rc-notfound-title">Producto no encontrado.</p>
+            <p className="rc-notfound-title">No encontramos ese producto</p>
             <ul className="rc-notfound-list">
-              <li>Revisa el codigo.</li>
-              <li>Busca por nombre.</li>
-              <li>Escanea nuevamente.</li>
+              <li>Revisa el código.</li>
+              <li>Búscalo por nombre.</li>
+              <li>Escanéalo de nuevo.</li>
             </ul>
             <button type="button" className="rc-btn rc-btn-min outline" onClick={reset}>
               Buscar otro
@@ -282,8 +293,13 @@ export default function App() {
 
         {phase === "idle" && (
           <section className="rc-hero">
-            <p className="rc-hero-big">PRECIO AL PUBLICO</p>
-            <p className="rc-hero-sub">Escanee o busque un producto para consultar su precio al instante.</p>
+            <div className="rc-hero-scan" aria-hidden="true">
+              <Icono nombre="escanear" className="rc-hero-ico" />
+              <span className="rc-hero-laser" />
+            </div>
+            <p className="rc-hero-kicker">Precio al público</p>
+            <p className="rc-hero-big">Escanea tu producto</p>
+            <p className="rc-hero-sub">Acerca el código de barras al lector o escribe el nombre del producto para conocer su precio al instante.</p>
           </section>
         )}
 
@@ -293,7 +309,7 @@ export default function App() {
       </main>
 
       {cameraOpen && <CameraScanner onDetect={onCameraDetect} onClose={() => setCameraOpen(false)} />}
-      <footer className="rc-footer">RYSA Consultor de Precios · Fuente oficial: ERP RYSA</footer>
+      <footer className="rc-footer"><span>Grupo RYSA · Plásticos · Empaques · Desechables</span><span>Precios con IVA incluido · {syncLabel}</span></footer>
     </div>
   );
 }

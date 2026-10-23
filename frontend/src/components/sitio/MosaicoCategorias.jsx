@@ -5,19 +5,19 @@ import { EASE } from "@/components/sitio/motion";
 import { CATEGORIAS, aproximado } from "@/data/categorias";
 
 // Mosaico de borde a borde con la familia de color RYSA (rojos, grafitos y
-// cálidos). La foto de cada categoría va fundida en el color del cuadro;
-// al pasar el cursor se acerca, gira un poco y recupera su color real.
-// `fusion`: luminosity tiñe la foto con el fondo oscuro o rojo; multiply
-// (sobre gris) la oscurece apenas sobre los fondos claros. `filtro` sube el
-// contraste de fotos muy claras para que no se pierdan en el color.
+// cálidos). Capas: la foto a color, encima el color del cuadro semitransparente
+// (`tinte`; al pasar el cursor baja a `tinteHover` y la foto se ve más) y, sobre
+// eso, bandas sólidas del mismo color detrás del título y de la información,
+// para que las letras nunca dependan de lo claro u oscuro de la foto.
 const ESTILOS = {
-  desechables: { fondo: "#CD0708", texto: "#FFFFFF", suave: "rgba(255,255,255,0.78)", acento: "#FFFFFF", fusion: "luminosity", opacidad: 0.9, filtro: "contrast(1.9) brightness(0.78)", veloCorto: true },
-  bolsas: { fondo: "#2E2F34", texto: "#FFFFFF", suave: "rgba(255,255,255,0.72)", acento: "#F27A7C", fusion: "luminosity", opacidad: 0.45 },
-  limpieza: { fondo: "#F6F5F2", texto: "#2E2F34", suave: "#52545A", acento: "#CD0708", fusion: "luminosity", opacidad: 0.9, filtro: "contrast(1.9) brightness(0.78)", veloCorto: true },
-  recipientes: { fondo: "#4A4B50", texto: "#FFFFFF", suave: "rgba(255,255,255,0.75)", acento: "#FFFFFF", fusion: "luminosity", opacidad: 0.5 },
-  reposteria: { fondo: "#FBD3D3", texto: "#7A0A0E", suave: "#A3060A", acento: "#A3060A", fusion: "multiply", opacidad: 0.55, gris: true },
-  "ferreteria-campo": { fondo: "#7A0A0E", texto: "#FFFFFF", suave: "rgba(255,255,255,0.75)", acento: "#F7B2B3", fusion: "luminosity", opacidad: 0.5 },
+  desechables: { fondo: "205,7,8", texto: "#FFFFFF", suave: "rgba(255,255,255,0.88)", acento: "#FFFFFF", tinte: 0.5 },
+  bolsas: { fondo: "46,47,52", texto: "#FFFFFF", suave: "rgba(255,255,255,0.85)", acento: "#F27A7C", tinte: 0.5 },
+  limpieza: { fondo: "246,245,242", texto: "#18191D", suave: "#3D3E43", acento: "#CD0708", tinte: 0.45 },
+  recipientes: { fondo: "74,75,80", texto: "#FFFFFF", suave: "rgba(255,255,255,0.85)", acento: "#FFFFFF", tinte: 0.5 },
+  reposteria: { fondo: "251,211,211", texto: "#520709", suave: "#7A0A0E", acento: "#A3060A", tinte: 0.45 },
+  "ferreteria-campo": { fondo: "122,10,14", texto: "#FFFFFF", suave: "rgba(255,255,255,0.85)", acento: "#F7B2B3", tinte: 0.5 },
 };
+const rgba = (rgb, a) => `rgba(${rgb},${a})`;
 
 const cuadro = {
   oculto: { clipPath: "inset(100% 0 0 0)" },
@@ -30,46 +30,40 @@ const foto = {
 
 function Cuadro({ cat, indice }) {
   const e = ESTILOS[cat.slug] || ESTILOS.bolsas;
-  // Velo del color del cuadro arriba y abajo: mantiene el texto legible
-  // incluso cuando la foto recupera su color.
-  // `veloCorto` para fotos cuyo objeto está abajo (no lo tapa).
-  const velo = e.veloCorto
-    ? `linear-gradient(to bottom, ${e.fondo} 0%, ${e.fondo}00 34%, ${e.fondo}00 72%, ${e.fondo}D9 100%)`
-    : `linear-gradient(to bottom, ${e.fondo} 0%, ${e.fondo}00 36%, ${e.fondo}00 44%, ${e.fondo}E6 78%, ${e.fondo} 100%)`;
   return (
     <motion.li variants={cuadro} className="relative">
       <Link to={`/productos/${cat.slug}`} aria-label={`${cat.nombre}, ${aproximado(cat.articulos)} artículos`}
-        className="group relative block h-[340px] overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white sm:h-[380px] lg:h-[420px]"
-        style={{ backgroundColor: e.fondo, color: e.texto }}>
-        {/* El fondo va también aquí: el transform crea un contexto de apilamiento y
-            la fusión solo ve lo que hay dentro de él. */}
-        <motion.div variants={foto} className="absolute inset-0" style={{ backgroundColor: e.fondo }}>
+        className="group relative block h-[300px] overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white sm:h-[360px] lg:h-[420px]"
+        style={{ backgroundColor: rgba(e.fondo, 1), color: e.texto }}>
+        <motion.div variants={foto} className="absolute inset-0">
           <img src={cat.imagen} alt="" loading="lazy" decoding="async"
-            className={`absolute inset-0 h-full w-full object-cover transition-transform duration-[1400ms] ease-out-rysa group-hover:rotate-[-1.5deg] group-hover:scale-110 ${e.gris ? "grayscale" : ""}`}
-            style={{ mixBlendMode: e.fusion, opacity: e.opacidad, filter: e.filtro }} />
-          <img src={cat.imagen} alt="" loading="lazy" decoding="async" aria-hidden="true"
-            className="absolute inset-0 h-full w-full object-cover opacity-0 transition-all duration-[1400ms] ease-out-rysa group-hover:rotate-[-1.5deg] group-hover:scale-110 group-hover:opacity-80" />
+            className="absolute inset-0 h-full w-full object-cover transition-transform duration-[1400ms] ease-out-rysa group-hover:rotate-[-1.5deg] group-hover:scale-110" />
         </motion.div>
-        <div className="absolute inset-0" style={{ background: velo }} aria-hidden="true" />
+        {/* Color del cuadro, 40 % más transparente que antes; más claro al pasar el cursor */}
+        <div className="absolute inset-0 transition-opacity duration-700 ease-out-rysa group-hover:opacity-60 group-focus-visible:opacity-60"
+          style={{ backgroundColor: rgba(e.fondo, e.tinte) }} aria-hidden="true" />
 
-        <div className="relative flex h-full flex-col justify-between p-6 sm:p-8">
-          <div className="flex items-start justify-between gap-4">
-            <h3 className="titular-fino text-[1.7rem] leading-tight sm:text-[2rem]">{cat.nombre}</h3>
-            <span className="font-display text-xs tabular-nums tracking-[0.2em]" style={{ color: e.suave }}>{String(indice + 1).padStart(2, "0")}</span>
+        <div className="relative flex h-full flex-col justify-between">
+          {/* Banda del título */}
+          <div className="flex items-start justify-between gap-4 p-5 pb-10 sm:p-7 sm:pb-12"
+            style={{ background: `linear-gradient(to bottom, ${rgba(e.fondo, 0.94)} 0%, ${rgba(e.fondo, 0.82)} 55%, ${rgba(e.fondo, 0)} 100%)` }}>
+            <h3 className="titular-fino text-[1.45rem] leading-tight sm:text-[1.8rem] lg:text-[2rem]">{cat.nombre}</h3>
+            <span className="pt-1 font-display text-xs tabular-nums tracking-[0.2em]" style={{ color: e.suave }}>{String(indice + 1).padStart(2, "0")}</span>
           </div>
 
-          <div>
-            {/* Tipos de artículo: suben al pasar el cursor (solo con cursor real). */}
-            <ul className="mb-5 hidden max-h-0 space-y-1.5 overflow-hidden text-[0.92rem] opacity-0 transition-all duration-700 ease-out-rysa [@media(hover:hover)]:block group-hover:max-h-40 group-hover:opacity-100 group-focus-visible:max-h-40 group-focus-visible:opacity-100"
-              aria-hidden="true" style={{ textShadow: e.texto === "#FFFFFF" ? "0 1px 10px rgba(0,0,0,0.65)" : "0 1px 10px rgba(255,255,255,0.9)" }}>
+          {/* Banda de información: los tipos aparecen aquí dentro, sobre color sólido */}
+          <div className="p-5 pt-10 sm:p-7 sm:pt-12"
+            style={{ background: `linear-gradient(to top, ${rgba(e.fondo, 0.96)} 0%, ${rgba(e.fondo, 0.9)} 60%, ${rgba(e.fondo, 0)} 100%)` }}>
+            <ul className="mb-4 hidden max-h-0 space-y-1.5 overflow-hidden text-[0.95rem] font-medium opacity-0 transition-all duration-700 ease-out-rysa [@media(hover:hover)]:block group-hover:max-h-40 group-hover:opacity-100 group-focus-visible:max-h-40 group-focus-visible:opacity-100"
+              aria-hidden="true">
               {cat.tipos.slice(0, 4).map((t) => (
                 <li key={t} className="flex items-center gap-3"><span className="h-px w-3 shrink-0" style={{ backgroundColor: e.acento }} />{t}</li>
               ))}
             </ul>
-            <div className="flex items-end justify-between gap-4 border-t pt-4" style={{ borderColor: `${e.texto}33` }}>
-              <span className="text-xs uppercase tracking-[0.16em]" style={{ color: e.suave }}>{aproximado(cat.articulos)} artículos</span>
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-full border transition-all duration-500 ease-out-rysa group-hover:scale-110"
-                style={{ borderColor: `${e.texto}55` }} aria-hidden="true">
+            <div className="flex items-end justify-between gap-4 border-t pt-4" style={{ borderColor: `${e.texto}40` }}>
+              <span className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: e.suave }}>{aproximado(cat.articulos)} artículos</span>
+              <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-all duration-500 ease-out-rysa group-hover:scale-110"
+                style={{ borderColor: `${e.texto}66` }} aria-hidden="true">
                 <ArrowRight className="h-4 w-4 transition-transform duration-500 group-hover:-rotate-45" />
               </span>
             </div>

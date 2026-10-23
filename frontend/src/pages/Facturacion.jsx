@@ -205,6 +205,11 @@ export default function Facturacion() {
                   <div><Label className="text-xs uppercase tracking-wider text-slate-500">Alerta de timbres (mínimo)</Label>
                     <Input type="number" value={cfg.timbres_alerta ?? 20} onChange={(e) => setCfg({ ...cfg, timbres_alerta: e.target.value })} className="mt-1" data-testid="cfg-alerta" /></div>
                 </div>
+                <label className="flex items-start gap-3 rounded border border-slate-200 p-3 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 accent-brand-600" checked={!!cfg.autofactura} onChange={(e) => setCfg({ ...cfg, autofactura: e.target.checked })} data-testid="cfg-autofactura" />
+                  <span className="text-sm"><span className="font-medium text-slate-800">Autofacturación en el sitio web</span>
+                    <span className="block text-xs text-slate-500">Los clientes facturan su ticket en gruporysa.com/facturacion con el folio y el total. Apagado, la página muestra «Próximamente disponible».</span></span>
+                </label>
                 <div className="text-xs text-slate-400 bg-slate-50 rounded p-3">
                   El certificado CSD (.cer/.key) se carga directamente en tu cuenta de Facty (una sola vez). Aquí solo se guarda la API Key de Facty (o define la variable FACTY_API_KEY en el servidor). No se muestra después de guardarla.
                 </div>

@@ -7040,6 +7040,7 @@ class PacConfigInput(BaseModel):
     folio: Optional[int] = 1
     lugar_expedicion: Optional[str] = ""  # CP
     timbres_alerta: Optional[int] = 20    # avisar cuando queden menos
+    autofactura: bool = False             # clientes facturan su ticket desde gruporysa.com/facturacion
 
 class ComplementoPagoInput(BaseModel):
     factura_id: str
@@ -7179,6 +7180,13 @@ class FacturacionInput(BaseModel):
 
 @api.post("/facturacion/sale/{sale_id}")
 async def emitir_cfdi(sale_id: str, data: Optional[FacturacionInput] = None, user: dict = Depends(require_permission("venta.crear"))):
+    receptor = data.model_dump() if data else {}
+    return await _timbrar_venta(sale_id, receptor, user)
+
+
+async def _timbrar_venta(sale_id: str, receptor: dict, user: dict, extra: Optional[dict] = None) -> dict:
+    """Timbra UNA venta (CFDI de ingreso). Lo usan el ERP y la autofacturación
+    del sitio; `extra` agrega campos al documento (origen, correo del cliente)."""
     cfg = await get_pac_config()
     if not pac_configurado(cfg):
         raise HTTPException(400, "El PAC no está configurado. Ve a Configuración → Facturación y captura tu API Key de Facty.")
@@ -7188,8 +7196,7 @@ async def emitir_cfdi(sale_id: str, data: Optional[FacturacionInput] = None, use
     if sale.get("facturado"):
         raise HTTPException(400, "Esta venta ya fue facturada")
     cliente = await db.clients.find_one({"id": sale.get("cliente_id")}, {"_id": 0}) if sale.get("cliente_id") else None
-    receptor = data.model_dump() if data else {}
-    receptor = {k: (v or "") for k, v in receptor.items()}
+    receptor = {k: (v or "") for k, v in (receptor or {}).items()}
     result = await pac_provider.crear_factura(sale, cliente, cfg, receptor)
     fid = result.get("id")
     uuid_ = result.get("uuid")
@@ -7197,14 +7204,14 @@ async def emitir_cfdi(sale_id: str, data: Optional[FacturacionInput] = None, use
            "pac_id": fid, "uuid": uuid_, "serie": result.get("serie"),
            "folio": result.get("folio"),
            "status": "vigente", "total": result.get("total", sale.get("total")),
-           "cliente_nombre": (cliente.get("nombre") if cliente else "PUBLICO EN GENERAL"),
-           "rfc": (cliente.get("rfc") if cliente else "") or "XAXX010101000",
+           "cliente_nombre": receptor.get("razon_social") or (cliente.get("nombre") if cliente else "PUBLICO EN GENERAL"),
+           "rfc": receptor.get("rfc") or (cliente.get("rfc") if cliente else "") or "XAXX010101000",
            "fecha": iso_now(), "provider": cfg.get("provider") or "facty",
-           "response": result.get("raw") or result}
+           "response": result.get("raw") or result, **(extra or {})}
     await db.cfdi_documents.insert_one(doc)
     await db.sales.update_one({"id": sale_id}, {"$set": {"facturado": True, "cfdi_uuid": uuid_, "cfdi_id": fid}})
     await log_audit(user, "facturar", "venta", sale_id, f"CFDI {uuid_}")
-    return {"ok": True, "pac_id": fid, "uuid": uuid_, "folio": doc["folio"]}
+    return {"ok": True, "pac_id": fid, "uuid": uuid_, "folio": doc["folio"], "cfdi_id": doc["id"]}
 
 class MultiFacturaInput(BaseModel):
     sale_ids: List[str] = Field(...)
@@ -7319,6 +7326,154 @@ async def emitir_rep(data: ComplementoPagoInput, user: dict = Depends(require_pe
     result = await pac_provider.emitir_complemento_pago(cfg, padre, data.model_dump())
     await log_audit(user, "facturar", "facturacion", padre.get("id"), f"Complemento de pago sobre {padre.get('uuid')}")
     return {"ok": True, "result": result}
+
+
+# -------------------------------------------------------------------------
+# AUTOFACTURACIÓN PÚBLICA (gruporysa.com/facturacion)
+# El cliente identifica su compra con el folio del ticket + el total pagado
+# (las dos cosas vienen impresas en el ticket) y captura sus datos fiscales.
+# Solo tickets confirmados del mes en curso (hora de México): un ticket de un
+# mes anterior ya entró a la factura global de ese mes.
+# -------------------------------------------------------------------------
+REGIMENES_RECEPTOR = {"601", "603", "605", "606", "607", "608", "610", "611", "612", "614",
+                      "615", "616", "620", "621", "622", "623", "624", "625", "626"}
+USOS_CFDI = {"G01", "G02", "G03", "I01", "I02", "I03", "I04", "I05", "I06", "I07", "I08",
+             "D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09", "D10", "S01", "CP01"}
+_RFC_RX = re.compile(r"^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$")
+_AUTOFACTURA_ACTOR = {"id": "autofactura-web", "name": "Autofacturación web", "email": "", "role": "sistema"}
+AUTOFACTURA_MAX_INTENTOS = 30          # consultas por IP en la ventana
+AUTOFACTURA_VENTANA_SEG = 15 * 60
+
+
+class AutofacturaTicket(BaseModel):
+    folio: str
+    total: float
+
+
+class AutofacturaInput(AutofacturaTicket):
+    rfc: str
+    razon_social: str
+    cp: str
+    reg_fiscal: str
+    uso_cfdi: str
+    email: Optional[str] = ""
+
+
+def _ip_publica(request: Request) -> str:
+    return request.headers.get("x-real-ip") or (request.client.host if request.client else "?")
+
+
+async def _autofactura_limite(request: Request):
+    """Frena la búsqueda de tickets por fuerza bruta (folio + total)."""
+    key = "autofactura:" + _ip_publica(request)
+    now = now_utc()
+    doc = await db.login_attempts.find_one({"_id": key})
+    ws = _iso_to_dt(doc.get("window_start")) if doc else None
+    if not doc or not ws or (now - ws) >= timedelta(seconds=AUTOFACTURA_VENTANA_SEG):
+        await db.login_attempts.update_one({"_id": key}, {"$set": {"kind": "autofactura", "count": 1,
+                                           "window_start": now.isoformat(), "last_at": now.isoformat()}}, upsert=True)
+        return
+    if int(doc.get("count", 0)) >= AUTOFACTURA_MAX_INTENTOS:
+        raise HTTPException(429, "Demasiadas consultas. Intenta de nuevo en unos minutos.")
+    await db.login_attempts.update_one({"_id": key}, {"$set": {"count": int(doc.get("count", 0)) + 1,
+                                                              "last_at": now.isoformat()}})
+
+
+def _folio_ticket(folio: str) -> str:
+    f = re.sub(r"\s+", "", folio or "").upper()
+    return "V" + f.zfill(6) if f.isdigit() else f
+
+
+async def _autofactura_disponible() -> bool:
+    cfg = await get_pac_config() or {}
+    return bool(cfg.get("autofactura")) and pac_configurado(cfg)
+
+
+async def _ticket_autofactura(t: AutofacturaTicket) -> dict:
+    folio = _folio_ticket(t.folio)
+    sale = await db.sales.find_one({"folio": folio}, {"_id": 0}) if folio else None
+    if (not sale or sale.get("estado") != "confirmada" or sale.get("tipo_venta") == "cotizacion"
+            or sale.get("source") == "LEGACY" or abs(float(sale.get("total") or 0) - float(t.total or 0)) > 0.01):
+        raise HTTPException(404, "No encontramos un ticket con ese folio y ese total. Revisa los datos impresos en tu ticket.")
+    return sale
+
+
+def _ticket_del_mes(sale: dict) -> bool:
+    f = _iso_to_dt(sale.get("fecha"))
+    if not f:
+        return False
+    hoy = now_utc().astimezone(_TZ_MX)
+    f = f.astimezone(_TZ_MX)
+    return (f.year, f.month) == (hoy.year, hoy.month)
+
+
+@api.get("/publico/factura/estado")
+async def autofactura_estado():
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0}) or {}
+    return {"disponible": await _autofactura_disponible(), "empresa": settings.get("empresa_nombre", "Grupo RYSA")}
+
+
+@api.post("/publico/factura/ticket")
+async def autofactura_ticket(data: AutofacturaTicket, request: Request):
+    if not await _autofactura_disponible():
+        raise HTTPException(503, "La facturación en línea estará disponible próximamente.")
+    await _autofactura_limite(request)
+    sale = await _ticket_autofactura(data)
+    cfdi = None
+    if sale.get("facturado"):
+        cfdi = await db.cfdi_documents.find_one({"sale_id": sale["id"], "status": "vigente"}, {"_id": 0, "response": 0})
+    return {
+        "folio": sale.get("folio"), "fecha": sale.get("fecha"), "total": sale.get("total"),
+        "subtotal": sale.get("subtotal"), "iva": sale.get("iva_total"),
+        "items": [{"descripcion": i.get("descripcion"), "cantidad": i.get("cantidad"),
+                   "importe": i.get("importe", float(i.get("cantidad", 0)) * float(i.get("precio", 0)))}
+                  for i in sale.get("items", [])],
+        "facturado": bool(sale.get("facturado")),
+        "cfdi": {"id": cfdi["id"], "uuid": cfdi.get("uuid"), "rfc": cfdi.get("rfc")} if cfdi else None,
+        "del_mes": _ticket_del_mes(sale),
+    }
+
+
+@api.post("/publico/factura/emitir")
+async def autofactura_emitir(data: AutofacturaInput, request: Request):
+    if not await _autofactura_disponible():
+        raise HTTPException(503, "La facturación en línea estará disponible próximamente.")
+    await _autofactura_limite(request)
+    rfc = re.sub(r"\s+", "", data.rfc or "").upper()
+    razon = re.sub(r"\s+", " ", data.razon_social or "").strip().upper()
+    cp = (data.cp or "").strip()
+    reg, uso = (data.reg_fiscal or "").strip(), (data.uso_cfdi or "").strip().upper()
+    if not _RFC_RX.match(rfc) or rfc in ("XAXX010101000", "XEXX010101000"):
+        raise HTTPException(422, "El RFC no es válido. Escríbelo como aparece en tu Constancia de Situación Fiscal.")
+    if len(razon) < 3:
+        raise HTTPException(422, "Escribe tu nombre o razón social como aparece en tu Constancia, sin el régimen (S.A. de C.V.).")
+    if not re.fullmatch(r"\d{5}", cp):
+        raise HTTPException(422, "El código postal fiscal debe tener 5 dígitos.")
+    if reg not in REGIMENES_RECEPTOR or uso not in USOS_CFDI:
+        raise HTTPException(422, "Selecciona un régimen fiscal y un uso de CFDI válidos.")
+    sale = await _ticket_autofactura(data)
+    if sale.get("facturado"):
+        raise HTTPException(409, "Este ticket ya fue facturado. Puedes descargar tu factura desde la búsqueda.")
+    if not _ticket_del_mes(sale):
+        raise HTTPException(400, "Este ticket es de un mes anterior y ya no puede facturarse en línea. Escríbenos por WhatsApp y te ayudamos.")
+    res = await _timbrar_venta(sale["id"], {"rfc": rfc, "razon_social": razon, "cp": cp, "reg_fiscal": reg, "uso_cfdi": uso},
+                               _AUTOFACTURA_ACTOR, {"origen": "autofactura_web", "email_cliente": (data.email or "").strip()[:120]})
+    return {"ok": True, "uuid": res.get("uuid"), "cfdi_id": res.get("cfdi_id")}
+
+
+@api.get("/publico/factura/{cfdi_id}/{fmt}")
+async def autofactura_descargar(cfdi_id: str, fmt: str, folio: str, total: float, request: Request):
+    if fmt not in ("xml", "pdf"):
+        raise HTTPException(400, "Formato inválido")
+    await _autofactura_limite(request)
+    sale = await _ticket_autofactura(AutofacturaTicket(folio=folio, total=total))
+    cfg = await get_pac_config()
+    doc = await db.cfdi_documents.find_one({"id": cfdi_id, "sale_id": sale["id"]}, {"_id": 0})
+    if not doc or not pac_configurado(cfg):
+        raise HTTPException(404, "Factura no disponible")
+    raw, media = await (pac_provider.descargar_xml(doc, cfg) if fmt == "xml" else pac_provider.descargar_pdf(doc, cfg))
+    return StreamingResponse(io.BytesIO(raw), media_type=media,
+        headers={"Content-Disposition": f"attachment; filename=Factura-{sale.get('folio')}.{fmt}"})
 
 
 # =========================================================================

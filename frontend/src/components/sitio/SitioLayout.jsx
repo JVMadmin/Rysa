@@ -42,6 +42,7 @@ export function cotizarUrl(c, asunto = "Cotización") {
 
 const NAV = [
   { to: "/productos", label: "Productos" },
+  { to: "/facturacion", label: "Facturación" },
   { to: "/#nosotros", label: "Nosotros" },
   { to: "/#contacto", label: "Contacto" },
 ];

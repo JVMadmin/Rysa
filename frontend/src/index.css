@@ -226,6 +226,10 @@ html.erp-densidad { font-size: 87.5%; }
 .marquesina { display: flex; width: max-content; animation: marquesina 38s linear infinite; }
 .marquesina:hover { animation-play-state: paused; }
 @media (prefers-reduced-motion: reduce) { .marquesina { animation: none; } }
+/* Letras gigantes de la banda del landing: corren solas, sin depender del scroll */
+.marquesina-giro { display: flex; width: max-content; animation: marquesina 46s linear infinite; }
+.marquesina-giro.reversa { animation-direction: reverse; }
+@media (prefers-reduced-motion: reduce) { .marquesina-giro { animation: none; } }
 
 /* ---- Mapas (Leaflet) ---------------------------------------------------- */
 /* Contenedor acotado: evita que los paneles de Leaflet tapen menús/modales. */
