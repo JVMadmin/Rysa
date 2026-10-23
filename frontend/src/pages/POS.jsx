@@ -43,7 +43,7 @@ const PRODUCT_EX_CLS = (ex) => {
 
 const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva }) => {
   const neto = priceOf(p);
-  const tasa = Number(p.iva_tasa || 8);
+  const tasa = Number(p.iva_tasa ?? 8);
   const conIva = +(neto * (1 + tasa / 100)).toFixed(2);
   // Precio destacado = el que realmente se cobra: con IVA cuando el toggle
   // "Precios incluyen IVA" está activo; neto cuando está desactivado.
@@ -296,7 +296,7 @@ export default function POS({ windowId, windowLabel }) {
   };
 
   // --- Formato carta: PDF real del comprobante comercial RYSA ---
-  // El backend es el GENERADOR aNICO: la primera llamada crea el archivo y
+  // El backend es el GENERADOR ÚNICO: la primera llamada crea el archivo y
   // todas las siguientes devuelven EL MISMO PDF (vista previa incluida).
   const generarCartaPDF = async () => {
     if (!ticket?.id) { toast.error("Ticket no disponible"); return null; }
@@ -533,6 +533,12 @@ export default function POS({ windowId, windowLabel }) {
       const ex = c.find((i) => i.product_id === p.id);
       if (ex) return c.map((i) => (i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i));
       const basePres = (p.presentaciones || []).find((pr) => pr.es_base) || (p.presentaciones || [])[0] || { nombre: p.unidad_medida || "PZA", factor: 1.0, precio: priceOf(p) };
+      // La unidad base entra con el MISMO precio que muestra la tarjeta (lista
+      // activa). El precio guardado en la presentación base solía ser uno viejo
+      // y cambiaba el precio al agregarlo; solo los empaques (factor ≠ 1) usan
+      // su precio propio.
+      const factorBase = Number(basePres.factor || 1.0);
+      const precioInicial = factorBase === 1 ? priceOf(p) : Number(basePres.precio ?? priceOf(p) * factorBase);
       return [
         ...c,
         {
@@ -542,10 +548,10 @@ export default function POS({ windowId, windowLabel }) {
           cantidad: 1,
           unidad: basePres.nombre || p.unidad_medida || "PZA",
           presentacion: basePres.nombre || p.unidad_medida || "PZA",
-          factor: Number(basePres.factor || 1.0),
+          factor: factorBase,
           presentaciones: p.presentaciones || [basePres],
-          precio: Number(basePres.precio ?? priceOf(p)),
-          iva_tasa: p.iva_tasa || 8,
+          precio: Number(precioInicial),
+          iva_tasa: p.iva_tasa ?? 8,
           costo: Number(p.costo ?? 0),
           descuento: 0,
           comentario: "",
@@ -567,7 +573,7 @@ export default function POS({ windowId, windowLabel }) {
     setCart((c) => {
       const ex = c.find((i) => i.product_id === pid);
       if (ex) return c.map((i) => (i.product_id === pid ? { ...i, precio: Number(precio) || 0 } : i));
-      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa || 8, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
+      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa ?? 8, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0) }];
     });
     setSelected(pid);
     setQ(""); qRef.current = ""; setResults([]);
@@ -664,7 +670,10 @@ export default function POS({ windowId, windowLabel }) {
         if (i.product_id !== id) return i;
         const pres = (i.presentaciones || []).find((p) => p.nombre === presNombre);
         if (!pres) return { ...i, presentacion: presNombre, unidad: presNombre };
-        const nuevoPrecio = Number(pres.precio ?? i.precio);
+        // Volver a la unidad base regresa al precio de la lista activa.
+        const nuevoPrecio = Number(pres.factor || 1.0) === 1
+          ? priceFromList({ precios: i.precios, precio_minimo: i.precio_minimo, costo: i.costo, iva_tasa: i.iva_tasa }, lista)
+          : Number(pres.precio ?? i.precio);
         return {
           ...i,
           presentacion: pres.nombre,
@@ -820,7 +829,7 @@ export default function POS({ windowId, windowLabel }) {
   }, [windowId, clearCartState, pubClientId, refreshFolio, setClienteId]);
 
   const confirmar = async () => {
-    // §3.7 â€” Aviso obligatorio de venta directa desde campo (vendedor_campo):
+    // §3.7 — Aviso obligatorio de venta directa desde campo (vendedor_campo):
     if (esVendedorCampo && !avisoCampoOk) {
       setAvisoCampoOpen(true);
       return;
@@ -828,7 +837,7 @@ export default function POS({ windowId, windowLabel }) {
     try {
       const payload = {
         cliente_id: clienteId || null,
-        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", presentacion: i.presentacion || i.unidad || "PZA", factor: Number(i.factor || 1.0), precio: Number(i.precio) || 0, iva_tasa: incluyeIva ? Number(i.iva_tasa || 8) : 0, descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
+        items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", presentacion: i.presentacion || i.unidad || "PZA", factor: Number(i.factor || 1.0), precio: Number(i.precio) || 0, iva_tasa: incluyeIva ? Number(i.iva_tasa ?? 8) : 0, descuento: Number(i.descuento || 0), comentario: i.comentario || "" })),
         descuento_global: totals.descGlobalTotal,
         condicion,
         pagos: (tipoVenta === "directa" && condicion === "contado") ? pagos.map((p) => ({ metodo: p.metodo, monto: Number(p.monto || 0), ...(p.metodo === "tarjeta" && p.card_type ? { card_type: p.card_type } : {}) })) : [],
@@ -961,7 +970,7 @@ export default function POS({ windowId, windowLabel }) {
   const folioActual = tipoVenta === "cotizacion" ? nextFolio.cotizacion : nextFolio.venta;
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 -m-6 p-6 pb-28 min-h-0 lg:h-[calc(100vh-5rem)] lg:overflow-hidden" data-testid="pos-page">
+    <div className="flex flex-col lg:flex-row gap-4 -m-6 p-6 pb-28 min-h-0 lg:h-[calc(var(--erp-vh)-5rem)] lg:overflow-hidden" data-testid="pos-page">
       {/* Izquierda: Cliente (sobre el ticket) + Ticket/Carrito */}
       <div className="lg:w-[68%] flex flex-col min-h-0">
         {/* Cliente */}
@@ -1392,7 +1401,7 @@ export default function POS({ windowId, windowLabel }) {
             <ul className="text-slate-600 list-disc pl-5 text-sm">
               {(invOverride || []).map((i) => (
                 <li key={i.product_id} data-testid="inv-override-item">
-                  <b>{i.descripcion}</b> â€” disp {Number(i.existencia ?? 0)} · pedido {Number(i.cantidad)}
+                  <b>{i.descripcion}</b> — disp {Number(i.existencia ?? 0)} · pedido {Number(i.cantidad)}
                 </li>
               ))}
             </ul>
@@ -1611,7 +1620,7 @@ export default function POS({ windowId, windowLabel }) {
               </div>
               )}
 
-              {/* Formato carta RYSA â€” GENERADOR aNICO: se muestra el PDF real
+              {/* Formato carta RYSA — GENERADOR ÚNICO: se muestra el PDF real
                   persistido; lo que se ve aquí es EXACTAMENTE el archivo que
                   se descarga, imprime y comparte por WhatsApp/correo. */}
               {printMode === "letter" && (
@@ -1739,7 +1748,7 @@ export default function POS({ windowId, windowLabel }) {
                   <tbody>
                     {ticket.items.map((i, k) => {
                       const linImporte = i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0));
-                      const linIva = i.iva_linea ?? (incluyeIva ? linImporte * ((i.iva_tasa || 8) / 100) : 0);
+                      const linIva = i.iva_linea ?? (incluyeIva ? linImporte * ((i.iva_tasa ?? 8) / 100) : 0);
                       const uniPrecio = i.precio_bruto ?? i.precio;
                       return (
                         <tr key={k}>
@@ -1994,7 +2003,7 @@ export default function POS({ windowId, windowLabel }) {
               {tipoVenta === "cotizacion"
                 ? <><FileText className="w-7 h-7 mr-2" /> Guardar cotización</>
                 : <><HandCoins className="w-7 h-7 mr-2" /> COBRAR · {money(totals.total)}</>}
-              <kbd className="ml-4 hidden lg:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white/20 text-sm font-bold border border-white/40" title="Atajo de teclado: Ctrl + Enter">Ctrl <span>+</span> Enter â†µ</kbd>
+              <kbd className="ml-4 hidden lg:inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-white/20 text-sm font-bold border border-white/40" title="Atajo de teclado: Ctrl + Enter">Ctrl <span>+</span> Enter ↵</kbd>
             </Button>
           </div>
         </div>

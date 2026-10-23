@@ -25,6 +25,11 @@ body {
    un 81 % global que también encogía el sitio público y los formularios. */
 html { font-size: 100%; }
 html.erp-densidad { font-size: 87.5%; }
+/* El ERP se ve como el navegador al 90 % de zoom (texto, íconos, bordes y
+   medidas en px). Con zoom, 100vh también se reduce al 90 %: las alturas de
+   pantalla completa del ERP usan --erp-vh, que lo compensa. */
+:root { --erp-vh: 100vh; }
+html.erp-densidad { zoom: 0.9; --erp-vh: calc(100vh / 0.9); }
 
 @layer base {
   :root {

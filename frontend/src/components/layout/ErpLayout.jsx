@@ -210,12 +210,12 @@ export default function ErpLayout() {
   const seccionLabel = (sec) => sec.charAt(0) + sec.slice(1).toLowerCase();
 
   return (
-    <div className="min-h-screen flex bg-canvas">
+    <div className="min-h-[var(--erp-vh)] flex bg-canvas">
       {/* Barra lateral en carbón: marca arriba, secciones en acordeón,
           indicador rojo en el módulo activo. */}
       <aside
         data-testid="sidebar"
-        className={`${collapsed ? "w-[72px]" : "w-60"} grafito grano shrink-0 text-slate-300 flex flex-col sticky top-0 h-screen z-30 transition-[width] duration-200 ease-out-rysa`}
+        className={`${collapsed ? "w-[72px]" : "w-60"} grafito grano shrink-0 text-slate-300 flex flex-col sticky top-0 h-[var(--erp-vh)] z-30 transition-[width] duration-200 ease-out-rysa`}
       >
         {/* Logotipo oficial para fondo oscuro (el mismo del sitio); colapsado,
             solo la "R" del isotipo. */}

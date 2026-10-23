@@ -778,7 +778,7 @@ export default function MachotesEditor() {
   const enUsoNombre = infoTipo?.activo ? (infoTipo.plantillas.find((p) => p.id === infoTipo.activo.template_id)?.nombre || "Personalizado") : null;
 
   return (
-    <div className="flex h-[calc(100vh-5rem)] flex-col gap-3" data-testid="machotes-editor">
+    <div className="flex h-[calc(var(--erp-vh)-5rem)] flex-col gap-3" data-testid="machotes-editor">
       {/* Encabezado */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
