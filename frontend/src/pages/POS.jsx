@@ -51,34 +51,34 @@ const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva 
   const secundario = incluyeIva ? neto : conIva;
   const etiqueta = incluyeIva ? "sin IVA" : "con IVA";
   const foto = fotoProducto(p.imagen_url);
-  // Caben 5 tarjetas por ventana: el alto sale del contenedor con scroll
-  // (container-type: size → 100cqh). Foto cuadrada del alto de la tarjeta a la
+  // Unas 5 tarjetas por ventana: el alto sale del contenedor con scroll
+  // (container-type: size → 100cqh), acotado entre 76 y 96 px. Foto cuadrada del alto de la tarjeta a la
   // izquierda; código, nombre, precio y existencia alineados a la derecha.
   return (
   <div className="relative">
     <button onClick={onAdd} data-testid={`pos-prod-${p.codigo}`}
-      className="flex h-[calc((100cqh-1.5rem)/5)] min-h-[104px] w-full items-stretch gap-3 overflow-hidden text-left border border-slate-200 rounded-md bg-white hover:border-brand-600 hover:bg-slate-50 transition-colors">
+      className="flex h-[clamp(76px,calc((100cqh-1.5rem)/5),96px)] w-full items-stretch gap-2.5 overflow-hidden text-left border border-slate-200 rounded-md bg-white hover:border-brand-600 hover:bg-slate-50 transition-colors">
       <span className="flex aspect-square h-full shrink-0 items-center justify-center border-r border-slate-100 bg-white">
         {foto
-          ? <img src={foto} alt="" loading="lazy" className="h-full w-full object-contain p-1.5" />
-          : <Package className="h-10 w-10 text-slate-300" />}
+          ? <img src={foto} alt="" loading="lazy" className="h-full w-full object-contain p-1" />
+          : <Package className="h-7 w-7 text-slate-300" />}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col items-end justify-between py-2 pr-3 text-right">
-        <span className="block max-w-full truncate pr-7 text-[15px] font-medium tracking-wide text-slate-500">{p.codigo}</span>
-        <span className="block text-[18px] font-semibold leading-tight text-slate-900 line-clamp-2">{p.descripcion}</span>
+      <span className="flex min-w-0 flex-1 flex-col items-end justify-between py-1.5 pr-2.5 text-right">
+        <span className="block max-w-full truncate pr-6 text-xs font-medium tracking-wide text-slate-500">{p.codigo}</span>
+        <span className="block text-sm font-semibold leading-snug text-slate-900 line-clamp-2">{p.descripcion}</span>
         <span className="flex w-full items-end justify-end gap-3">
-          {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="mb-0.5 h-7 px-2 text-sm leading-none text-amber-600 border-amber-300">{p.vendidas} vend.</Badge>}
-          <Badge variant="outline" className={`mb-0.5 h-8 min-w-[2.75rem] justify-center px-2.5 text-base font-bold tabular-nums leading-none ${PRODUCT_EX_CLS(p.existencia)}`} data-testid={`pos-ex-${p.codigo}`}>{p.existencia}</Badge>
-          <span className="text-right">
-            <span className="block font-display text-[21px] font-bold leading-none tabular-nums text-brand-600">{money(principal)}</span>
-            <span className="mt-0.5 block text-sm tabular-nums text-slate-500">{etiqueta} {money(secundario)}</span>
+          {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="h-5 px-1.5 text-[11px] leading-none text-amber-600 border-amber-300">{p.vendidas} vend.</Badge>}
+          <Badge variant="outline" className={`h-6 min-w-[2.25rem] justify-center px-2 text-sm font-bold tabular-nums leading-none ${PRODUCT_EX_CLS(p.existencia)}`} data-testid={`pos-ex-${p.codigo}`}>{p.existencia}</Badge>
+          <span className="flex items-baseline gap-2 text-right">
+            <span className="text-[11px] tabular-nums text-slate-500">{etiqueta} {money(secundario)}</span>
+            <span className="font-display text-base font-bold leading-none tabular-nums text-brand-600">{money(principal)}</span>
           </span>
         </span>
       </span>
     </button>
     <button onClick={onFav} title={isFav ? "Quitar de favoritos" : "Agregar a favoritos"} data-testid={`pos-fav-${p.codigo}`}
-      className="absolute top-1 right-1 p-1 text-slate-300 hover:text-amber-400 transition-colors">
-      <Star className={`w-5 h-5 ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
+      className="absolute top-0.5 right-0.5 p-1 text-slate-300 hover:text-amber-400 transition-colors">
+      <Star className={`w-4 h-4 ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
     </button>
   </div>
   );

@@ -397,7 +397,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
             ))}
             <th className="p-3"></th>
           </tr></thead>
-          <tbody>
+          <tbody className="text-base">
             {loading && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && pageRows.length === 0 && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center text-slate-400"><Users className="w-8 h-8 mx-auto mb-2" />Sin clientes.</td></tr>}
             {!loading && pageRows.map((c) => {

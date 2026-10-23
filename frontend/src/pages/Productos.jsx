@@ -370,43 +370,43 @@ export default function Productos() {
 
       <div className="card-soft">
         <TableScroller testid="productos-scroller">
-        <table className="w-full text-[18px] leading-snug">
+        <table className="w-full text-sm">
           <thead className="bg-slate-50 sticky top-0">
-            <tr className="text-left text-sm uppercase tracking-wider text-slate-500">
+            <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
               {[{ key: "estado", label: "Estado", noSort: true }, { key: "codigo", label: "Código" }, { key: "descripcion", label: "Descripción" },
                 { key: "linea", label: "Línea" }, { key: "clasificacion", label: "Clasifica" },
                 { key: "costo", label: "Costo", right: true }, { key: "existencia", label: "Exist.", right: true },
                 { key: "unidad_medida", label: "U.M." },
                 { key: "precio", label: "Precio", right: true }, { key: "utilidad", label: "Utilidad", right: true },
                 { key: "stock_minimo", label: "Min", right: true }].map((col) => (
-                <th key={col.key} onClick={() => !col.noSort && toggleSort(col.key)} className={`px-4 py-3.5 select-none ${col.noSort ? "" : "cursor-pointer hover:text-brand-600"} ${col.right ? "text-right" : "text-left"}`}>
+                <th key={col.key} onClick={() => !col.noSort && toggleSort(col.key)} className={`p-3 select-none ${col.noSort ? "" : "cursor-pointer hover:text-brand-600"} ${col.right ? "text-right" : "text-left"}`}>
                   <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
                     {col.label}
                     {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : !col.noSort && <ArrowDownUp className="w-3 h-3 opacity-30" />}
                   </span>
                 </th>
               ))}
-              <th className="px-4 py-3.5">Imagen</th>
+              <th className="p-3">Imagen</th>
               <th className="p-3"></th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="text-base">
             {loading && <tr><td colSpan={13} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && sorted.length === 0 && <tr><td colSpan={13} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
             {!loading && sorted.map((p) => {
               const [color, label] = dot(p);
               return (
                 <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`prod-row-${p.codigo}`}>
-                  <td className="px-4 py-3.5"><div className="flex items-center gap-2"><span className={`w-3 h-3 rounded-full ${color}`} title={label} /><Badge className={`text-sm ${estadoBadge[p.estado]}`}>{p.estado}</Badge></div></td>
-                  <td className="px-4 py-3.5 font-medium text-brand-600">{p.codigo}</td>
-                  <td className="px-4 py-3.5 max-w-md font-medium text-slate-900"><span className="line-clamp-2">{p.descripcion}</span></td>
-                  <td className="px-4 py-3.5 text-slate-500">{p.linea}</td>
-                  <td className="px-4 py-3.5 text-slate-500">{p.clasificacion || "—"}</td>
-                  <td className="px-4 py-3.5 text-right">{money(p.costo)}</td>
-                  <td className="px-4 py-3.5 text-right text-[20px] font-bold tabular-nums">{p.existencia}</td>
-                  <td className="px-4 py-3.5">
+                  <td className="px-3 py-3"><div className="flex items-center gap-2"><span className={`w-3 h-3 rounded-full ${color}`} title={label} /><Badge className={`${estadoBadge[p.estado]}`}>{p.estado}</Badge></div></td>
+                  <td className="px-3 py-3 font-medium text-brand-600">{p.codigo}</td>
+                  <td className="px-3 py-3 min-w-[16rem] max-w-md font-medium text-slate-900"><span className="line-clamp-2">{p.descripcion}</span></td>
+                  <td className="px-3 py-3 text-slate-500">{p.linea}</td>
+                  <td className="px-3 py-3 text-slate-500">{p.clasificacion || "—"}</td>
+                  <td className="px-3 py-3 text-right">{money(p.costo)}</td>
+                  <td className="px-3 py-3 text-right text-[17px] font-bold tabular-nums">{p.existencia}</td>
+                  <td className="px-3 py-3">
                     <div className="flex flex-col items-start gap-1">
-                      <span className="font-mono text-base">{p.unidad_medida || "PZA"}</span>
+                      <span className="font-mono text-sm">{p.unidad_medida || "PZA"}</span>
                       {p.presentaciones && p.presentaciones.length > 1 && (
                         <Badge
                           variant="outline"
@@ -419,23 +419,23 @@ export default function Productos() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3.5 text-right">{money(precio1(p))}</td>
-                  <td className="px-4 py-3.5 text-right" data-testid={`prod-utilidad-${p.codigo}`}>
+                  <td className="px-3 py-3 text-right">{money(precio1(p))}</td>
+                  <td className="px-3 py-3 text-right" data-testid={`prod-utilidad-${p.codigo}`}>
                     {(() => { const psi = p.precios?.[0]?.precio_sin_iva ?? 0; const u = psi - (p.costo || 0); const m = psi ? (u / psi * 100) : 0; return (<span className={u > 0 ? "text-emerald-700 font-semibold" : "text-red-600"}>{money(u)} <span className="text-sm text-slate-400">({m.toFixed(0)}%)</span></span>); })()}
                   </td>
-                  <td className="px-4 py-3.5 text-right text-slate-500">{p.stock_minimo}</td>
-                  <td className="px-4 py-3.5">
+                  <td className="px-3 py-3 text-right text-slate-500">{p.stock_minimo}</td>
+                  <td className="px-3 py-3">
                     {fotoProducto(p.imagen_url) ? (
                       <img src={fotoProducto(p.imagen_url)} alt=""
-                        className="w-14 h-14 object-contain rounded border border-slate-100 bg-white"
+                        className="w-12 h-12 object-contain rounded border border-slate-100 bg-white"
                         data-testid={`prod-img-${p.codigo}`} />
                     ) : (
-                      <div className="w-14 h-14 rounded bg-slate-100 flex items-center justify-center text-slate-300" data-testid={`prod-img-${p.codigo}`}>
+                      <div className="w-12 h-12 rounded bg-slate-100 flex items-center justify-center text-slate-300" data-testid={`prod-img-${p.codigo}`}>
                         <Boxes className="w-6 h-6" />
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3.5">
+                  <td className="px-3 py-3">
                     <div className="flex gap-1 justify-end">
                       <Button
                         size="icon"
