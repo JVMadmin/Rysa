@@ -11,14 +11,14 @@ export const MARCAS_SITIO = [
   { slug: "dinastia", nombre: "Dinastía" },
   { slug: "garduno", nombre: "Garduño" },
   { slug: "serviplastic", nombre: "Serviplastic" },
-  { slug: "cubasa", nombre: "Cubasa" },
-  { slug: "ideal", nombre: "Ideal" },
+  { slug: "cubasa", nombre: "Cubasa", logo: "/brand/marcas/cubasa.webp" },
+  { slug: "ideal", nombre: "Ideal", logo: "/brand/marcas/ideal.webp" },
   { slug: "poliplast", nombre: "Poliplast" },
-  { slug: "coplasur", nombre: "Coplasur" },
-  { slug: "tarasquito", nombre: "Tarasquito" },
-  { slug: "banaplastic", nombre: "Banaplastic" },
-  { slug: "anguiplast", nombre: "Anguiplast" },
-  { slug: "truper", nombre: "Truper" },
+  { slug: "coplasur", nombre: "Coplasur", logo: "/brand/marcas/coplasur.webp" },
+  { slug: "tarasquito", nombre: "Tarasquito", logo: "/brand/marcas/tarasquito.webp" },
+  { slug: "banaplastic", nombre: "Banaplastic", logo: "/brand/marcas/banaplastic.webp" },
+  { slug: "anguiplast", nombre: "Anguiplast", logo: "/brand/marcas/anguiplast.webp" },
+  { slug: "truper", nombre: "Truper", logo: "/brand/marcas/truper.webp" },
 ];
 
 export const marcaPorSlug = (slug) => MARCAS_SITIO.find((m) => m.slug === slug);
