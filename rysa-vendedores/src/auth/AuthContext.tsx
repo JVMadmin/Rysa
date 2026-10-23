@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { getActiveUser, logout as authLogout, User } from '@/services/auth';
+import { getActiveUser, logout as authLogout, cerrarJornada as authCerrarJornada, User } from '@/services/auth';
+import { trackingService } from '@/services/trackingService';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   setUser: (user: User | null) => void;
   logout: () => Promise<void>;
+  cerrarJornada: () => Promise<{ enServidor: boolean; ubicaciones?: number }>;
   refreshUser: () => Promise<void>;
 }
 
@@ -14,6 +16,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   setUser: () => {},
   logout: async () => {},
+  cerrarJornada: async () => ({ enServidor: false }),
   refreshUser: async () => {},
 });
 
@@ -37,8 +40,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const handleLogout = async () => {
+    await trackingService.stopTracking().catch(() => {});
     await authLogout();
     setUser(null);
+  };
+
+  // Cierre del día: avisa al servidor, apaga el GPS y vuelve al login.
+  const handleCerrarJornada = async () => {
+    const r = await authCerrarJornada();
+    await trackingService.stopTracking().catch(() => {});
+    setUser(null);
+    return r;
   };
 
   return (
@@ -48,6 +60,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loading,
         setUser,
         logout: handleLogout,
+        cerrarJornada: handleCerrarJornada,
         refreshUser: checkSession,
       }}
     >

@@ -75,20 +75,12 @@ export default function VisitasScreen() {
   // React Native. Se gestiona desde aquí (pantalla montada y visible) en lugar
   // de _layout.tsx, para que Android siempre tenga una Activity en RESUMED
   // cuando se solicita el permiso — eliminando ForegroundServiceStartNotAllowedException.
-  const [locationPermission, requestLocationPermission] = Location.useForegroundPermissions();
+  const [locationPermission] = Location.useForegroundPermissions();
   const gpsPermissionGranted = locationPermission?.granted === true;
   const trackingStartedRef = useRef(false);
 
-  // Solicitar permiso en primer plano cuando la pantalla esté montada y visible
-  useEffect(() => {
-    if (!locationPermission || locationPermission.status === 'undetermined') {
-      // Delay para garantizar que la pantalla esté completamente en RESUMED
-      const t = setTimeout(() => {
-        requestLocationPermission().catch(() => {});
-      }, 1000);
-      return () => clearTimeout(t);
-    }
-  }, [locationPermission?.status]);
+  // Los permisos y el arranque del rastreo los maneja JornadaGuard al iniciar
+  // sesión (una sola solicitud; dos simultáneas truenan en Android 12+).
 
   // Iniciar tracking cuando el permiso esté confirmado, solo una vez por sesión
   useEffect(() => {
@@ -372,8 +364,12 @@ export default function VisitasScreen() {
   // Toggle de Tracking Continuo (usando trackingService global con watchPositionAsync)
   const toggleContinuousTracking = async () => {
     if (continuousTracking) {
-      await trackingService.stopTracking();
-      Alert.alert('Ruta en Pausa', 'Se detuvo la transmisión continua de ubicación.');
+      // La ruta se transmite durante toda la jornada; solo se detiene al
+      // "Cerrar jornada" desde Inicio.
+      const bg = await trackingService.getBackgroundPermissionStatus();
+      Alert.alert('Ruta activa', bg === 'granted'
+        ? 'Tu ubicación se envía durante toda la jornada, aunque bloquees el celular. Se detiene al cerrar la jornada en Inicio.'
+        : 'Tu ubicación se envía mientras la app esté abierta. Para enviarla también con el celular bloqueado, permite la ubicación "todo el tiempo" en Ajustes.');
     } else {
       // Paso 1: Iniciar watchPositionAsync (GPS en primer plano - no crashea)
       const ok = await trackingService.startTracking();
@@ -720,7 +716,7 @@ export default function VisitasScreen() {
           >
             <View style={[styles.gpsDot, continuousTracking && styles.gpsDotActive]} />
             <Text style={[styles.trackingToggleText, continuousTracking && styles.trackingToggleTextActive]}>
-              {continuousTracking ? 'Ruta 15s Activa' : 'Iniciar Ruta'}
+              {continuousTracking ? 'Jornada en ruta' : 'Activar ubicación'}
             </Text>
           </TouchableOpacity>
         </View>

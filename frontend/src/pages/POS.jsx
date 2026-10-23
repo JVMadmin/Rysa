@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import CajaAperturaModal from "@/components/CajaAperturaModal";
 import ReporteRapido from "@/components/ReporteRapido";
 import { toast } from "sonner";
+import { LISTAS_PCT_DEFAULT, REDONDEO_DEFAULT, precioNetoLista as calcListPrice } from "@/lib/precios";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, PauseCircle, PlayCircle, X, Package,
   Banknote, ArrowLeftRight, CreditCard,   Tag, Printer, Hash, Keyboard, FileText,
@@ -30,27 +31,7 @@ const METODOS = [
   ["otros", "Otro", Gift],
 ];
 
-const LISTAS_PCT_DEFAULT = [40, 30, 20, 15, 10];
 const UNIDADES_OPC = ["PZA", "PAQ", "KILO", "KG", "GR", "LT", "ML", "MTR", "CM", "CAJ", "BOT", "LATA", "DOC", "PAR", "ROLLO", "BULTO", "SERV"];
-
-// Precio de una lista concreta. Usa el precio guardado del producto; si la lista
-// no tiene precio configurado lo calcula aplicando el % de utilidad de la
-// configuración (listas_precios_pct) sobre el costo, con IVA.
-const calcListPrice = (p, l, pct) => {
-  const n = pct?.length ?? LISTAS_PCT_DEFAULT.length;
-  if (Number(l) === n + 1) return Number(p.precio_minimo ?? 0);
-  const arr = p.precios || [];
-  const lIdx = Number(l) - 1;
-  const stored = arr[lIdx]?.precio_con_iva;
-  if (stored) return stored;
-  const costo = Number(p.costo ?? 0);
-  if (costo > 0 && lIdx < n) {
-    const pctLista = Number(pct[lIdx] ?? pct[0] ?? 0);
-    const sin = costo * (1 + pctLista / 100);
-    return +(sin * (1 + Number(p.iva_tasa ?? p.iva ?? 8) / 100)).toFixed(2);
-  }
-  return arr[0]?.precio_con_iva ?? 0;
-};
 
 const PRODUCT_EX_CLS = (ex) => {
   const n = Number(ex || 0);
@@ -150,6 +131,8 @@ export default function POS({ windowId, windowLabel }) {
   const [nextFolio, setNextFolio] = useState({ venta: "", cotizacion: "" });
   const [listaNames, setListaNames] = useState(["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"]);
   const [listasPct, setListasPct] = useState(LISTAS_PCT_DEFAULT);
+  const [filaPrecio, setFilaPrecio] = useState(0);
+  const [redondeo, setRedondeo] = useState(REDONDEO_DEFAULT);
   const [priceCheckOpen, setPriceCheckOpen] = useState(false);
   const [pcQuery, setPcQuery] = useState("");
   const [pcResults, setPcResults] = useState([]);
@@ -380,6 +363,7 @@ export default function POS({ windowId, windowLabel }) {
       setSettings(r.data || {});
       if (r.data?.listas_precios_nombres?.length) setListaNames(r.data.listas_precios_nombres);
       if (r.data?.listas_precios_pct?.length) setListasPct(r.data.listas_precios_pct);
+      if (r.data?.redondeo_precios) setRedondeo(r.data.redondeo_precios);
       setIncluyeIva(true);
       incluyeIvaDefault.current = true;
     });
@@ -532,7 +516,7 @@ export default function POS({ windowId, windowLabel }) {
     finally { setWaSending(false); }
   };
 
-  const priceFromList = (p, l) => calcListPrice(p, l, listasPct);
+  const priceFromList = (p, l) => calcListPrice(p, l, listasPct, redondeo);
   const priceOf = (p) => priceFromList(p, lista);
 
   const addToCart = (p) => {
@@ -584,7 +568,8 @@ export default function POS({ windowId, windowLabel }) {
   // Al cambiar la lista de precios se actualizan automáticamente los precios del carrito
   const applyLista = (l) => {
     setLista(l);
-    setCart((c) => c.map((i) => (i.precios?.length ? { ...i, precio: priceFromList({ precios: i.precios, precio_minimo: i.precio_minimo, costo: i.costo, iva_tasa: i.iva_tasa }, l) } : i)));
+    // También los productos sin precio capturado: su precio sale del costo y el % de la lista.
+    setCart((c) => c.map((i) => (i.precios?.length || i.costo > 0 ? { ...i, precio: priceFromList({ precios: i.precios, precio_minimo: i.precio_minimo, costo: i.costo, iva_tasa: i.iva_tasa }, l) } : i)));
   };
   // Alterna un producto en los favoritos del usuario
   const toggleFav = async (e, pid) => {
@@ -732,16 +717,17 @@ export default function POS({ windowId, windowLabel }) {
         const item = t ? cart.find((i) => i.product_id === t) : null;
         const prod = item || selProd;
         if (!prod) return toast.error("Selecciona un producto del carrito o de la búsqueda");
-        if (!(prod.precios?.length || prod.precio_minimo != null)) return toast.error("El producto no tiene precios configurados");
-        const precio = item ? item.precio : calcListPrice(prod, lista, listasPct);
+        if (!(prod.precios?.length || Number(prod.costo) > 0 || Number(prod.precio_minimo) > 0)) return toast.error("El producto no tiene costo ni precios configurados");
+        const precio = item ? item.precio : calcListPrice(prod, lista, listasPct, redondeo);
         setLinePrice({ ...prod, product_id: prod.product_id || prod.id, precio });
+        setFilaPrecio(Math.max(0, Number(lista) - 1));
         const fv = incluyeIva ? 1 + Number(prod.iva_tasa ?? prod.iva ?? 8) / 100 : 1;
         setLibreVal(String(+(precio * fv).toFixed(2)));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, cart, selProd, lista, listasPct, incluyeIva]);
+  }, [selected, cart, selProd, lista, listasPct, redondeo, incluyeIva]);
 
   const pcSearch = async (val) => {
     setPcQuery(val);
@@ -1156,7 +1142,7 @@ export default function POS({ windowId, windowLabel }) {
                         </td>
                         <td className="px-1.5 py-1 text-right tabular-nums text-slate-500 whitespace-nowrap">{i.iva_tasa}%</td>
                         <td className="px-1.5 py-1 text-right tabular-nums whitespace-nowrap">
-                          <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setLibreVal(String(precioVista)); }}
+                          <button onClick={(e) => { e.stopPropagation(); setLinePrice(i); setFilaPrecio(Math.max(0, Number(lista) - 1)); setLibreVal(String(precioVista)); }}
                             className="underline decoration-dotted hover:text-brand-600" data-testid={`cart-price-${i.codigo}`}>
                             {money(precioVista)}
                           </button>
@@ -1420,23 +1406,51 @@ export default function POS({ windowId, windowLabel }) {
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Tag className="w-5 h-5" /> Precio · {linePrice?.descripcion}</DialogTitle></DialogHeader>
           {linePrice && (
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                {listaNames.map((_, i) => {
-                  const pr = priceFromList(linePrice, i + 1);
-                  return (
-                    <button key={i} onClick={() => setLinePrecio(linePrice, pr * fDlg)} data-testid={`line-precio-${i + 1}`}
-                      className={`flex items-center justify-between border rounded-md px-3 py-2 hover:border-brand-600 ${Math.abs(linePrice.precio - pr) < 0.001 ? "border-brand-600 bg-brand-600/5" : "border-slate-200"}`}>
-                      <span className="text-sm text-slate-500">{listaNames[i] || `Precio ${i + 1}`}</span>
-                      <span className="font-display font-bold text-brand-600">{money(pr * fDlg)}</span>
-                    </button>
-                  );
-                })}
-                <button onClick={() => setLinePrecio(linePrice, (linePrice.precio_minimo || 0) * fDlg)} data-testid="line-precio-min"
-                  className="flex items-center justify-between border rounded-md px-3 py-2 hover:border-amber-500 border-slate-200">
-                  <span className="text-sm text-slate-500">Precio mínimo</span>
-                  <span className="font-display font-bold text-amber-600">{money((linePrice.precio_minimo || 0) * fDlg)}</span>
-                </button>
-              </div>
+              {/* Lista de precios (F6): Precio 1…n y mínimo, sin y con IVA, ya
+                  redondeados. Flechas para moverse, Enter o doble clic para elegir. */}
+              {(() => {
+                const ivaF = 1 + Number(linePrice.iva_tasa ?? 8) / 100;
+                const filas = [
+                  ...listaNames.map((n, i) => ({ id: `${i + 1}`, nombre: n || `Precio ${i + 1}`, neto: priceFromList(linePrice, i + 1) })),
+                  { id: "min", nombre: "Precio mínimo", neto: Number(linePrice.precio_minimo || 0) },
+                ];
+                const elegir = (f) => f && f.neto > 0 && setLinePrecio(linePrice, f.neto * fDlg);
+                const sel = Math.min(filaPrecio, filas.length - 1);
+                return (
+                  <div>
+                    <div className="overflow-hidden rounded-md border border-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-600"
+                      tabIndex={0} autoFocus data-testid="line-precios-tabla"
+                      onKeyDown={(e) => {
+                        if (e.key === "ArrowDown") { e.preventDefault(); setFilaPrecio((x) => Math.min(x + 1, filas.length - 1)); }
+                        else if (e.key === "ArrowUp") { e.preventDefault(); setFilaPrecio((x) => Math.max(x - 1, 0)); }
+                        else if (e.key === "Enter") { e.preventDefault(); elegir(filas[sel]); }
+                      }}>
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 text-2xs uppercase tracking-wider text-slate-500">
+                          <tr><th className="px-3 py-2 text-left font-semibold">Lista</th><th className="px-3 py-2 text-right font-semibold">Sin IVA</th><th className="px-3 py-2 text-right font-semibold">Con IVA</th></tr>
+                        </thead>
+                        <tbody>
+                          {filas.map((f, idx) => {
+                            const actual = Math.abs(Number(linePrice.precio) - f.neto) < 0.0001 && f.neto > 0;
+                            return (
+                              <tr key={f.id} data-testid={`line-precio-${f.id}`} onClick={() => setFilaPrecio(idx)} onDoubleClick={() => elegir(f)}
+                                className={`cursor-pointer border-t border-slate-100 ${idx === sel ? "bg-carbon-900 text-white" : "hover:bg-slate-50"} ${f.neto > 0 ? "" : "opacity-50"}`}>
+                                <td className="px-3 py-2">{f.nombre}{actual && <span className={`ml-2 text-2xs ${idx === sel ? "text-brand-300" : "text-brand-600"}`}>actual</span>}</td>
+                                <td className="cifras px-3 py-2 text-right">{f.neto.toFixed(4)}</td>
+                                <td className="cifras px-3 py-2 text-right font-semibold">{money(f.neto * ivaF)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-3 flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setLinePrice(null)} data-testid="line-precio-cancelar">Cancelar</Button>
+                      <Button onClick={() => elegir(filas[sel])} disabled={!(filas[sel]?.neto > 0)} className="bg-brand-600 hover:bg-brand-700" data-testid="line-precio-seleccionar">Seleccionar</Button>
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="border-t pt-3">
                 <Label className="text-xs uppercase tracking-wider text-slate-500">{incluyeIva ? "Precio libre (c/IVA)" : "Precio libre"}</Label>
                 {can("producto.precio") ? (
@@ -1466,7 +1480,7 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="text-xs text-slate-400 mb-2">{p.codigo}</div>
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   {listaNames.map((_, i) => (
-                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-brand-600">{money(calcListPrice(p, i + 1, listasPct))}</div></div>
+                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-brand-600">{money(calcListPrice(p, i + 1, listasPct, redondeo) * (1 + Number(p.iva_tasa ?? 8) / 100))}</div></div>
                   ))}
                 </div>
               </div>

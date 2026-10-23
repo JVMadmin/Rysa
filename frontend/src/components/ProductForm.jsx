@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { api, formatApiError, money, esFotoGenerica } from "@/lib/api";
 import { toast } from "sonner";
+import { REDONDEO_DEFAULT, redondearPrecio } from "@/lib/precios";
 import { Loader2, Plus, X, Barcode, Boxes } from "lucide-react";
 import { ImageUpload } from "@/components/ImageUpload";
 import PresentacionesModal from "@/components/PresentacionesModal";
@@ -120,13 +121,19 @@ export default function ProductForm({ open, onClose, product, onSaved }) {
   };
   const removeBarcode = (v) => setF((s) => ({ ...s, codigos_barras: s.codigos_barras.filter((x) => x !== v) }));
 
+  const [redondeo, setRedondeo] = useState(REDONDEO_DEFAULT);
+  useEffect(() => {
+    api.get("/settings").then((r) => { if (r.data?.redondeo_precios) setRedondeo(r.data.redondeo_precios); }).catch(() => {});
+  }, []);
+
   const setPrecio = (i, field, val) => {
     setF((s) => {
       const next = { ...s, [`${field}${i}`]: val };
       const iva = num(s.impuesto) || 8, costo = num(s.costo);
       if (field === "utilpreci") {
+        // Precio con IVA redondeado igual que en el POS (Configuración → Precios).
         const sin = costo * (1 + num(val) / 100);
-        next[`precio${i}`] = +(sin * (1 + iva / 100)).toFixed(2);
+        next[`precio${i}`] = redondearPrecio(sin * (1 + iva / 100), redondeo);
       } else if (field === "precio") {
         const sin = num(val) / (1 + iva / 100);
         next[`utilpreci${i}`] = costo > 0 ? +((sin / costo - 1) * 100).toFixed(1) : 0;

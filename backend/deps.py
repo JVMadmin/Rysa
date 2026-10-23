@@ -58,9 +58,10 @@ JWT_ALGORITHM = "HS256"
 def get_jwt_secret() -> str:
     return os.environ["JWT_SECRET"]
 
-def _jwt_claims(user_id: str, email: str, token_type: str, token_version: int) -> dict:
+def _jwt_claims(user_id: str, email: str, token_type: str, token_version: int,
+                ttl_seconds: int | None = None) -> dict:
     now = now_utc()
-    ttl = ACCESS_TOKEN_TTL_SECONDS if token_type == "access" else REFRESH_TOKEN_TTL_SECONDS
+    ttl = ttl_seconds or (ACCESS_TOKEN_TTL_SECONDS if token_type == "access" else REFRESH_TOKEN_TTL_SECONDS)
     return {
         "sub": user_id,
         "email": email,
@@ -71,8 +72,10 @@ def _jwt_claims(user_id: str, email: str, token_type: str, token_version: int) -
         "token_version": int(token_version or 0),
     }
 
-def create_access_token(user_id: str, email: str, token_version: int = 0) -> str:
-    return jwt.encode(_jwt_claims(user_id, email, "access", token_version),
+def create_access_token(user_id: str, email: str, token_version: int = 0,
+                        ttl_seconds: int | None = None) -> str:
+    """ttl_seconds: vigencia distinta a la normal (jornada de la app de vendedores)."""
+    return jwt.encode(_jwt_claims(user_id, email, "access", token_version, ttl_seconds),
                       get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 def create_refresh_token(user_id: str, token_version: int = 0) -> str:

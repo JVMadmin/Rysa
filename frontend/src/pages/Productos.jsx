@@ -14,6 +14,7 @@ import ProductForm from "@/components/ProductForm";
 import PresentacionesModal from "@/components/PresentacionesModal";
 import { TableScroller } from "@/components/TableScroller";
 import { toast } from "sonner";
+import { LISTAS_PCT_DEFAULT, REDONDEO_DEFAULT, precioLista } from "@/lib/precios";
 import { Plus, Search, Upload, Pencil, History, Loader2, Boxes, FileDown, FileSpreadsheet, FileText, ArrowDownUp, ArrowUp, ArrowDown, SlidersHorizontal, Tags } from "lucide-react";
 const dot = (p) => {
   const ex = Number(p.existencia || 0), min = Number(p.stock_minimo || 0);
@@ -33,6 +34,15 @@ const movBadge = (t) => (MOV_TIPOS.find((x) => x.v === t)?.cls) || "bg-slate-100
 const fmtFecha = (f) => (f || "").slice(0, 16).replace("T", " ");
 
 export default function Productos() {
+  // Precio 1 con IVA calculado igual que en el POS (lista + redondeo de Configuración).
+  const [cfgPrecios, setCfgPrecios] = useState({ pct: LISTAS_PCT_DEFAULT, modo: REDONDEO_DEFAULT });
+  useEffect(() => {
+    api.get("/settings").then((r) => setCfgPrecios({
+      pct: r.data?.listas_precios_pct?.length ? r.data.listas_precios_pct : LISTAS_PCT_DEFAULT,
+      modo: r.data?.redondeo_precios || REDONDEO_DEFAULT,
+    })).catch(() => {});
+  }, []);
+  const precio1 = (p) => precioLista(p, 1, cfgPrecios.pct, cfgPrecios.modo);
   const { can } = useAuth();
   const location = useLocation();
   const [rows, setRows] = useState([]);
@@ -80,7 +90,7 @@ export default function Productos() {
     const numFields = ["costo", "existencia", "stock_minimo"];
     sorted.sort((a, b) => {
       const getV = (r) => {
-        if (sort.key === "precio") return r.precios?.[0]?.precio_con_iva ?? 0;
+        if (sort.key === "precio") return precio1(r);
         if (sort.key === "utilidad") { const psi = r.precios?.[0]?.precio_sin_iva ?? 0; return psi - (r.costo || 0); }
         return r[sort.key];
       };
@@ -409,7 +419,7 @@ export default function Productos() {
                       )}
                     </div>
                   </td>
-                  <td className="p-3 text-right">{money(p.precios?.[0]?.precio_con_iva)}</td>
+                  <td className="p-3 text-right">{money(precio1(p))}</td>
                   <td className="p-3 text-right" data-testid={`prod-utilidad-${p.codigo}`}>
                     {(() => { const psi = p.precios?.[0]?.precio_sin_iva ?? 0; const u = psi - (p.costo || 0); const m = psi ? (u / psi * 100) : 0; return (<span className={u > 0 ? "text-emerald-700 font-semibold" : "text-red-600"}>{money(u)} <span className="text-xs text-slate-400">({m.toFixed(0)}%)</span></span>); })()}
                   </td>

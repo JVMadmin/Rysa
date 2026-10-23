@@ -118,3 +118,52 @@ def utilidad_margen(precio_neto: float, costo: float) -> tuple:
     util = neto - costo
     margen = round(util / neto * 100, 2) if neto else 0.0
     return round(util, 2), margen
+
+# ── Listas de precios ────────────────────────────────────────────────────────
+# Misma regla que frontend/src/lib/precios.js (POS) para que la app de
+# vendedores cobre igual: precio con IVA = costo × (1 + % de la lista) × (1 + IVA),
+# redondeado según Configuración; el carrito y la venta usan el NETO.
+# Referencia B90 (costo 29.63): P1 50% → $48, P2 40% → $45, P3 30% → $42.
+LISTAS_PCT_DEFAULT = [50, 40, 30, 20, 15]
+REDONDEO_DEFAULT = "arriba_peso"
+
+
+def redondear_precio(valor: float, modo: str = REDONDEO_DEFAULT) -> float:
+    import math
+    c = round(float(valor or 0) + 1e-9, 2)
+    if modo == "ninguno":
+        return c
+    if modo == "arriba_50":
+        return math.ceil(c * 2 - 1e-9) / 2
+    if modo == "cercano_peso":
+        return float(math.floor(c + 0.5))
+    return float(math.ceil(c - 1e-9))
+
+
+def neto_redondeado(neto: float, iva_tasa: float, modo: str = REDONDEO_DEFAULT) -> float:
+    f = 1 + float(iva_tasa or 0) / 100
+    if modo == "ninguno":
+        return round(float(neto or 0), 2)
+    return round(redondear_precio(float(neto or 0) * f, modo) / f, 4)
+
+
+def precios_lista(prod: dict, pct: list | None = None, modo: str = REDONDEO_DEFAULT) -> list:
+    """[{lista, precio (neto), precio_con_iva}] para las listas configuradas.
+    Usa el precio capturado del producto para la lista si existe; si no, el
+    % de la lista sobre el costo."""
+    pct = pct or LISTAS_PCT_DEFAULT
+    iva = float(prod.get("iva_tasa") or prod.get("impuesto") or 8)
+    f = 1 + iva / 100
+    capturados = prod.get("precios") or []
+    costo = float(prod.get("costo") or 0)
+    out = []
+    for i, p in enumerate(pct):
+        cap = float((capturados[i] or {}).get("precio_con_iva") or 0) if i < len(capturados) else 0.0
+        if cap > 0:
+            neto = neto_redondeado(cap / f, iva, modo)
+        elif costo > 0:
+            neto = neto_redondeado(costo * (1 + float(p or 0) / 100), iva, modo)
+        else:
+            neto = 0.0
+        out.append({"lista": i + 1, "precio": neto, "precio_con_iva": round(neto * f, 2)})
+    return out

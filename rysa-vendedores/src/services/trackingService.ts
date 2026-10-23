@@ -5,29 +5,16 @@ import { AppState, Platform } from 'react-native';
 import { registerSellerLocation } from './salesService';
 import { queueOfflineAction, saveLastGpsCache, getLastGpsCache } from './offlineCache';
 import { syncManager } from './syncManager';
+import { getAuthToken, getJornada, jornadaVigente } from '@/lib/api';
 
 export const LOCATION_BACKGROUND_TASK = 'RYSA_BACKGROUND_LOCATION_TASK';
 const TRACKING_STORAGE_KEY = 'rysa_tracking_active';
 const INTERVAL_MS = 15000;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LIMPIEZA AL NIVEL DE MÓDULO
-// Al importar este módulo, detener inmediatamente cualquier LocationTaskService
-// residual de versiones anteriores. Si la app fue actualizada y tenía un
-// Foreground Service corriendo, Android lo intentará reiniciar automáticamente
-// causando ForegroundServiceStartNotAllowedException antes de que nuestro
-// código de JS pueda hacer nada.
-// ─────────────────────────────────────────────────────────────────────────────
-if (Platform.OS === 'android') {
-  Location.hasStartedLocationUpdatesAsync(LOCATION_BACKGROUND_TASK)
-    .then((running) => {
-      if (running) {
-        console.log('[trackingService] Deteniendo LocationTaskService residual de sesión anterior...');
-        return Location.stopLocationUpdatesAsync(LOCATION_BACKGROUND_TASK).catch(() => {});
-      }
-    })
-    .catch(() => {});
-}
+// Ya NO se detiene el servicio de fondo al cargar el módulo: eso apagaba el
+// rastreo cada vez que Android o el vendedor reabrían la app. El servicio vive
+// mientras la jornada esté vigente; la tarea de fondo se detiene sola cuando
+// la sesión vence (23:59) o se cierra la jornada.
 
 export interface TrackingLocation {
   latitud: number;
@@ -206,9 +193,11 @@ class TrackingService {
           distanceInterval: 10,
           deferredUpdatesInterval: INTERVAL_MS,
           foregroundService: {
-            notificationTitle: 'RYSA Vendedores en Ruta',
-            notificationBody: 'Transmitiendo telemetría GPS continua en campo',
-            notificationColor: '#D32F2F',
+            notificationTitle: 'Jornada activa · RYSA',
+            notificationBody: 'Tu ubicación se envía a tu supervisor hasta que cierres la jornada.',
+            notificationColor: '#CD0708',
+            // Sigue enviando aunque el vendedor cierre la app desde recientes.
+            killServiceOnDestroy: false,
           },
           pausesUpdatesAutomatically: false,
           showsBackgroundLocationIndicator: true,
@@ -218,6 +207,15 @@ class TrackingService {
     } catch (err) {
       console.warn('[trackingService] tryStartForegroundService omitido:', err);
     }
+  }
+
+  /** Inicio de jornada: GPS en primer plano + servicio de fondo (si ya hay
+   *  permiso "todo el tiempo"). Se llama justo después del login, con la app
+   *  visible, que es cuando Android permite arrancar el servicio. */
+  async iniciarJornada(): Promise<boolean> {
+    const ok = await this.startTracking(true);
+    if (ok) await this.tryStartForegroundService();
+    return ok;
   }
 
   async stopTracking(): Promise<void> {
@@ -318,6 +316,12 @@ if (Platform.OS !== 'web') {
       TaskManager.defineTask(LOCATION_BACKGROUND_TASK, async ({ data, error }) => {
         if (error) {
           console.warn('[trackingService:BackgroundTask] Error en tarea de fondo:', error.message);
+          return;
+        }
+        // Sin sesión o con la jornada vencida/cerrada: se apaga el servicio.
+        const vigente = !!(await getAuthToken()) && jornadaVigente(await getJornada());
+        if (!vigente) {
+          await Location.stopLocationUpdatesAsync(LOCATION_BACKGROUND_TASK).catch(() => {});
           return;
         }
         if (data) {

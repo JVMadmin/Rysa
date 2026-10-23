@@ -39,6 +39,8 @@ KNOWN_COLLECTIONS = [
     "sales_goals",
     # Snapshots de asignación de imágenes de catálogo (Rollback)
     "catalog_image_snapshots",
+    # Jornadas de la app de vendedores (inicio al login, cierre del día)
+    "jornadas",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.

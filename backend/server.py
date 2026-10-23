@@ -29,7 +29,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import httpx
 import platform
 
@@ -892,7 +892,11 @@ class SettingsInput(BaseModel):
     moneda: str = "MXN"
     precios_incluyen_iva: bool = False
     listas_precios_nombres: List[str] = Field(default_factory=lambda: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"])
-    listas_precios_pct: List[float] = Field(default_factory=lambda: [40, 30, 20, 15, 10])
+    # % de utilidad sobre costo por lista (antes de IVA). Referencia B90:
+    # costo 29.63 -> 50% $48, 40% $45, 30% $42 con IVA.
+    listas_precios_pct: List[float] = Field(default_factory=lambda: [50, 40, 30, 20, 15])
+    # Redondeo del precio final con IVA: arriba_peso | arriba_50 | cercano_peso | ninguno.
+    redondeo_precios: str = "arriba_peso"
     unidades_medida: List[str] = Field(default_factory=lambda: list(UNIDADES_DEFAULT))
     logo_url: Optional[str] = ""
     ticket_config: dict = Field(default_factory=dict)
@@ -1144,6 +1148,73 @@ async def refresh_session(response: Response, request: Request):
     await store_refresh_token(new_refresh, user["id"], token_version)
     set_auth_cookies(response, access, new_refresh)
     return {"token": access}
+
+
+# =========================================================================
+# JORNADA DE LA APP DE VENDEDORES
+# El vendedor inicia sesión una vez al día: la sesión dura hasta las 23:59
+# (hora del centro de México, UTC-6 sin horario de verano) y no vuelve a pedir
+# contraseña. Al "Cerrar jornada" se registra el cierre y se invalida el token
+# (token_version), con lo que la app deja de poder enviar ubicación.
+# =========================================================================
+ROLES_APP_VENDEDORES = {"vendedor", "vendedor_campo"}
+_TZ_MX = timezone(timedelta(hours=-6))
+
+
+def _fin_de_jornada(ahora: datetime) -> datetime:
+    local = ahora.astimezone(_TZ_MX)
+    return local.replace(hour=23, minute=59, second=59, microsecond=0).astimezone(timezone.utc)
+
+
+def _jornada_publica(j: dict) -> dict:
+    return {k: j.get(k) for k in ("id", "inicio", "vence", "fin", "estado")}
+
+
+@api.post("/auth/login-movil")
+async def login_movil(data: LoginInput, response: Response, request: Request):
+    """Login de la app de vendedores: mismas validaciones y bloqueos que
+    /auth/login, pero el token vale hasta el fin del día y abre la jornada."""
+    res = await login(data, response, request)
+    user = await db.users.find_one({"id": res["user"]["id"]}, {"_id": 0})
+    if (user.get("role") or "").lower() not in ROLES_APP_VENDEDORES:
+        raise HTTPException(403, "Esta aplicación es exclusiva para asesores y vendedores en campo.")
+    ahora = now_utc()
+    vence = _fin_de_jornada(ahora)
+    jornada = await db.jornadas.find_one(
+        {"vendedor_id": user["id"], "estado": "abierta", "vence": {"$gt": ahora.isoformat()}}, {"_id": 0})
+    if not jornada:
+        jornada = {
+            "id": uid(), "vendedor_id": user["id"], "vendedor_nombre": user.get("name", ""),
+            "inicio": ahora.isoformat(), "vence": vence.isoformat(), "fin": None, "estado": "abierta",
+            "dispositivo": (request.headers.get("user-agent") or "")[:200],
+        }
+        await db.jornadas.insert_one(dict(jornada))
+    ttl = max(600, int((vence - ahora).total_seconds()))
+    token = create_access_token(user["id"], user["email"], int(user.get("token_version", 0)), ttl_seconds=ttl)
+    await log_audit(user, "JORNADA_INICIO", "jornada", registro_id=jornada["id"])
+    return {"token": token, "user": res["user"], "jornada": _jornada_publica(jornada)}
+
+
+@api.get("/auth/jornada")
+async def jornada_actual(user: dict = Depends(get_current_user)):
+    j = await db.jornadas.find_one({"vendedor_id": user["id"], "estado": "abierta"}, {"_id": 0})
+    return _jornada_publica(j) if j else None
+
+
+@api.post("/auth/jornada/cerrar")
+async def cerrar_jornada(response: Response, user: dict = Depends(get_current_user)):
+    """Cierre del día: registra la hora de cierre y revoca las sesiones del
+    vendedor (la app ya no puede enviar ubicación con ese token)."""
+    fin = iso_now()
+    inicio_dia = now_utc().astimezone(_TZ_MX).replace(hour=0, minute=0, second=0, microsecond=0)
+    pings = await db.seller_locations.count_documents(
+        {"vendedor_id": user["id"], "fecha": {"$gte": inicio_dia.astimezone(timezone.utc).isoformat()}})
+    await db.jornadas.update_many({"vendedor_id": user["id"], "estado": "abierta"},
+                                  {"$set": {"estado": "cerrada", "fin": fin, "ubicaciones": pings}})
+    await db.users.update_one({"id": user["id"]}, {"$inc": {"token_version": 1}})
+    clear_auth_cookies(response)
+    await log_audit(user, "JORNADA_CIERRE", "jornada", registro_id=user["id"])
+    return {"ok": True, "fin": fin, "ubicaciones_hoy": pings}
 
 
 @api.post("/auth/logout")
@@ -2229,15 +2300,17 @@ async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = 
         flt, {"_id": 0, "id": 1, "codigo": 1, "sku": 1, "descripcion": 1,
               "clasificacion": 1, "categoria": 1, "imagen": 1, "IMAGEN": 1, "imagen_url": 1,
               "precios": 1, "existencia": 1, "unidad_medida": 1, "unimedida": 1,
-              "iva_tasa": 1, "impuesto": 1, "precio1": 1, "precio2": 1,
-              "precio_con_iva": 1, "precio_sin_iva": 1}).sort("descripcion", 1).to_list(5000)
+              "iva_tasa": 1, "impuesto": 1, "costo": 1}).sort("descripcion", 1).to_list(5000)
+    # Listas con la misma regla que el POS (moneycalc.precios_lista): precio
+    # NETO por lista (la app suma el IVA una vez) y con IVA ya redondeado.
+    # El costo solo se usa para calcular; no se devuelve.
+    cfg = await db.settings.find_one({"_id": "app"}) or {}
+    pct = cfg.get("listas_precios_pct") or None
+    modo = cfg.get("redondeo_precios") or "arriba_peso"
     out = []
     for d in docs:
-        precio = 0.0
-        try:
-            precio = float(d.get("precio_con_iva") or ((d.get("precios") or [{}])[0]).get("precio_con_iva") or d.get("precio1") or 0)
-        except Exception:
-            precio = 0.0
+        listas = moneycalc.precios_lista(d, pct, modo)
+        precio = listas[0]["precio"] if listas else 0.0
         out.append({
             "id": d.get("id"),
             "nombre": d.get("descripcion") or "",
@@ -2246,14 +2319,14 @@ async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = 
             "sku": d.get("codigo") or d.get("sku") or "",
             "categoria": d.get("clasificacion") or d.get("categoria") or "",
             "imagen": d.get("imagen") or d.get("IMAGEN") or d.get("imagen_url") or "",
-            "precio_publico": round(precio, 2),
-            "precio": round(precio, 2),
-            "precio1": float(d.get("precio1") or precio),
-            "precio2": float(d.get("precio2") or precio),
+            "precio_publico": listas[0]["precio_con_iva"] if listas else 0.0,
+            "precio": precio,
+            "precio1": precio,
+            "precio2": listas[1]["precio"] if len(listas) > 1 else precio,
             "existencia": round(float(d.get("existencia") or 0), 3),
             "unidad_medida": d.get("unidad_medida") or d.get("unimedida") or "PZA",
             "iva_tasa": float(d.get("iva_tasa") or d.get("impuesto") or 8.0),
-            "precios": d.get("precios") or [],
+            "precios": listas,
         })
     return out
 

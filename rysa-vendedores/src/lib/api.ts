@@ -7,8 +7,55 @@ export const API_URL = DEFAULT_PROD_URL;
 
 const TOKEN_STORAGE_KEY = "@rysa_auth_token";
 const USER_STORAGE_KEY = "@rysa_auth_user";
+const JORNADA_STORAGE_KEY = "@rysa_jornada";
 
 let inMemoryToken: string | null = null;
+
+// ── Jornada del día ─────────────────────────────────────────────────────────
+// El login de la app abre una jornada que vence a las 23:59 (hora de México).
+// Mientras esté vigente la app no vuelve a pedir contraseña.
+export interface Jornada {
+  id: string;
+  inicio: string;
+  vence: string;
+  fin?: string | null;
+  estado: string;
+}
+
+export async function setJornada(j: Jornada | null): Promise<void> {
+  if (j) await AsyncStorage.setItem(JORNADA_STORAGE_KEY, JSON.stringify(j));
+  else await AsyncStorage.removeItem(JORNADA_STORAGE_KEY);
+}
+
+export async function getJornada(): Promise<Jornada | null> {
+  try {
+    const raw = await AsyncStorage.getItem(JORNADA_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function jornadaVigente(j: Jornada | null): boolean {
+  return !!j && j.estado === 'abierta' && new Date(j.vence).getTime() > Date.now();
+}
+
+// Aviso de sesión terminada (token vencido o jornada cerrada en el servidor):
+// la app vuelve al login y deja de enviar ubicación.
+const sesionListeners = new Set<() => void>();
+
+export function onSesionTerminada(fn: () => void): () => void {
+  sesionListeners.add(fn);
+  return () => sesionListeners.delete(fn);
+}
+
+async function terminarSesionLocal(): Promise<void> {
+  await setAuthToken(null);
+  await setJornada(null);
+  sesionListeners.forEach((fn) => {
+    try { fn(); } catch {}
+  });
+}
 
 export async function getBaseUrl(): Promise<string> {
   return DEFAULT_PROD_URL;
@@ -124,6 +171,10 @@ export async function apiFetch<T = any>(
     clearTimeout(timeoutId);
 
     const data = await response.json().catch(() => null);
+
+    if (response.status === 401 && token && !endpoint.startsWith('/auth/login')) {
+      await terminarSesionLocal();
+    }
 
     if (!response.ok) {
       const errMsg = formatApiError(data?.detail) || data?.message || `Error de servidor (${response.status})`;

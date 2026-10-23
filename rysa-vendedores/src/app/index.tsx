@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   RefreshControl,
   SafeAreaView,
@@ -22,7 +23,30 @@ import { syncManager } from '@/services/syncManager';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { user, logout } = useAuth();
+  const { user, cerrarJornada } = useAuth();
+  const [cerrando, setCerrando] = useState(false);
+
+  // Cierre del día: deja de enviar ubicación y mañana pedirá contraseña.
+  const confirmarCierre = () => {
+    Alert.alert(
+      'Cerrar jornada',
+      'Se dejará de enviar tu ubicación y tendrás que iniciar sesión de nuevo en tu siguiente jornada.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Cerrar jornada',
+          style: 'destructive',
+          onPress: async () => {
+            setCerrando(true);
+            const r = await cerrarJornada();
+            if (!r.enServidor) {
+              Alert.alert('Jornada cerrada en el teléfono', 'No hubo conexión para avisar al servidor. Tu ubicación ya no se envía; tu sesión vence a las 23:59.');
+            }
+          },
+        },
+      ],
+    );
+  };
   const [dashboard, setDashboard] = useState<SellerDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -128,11 +152,14 @@ export default function HomeScreen() {
           </View>
           <TouchableOpacity
             style={styles.logoutButton}
-            onPress={logout}
+            onPress={confirmarCierre}
+            disabled={cerrando}
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Cerrar jornada"
           >
-            <MaterialIcons name="logout" size={20} color="#CBD5E0" />
+            {cerrando ? <ActivityIndicator size="small" color="#FFFFFF" /> : <MaterialIcons name="logout" size={18} color="#FFFFFF" />}
+            <Text style={styles.logoutText}>Cerrar jornada</Text>
           </TouchableOpacity>
         </View>
 
@@ -429,9 +456,18 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   logoutButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#CD0708',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderRadius: 8,
+  },
+  logoutText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   loadingContainer: {
     alignItems: 'center',

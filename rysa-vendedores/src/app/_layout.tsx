@@ -9,18 +9,17 @@ import { StatusBar } from 'react-native';
 import { AuthProvider, useAuth } from '@/auth/AuthContext';
 import { LoginScreen } from '@/components/LoginScreen';
 import AppTabs from '@/components/app-tabs';
+import { JornadaGuard } from '@/components/JornadaGuard';
 
-// IMPORTANTE: trackingService se importa para que su código de limpieza
-// (nivel de módulo) se ejecute al arrancar la app y detenga cualquier
-// LocationTaskService residual de versiones anteriores.
-// El tracking GPS NO se inicia aquí — solo se inicia desde la pantalla
-// de Visitas, que es el único contexto seguro para Android 12+.
+// Se importa al arrancar para que la tarea de ubicación de fondo quede
+// definida a nivel de módulo (requisito de expo-location / TaskManager).
 import '@/services/trackingService';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function MainContent() {
   const { user, loading, setUser } = useAuth();
+  const terminarSesion = React.useCallback(() => setUser(null), [setUser]);
 
   useEffect(() => {
     if (!loading) {
@@ -47,7 +46,13 @@ function MainContent() {
     return <LoginScreen onLoginSuccess={setUser} />;
   }
 
-  return <AppTabs />;
+  // Con sesión: la jornada mantiene el GPS activo hasta el cierre del día.
+  return (
+    <>
+      <JornadaGuard onSesionTerminada={terminarSesion} />
+      <AppTabs />
+    </>
+  );
 }
 
 export default function RootLayout() {

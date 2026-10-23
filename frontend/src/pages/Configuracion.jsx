@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { LISTAS_PCT_DEFAULT, MODOS_REDONDEO, REDONDEO_DEFAULT, redondearPrecio } from "@/lib/precios";
 import { api, formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +49,7 @@ export default function Configuracion() {
   const [importFile, setImportFile] = useState(null);
   const [importing, setImporting] = useState(false);
 
-  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: [40, 30, 20, 15, 10], logo_url: "", ticket_config: {}, storage: { backend: "local", upload_dir: "" }, printers: { lista: [], predeterminadas: {}, bridge_url: "" }, ...r.data, ticket_config: { tamano: "80mm", mostrar_rfc: true, mostrar_direccion: true, mostrar_telefono: true, encabezado: "", pie: "¡Gracias por su compra!", auto_print: false, ...(r.data?.ticket_config || {}) }, storage: { backend: "local", upload_dir: "", ...(r.data?.storage || {}) }, printers: { lista: [], predeterminadas: {}, bridge_url: "", ...(r.data?.printers || {}) } })).catch((e) => setSErr(formatApiError(e.response?.data?.detail))); }, []);
+  useEffect(() => { api.get("/settings").then((r) => setS({ sucursales: [], listas_precios_nombres: ["Precio 1", "Precio 2", "Precio 3", "Precio 4", "Precio 5"], listas_precios_pct: LISTAS_PCT_DEFAULT, logo_url: "", ticket_config: {}, storage: { backend: "local", upload_dir: "" }, printers: { lista: [], predeterminadas: {}, bridge_url: "" }, ...r.data, ticket_config: { tamano: "80mm", mostrar_rfc: true, mostrar_direccion: true, mostrar_telefono: true, encabezado: "", pie: "¡Gracias por su compra!", auto_print: false, ...(r.data?.ticket_config || {}) }, storage: { backend: "local", upload_dir: "", ...(r.data?.storage || {}) }, printers: { lista: [], predeterminadas: {}, bridge_url: "", ...(r.data?.printers || {}) } })).catch((e) => setSErr(formatApiError(e.response?.data?.detail))); }, []);
 
   const setStorage = (k, v) => setS((x) => ({ ...x, storage: { ...(x.storage || {}), [k]: v } }));
 
@@ -172,8 +173,8 @@ export default function Configuracion() {
     }
   };
   const setLista = (i, v) => setS((x) => ({ ...x, listas_precios_nombres: x.listas_precios_nombres.map((n, idx) => idx === i ? v : n) }));
-  const setListaPct = (i, v) => setS((x) => ({ ...x, listas_precios_pct: (x.listas_precios_pct || [40, 30, 20, 15, 10]).map((n, idx) => idx === i ? v : n) }));
-  const addLista = () => setS((x) => ({ ...x, listas_precios_nombres: [...(x.listas_precios_nombres || []), `Precio ${(x.listas_precios_nombres || []).length + 1}`], listas_precios_pct: [...(x.listas_precios_pct || [40, 30, 20, 15, 10]), 10] }));
+  const setListaPct = (i, v) => setS((x) => ({ ...x, listas_precios_pct: (x.listas_precios_pct || LISTAS_PCT_DEFAULT).map((n, idx) => idx === i ? v : n) }));
+  const addLista = () => setS((x) => ({ ...x, listas_precios_nombres: [...(x.listas_precios_nombres || []), `Precio ${(x.listas_precios_nombres || []).length + 1}`], listas_precios_pct: [...(x.listas_precios_pct || LISTAS_PCT_DEFAULT), 10] }));
   const delLista = (i) => setS((x) => ({ ...x, listas_precios_nombres: x.listas_precios_nombres.filter((_, idx) => idx !== i), listas_precios_pct: x.listas_precios_pct.filter((_, idx) => idx !== i) }));
   const setSuc = (i, k, v) => setS((x) => ({ ...x, sucursales: x.sucursales.map((su, idx) => idx === i ? { ...su, [k]: v } : su) }));
   const addSuc = () => setS((x) => ({ ...x, sucursales: [...x.sucursales, { nombre: "", direccion: "", ciudad: "", estado: "", cp: "", telefono: "", activa: true }] }));
@@ -382,7 +383,36 @@ export default function Configuracion() {
                 ))}
                 <Button variant="outline" size="sm" onClick={addLista} className="h-7 text-[11px]" data-testid="cfg-lista-add"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar lista de precios</Button>
               </div>
-              <p className="text-[11px] text-slate-400 mt-2">El % define la utilidad sugerida de cada lista sobre el costo (referencia para nuevos precios).</p>
+              <p className="text-[11px] text-slate-400 mt-2">El % es la utilidad de cada lista sobre el costo, antes de IVA. Se usa en todos los productos que no tienen un precio capturado para esa lista; cada cliente compra con la lista que tenga asignada (Precio 1 por omisión).</p>
+            </div>
+
+            {/* Redondeo del precio final (con IVA) y ejemplo en vivo */}
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-slate-500 mb-2 block">Redondeo del precio con IVA</Label>
+              <select value={s.redondeo_precios || REDONDEO_DEFAULT} onChange={(e) => set("redondeo_precios", e.target.value)} data-testid="cfg-redondeo"
+                className="w-full h-10 rounded-md border border-slate-200 bg-white px-3 text-sm">
+                {Object.entries(MODOS_REDONDEO).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              {(() => {
+                const costo = 29.63, iva = Number(s.iva_tasa) || 8;
+                return (
+                  <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="cfg-precios-ejemplo">
+                    <div className="text-[11px] text-slate-500 mb-2">Ejemplo con costo ${costo.toFixed(2)} e IVA {iva}%:</div>
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                      {s.listas_precios_nombres.map((n, i) => {
+                        const pct = Number((s.listas_precios_pct || [])[i] ?? 0);
+                        const final = redondearPrecio(costo * (1 + pct / 100) * (1 + iva / 100), s.redondeo_precios || REDONDEO_DEFAULT);
+                        return (
+                          <div key={i} className="rounded bg-white p-2 text-center">
+                            <div className="truncate text-[11px] text-slate-500">{n || `Precio ${i + 1}`} · {pct}%</div>
+                            <div className="font-display font-bold text-carbon-900">${final.toFixed(2)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Unidades de medida */}
