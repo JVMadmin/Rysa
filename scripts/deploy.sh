@@ -113,13 +113,15 @@ if [[ "${ENVIRONMENT:-development}" == "production" ]]; then
     exit 1
   fi
   ok "DATABASE_URL apunta a rysa_prod (producción)"
-  # Herramientas destructivas / migración legacy apagadas en producción.
+  # Herramientas destructivas apagadas en producción.
   case "${DEVELOPER_MODE:-}" in
     false|0|off|no) ;;
     *) err "DEVELOPER_MODE debe ser 'false' en producción (actual: '${DEVELOPER_MODE:-<vacío>}')"; exit 1 ;;
   esac
+  # La migración legacy SÍ se usa en producción (rol admin_desarrollador +
+  # frase de confirmación + lote reversible). Solo se avisa para no olvidarla.
   if [[ "${LEGACY_MIGRATION_ENABLED:-false}" == "true" ]]; then
-    err "LEGACY_MIGRATION_ENABLED=true en producción; ponlo en false"; exit 1
+    log "AVISO: LEGACY_MIGRATION_ENABLED=true (importación legacy disponible); apágalo al terminar la migración"
   fi
   # El stack nunca se publica fuera de loopback (el nginx del host da TLS).
   if [[ "${NGINX_BIND:-127.0.0.1}" != "127.0.0.1" ]]; then
