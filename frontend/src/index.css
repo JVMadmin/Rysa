@@ -230,6 +230,30 @@ html.erp-densidad { font-size: 87.5%; }
 .marquesina-giro { display: flex; width: max-content; animation: marquesina 46s linear infinite; }
 .marquesina-giro.reversa { animation-direction: reverse; }
 @media (prefers-reduced-motion: reduce) { .marquesina-giro { animation: none; } }
+/* Botón flotante de WhatsApp: esfera 3D en reposo, píldora con texto al activarse */
+.wa-flotante { -webkit-tap-highlight-color: transparent; }
+.wa-flota { animation: wa-flotar 3.2s ease-in-out infinite; }
+.wa-boton {
+  background: radial-gradient(circle at 32% 26%, #6ef39a 0%, #2bd468 38%, #1aa851 72%, #128c44 100%);
+  box-shadow: inset 0 3px 6px rgba(255,255,255,0.45), inset 0 -5px 10px rgba(0,0,0,0.22),
+              0 10px 22px -6px rgba(18,140,68,0.65), 0 4px 8px rgba(0,0,0,0.18);
+  transform-origin: right center;
+  transition: transform 0.35s var(--ease-out, ease), box-shadow 0.35s ease;
+}
+.wa-texto { max-width: 0; opacity: 0; transition: max-width 0.4s ease, opacity 0.3s ease, padding 0.4s ease; }
+.wa-flotante:hover .wa-flota, .wa-flotante:focus-visible .wa-flota, .wa-flotante[data-abierto] .wa-flota { animation-play-state: paused; }
+.wa-flotante:hover .wa-boton, .wa-flotante:focus-visible .wa-boton, .wa-flotante[data-abierto] .wa-boton {
+  transform: scale(1.12);
+  box-shadow: inset 0 3px 6px rgba(255,255,255,0.45), inset 0 -5px 10px rgba(0,0,0,0.22),
+              0 16px 30px -8px rgba(18,140,68,0.75), 0 6px 12px rgba(0,0,0,0.2);
+}
+.wa-flotante:hover .wa-texto, .wa-flotante:focus-visible .wa-texto, .wa-flotante[data-abierto] .wa-texto {
+  max-width: 8rem; opacity: 1; padding-right: 1.25rem;
+}
+.wa-flotante:focus-visible { outline: none; }
+.wa-flotante:focus-visible .wa-boton { outline: 3px solid #fff; outline-offset: 2px; }
+@keyframes wa-flotar { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .wa-flota { animation: none; } }
 
 /* ---- Mapas (Leaflet) ---------------------------------------------------- */
 /* Contenedor acotado: evita que los paneles de Leaflet tapen menús/modales. */
