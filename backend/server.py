@@ -7425,8 +7425,9 @@ async def autofactura_ticket(data: AutofacturaTicket, request: Request):
     return {
         "folio": sale.get("folio"), "fecha": sale.get("fecha"), "total": sale.get("total"),
         "subtotal": sale.get("subtotal"), "iva": sale.get("iva_total"),
+        # Importe con IVA (el precio de la partida ya lo incluye), para que sume al total.
         "items": [{"descripcion": i.get("descripcion"), "cantidad": i.get("cantidad"),
-                   "importe": i.get("importe", float(i.get("cantidad", 0)) * float(i.get("precio", 0)))}
+                   "importe": round(float(i.get("cantidad", 0)) * (float(i.get("precio", 0)) - float(i.get("descuento", 0) or 0)), 2)}
                   for i in sale.get("items", [])],
         "facturado": bool(sale.get("facturado")),
         "cfdi": {"id": cfdi["id"], "uuid": cfdi.get("uuid"), "rfc": cfdi.get("rfc")} if cfdi else None,

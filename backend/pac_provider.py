@@ -226,13 +226,16 @@ async def crear_factura(sale, cliente, cfg, receptor=None):
     Devuelve {id, uuid, serie, folio, total}."""
     payload = _payload_factura(sale, cliente, cfg, receptor)
     result = await _request(cfg, "POST", PATH_CREAR, json=payload)
-    if not isinstance(result, dict) or result.get("__raw__"):
-        return {"id": None, "uuid": None, "serie": payload.get("serie"),
-                "folio": None, "total": sale.get("total"), "raw": result}
+    uuid_ = result.get("uuid") or result.get("Uuid") if isinstance(result, dict) else None
+    if not isinstance(result, dict) or result.get("__raw__") or not uuid_:
+        # Sin folio fiscal no hay factura: no se debe marcar la venta como facturada
+        # (p. ej. la URL de Facty responde una página web en lugar de la API).
+        raise HTTPException(502, "Facty no devolvió el folio fiscal (UUID); la factura no se timbró. "
+                            "Revisa la URL y la API Key de Facty en Configuración → Facturación.")
     fid = result.get("id") or result.get("Id")
     return {
         "id": fid,
-        "uuid": result.get("uuid") or result.get("Uuid"),
+        "uuid": uuid_,
         "serie": result.get("serie") or result.get("Serie") or payload.get("serie"),
         "folio": result.get("folio") or result.get("Folio"),
         "total": result.get("total", sale.get("total")),

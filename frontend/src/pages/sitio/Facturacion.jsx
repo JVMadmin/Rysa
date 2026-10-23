@@ -184,7 +184,7 @@ export default function Facturacion() {
                     <div className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
                       <div>
                         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Ticket {venta.folio}</div>
-                        <div className="mt-1 text-sm text-slate-600">{(venta.fecha || "").slice(0, 10)} · {venta.items.length} artículo{venta.items.length === 1 ? "" : "s"}</div>
+                        <div className="mt-1 text-sm text-slate-600">{venta.fecha ? new Date(venta.fecha).toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" }) : ""} · {venta.items.length} artículo{venta.items.length === 1 ? "" : "s"}</div>
                       </div>
                       <div className="font-display text-3xl font-bold text-carbon-900">{money(venta.total)}</div>
                     </div>
@@ -196,7 +196,7 @@ export default function Facturacion() {
                     ) : (
                       <form onSubmit={emitir} className="mt-7 grid gap-5 sm:grid-cols-2">
                         <Campo label="RFC" ayuda="12 caracteres (empresa) o 13 (persona física)">
-                          <input required maxLength={13} value={fiscal.rfc} onChange={f("rfc")} className={`${CAMPO} font-display tracking-wider`} placeholder="XAXX010101000" autoComplete="off" data-testid="fact-rfc" />
+                          <input required maxLength={13} value={fiscal.rfc} onChange={f("rfc")} className={`${CAMPO} font-display tracking-wider`} placeholder="Como en tu Constancia" autoComplete="off" data-testid="fact-rfc" />
                         </Campo>
                         <Campo label="Código postal fiscal" ayuda="El de tu Constancia de Situación Fiscal">
                           <input required inputMode="numeric" maxLength={5} value={fiscal.cp} onChange={(e) => setFiscal({ ...fiscal, cp: e.target.value.replace(/\D/g, "") })} className={CAMPO} placeholder="86000" data-testid="fact-cp" />
