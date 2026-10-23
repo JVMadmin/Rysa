@@ -7,7 +7,7 @@ export const MARCAS_SITIO = [
   { slug: "chiaplast", nombre: "Chiaplast", logo: "/brand/marcas/chiaplast.webp" },
   { slug: "aguirey", nombre: "Aguirey" },
   { slug: "politab", nombre: "Politab" },
-  { slug: "primo", nombre: "PRIMO" },
+  { slug: "primo", nombre: "PRIMO", logo: "/brand/marcas/primo.webp" },
   { slug: "dinastia", nombre: "Dinastía" },
   { slug: "garduno", nombre: "Garduño" },
   { slug: "serviplastic", nombre: "Serviplastic" },
