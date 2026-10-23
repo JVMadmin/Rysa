@@ -55,11 +55,34 @@ def _descargar(url: str) -> bytes:
     return data
 
 
+def _encuadrar(im):
+    """Recorta el fondo liso (el color de la esquina), centra el producto y lo
+    deja cuadrado con margen. Hay catálogos (REYMA) con el producto chico en
+    una esquina de un lienzo blanco: en la ficha solo se veía blanco."""
+    from PIL import Image, ImageChops
+    fondo = im.getpixel((0, 0))
+    mascara = ImageChops.difference(im, Image.new("RGB", im.size, fondo)).convert("L").point(lambda v: 255 if v > 18 else 0)
+    caja = mascara.getbbox()
+    if caja:
+        im = im.crop(caja)
+    lado = int(max(im.size) * 1.18)
+    lienzo = Image.new("RGB", (lado, lado), fondo)
+    lienzo.paste(im, ((lado - im.width) // 2, (lado - im.height) // 2))
+    return lienzo
+
+
 def _a_webp(data: bytes) -> bytes:
     from PIL import Image
     im = Image.open(io.BytesIO(data))
     im.verify()  # descarta archivos que no son imagen
-    im = Image.open(io.BytesIO(data)).convert("RGB")
+    im = Image.open(io.BytesIO(data))
+    if im.mode in ("RGBA", "LA", "P"):
+        # Transparencia sobre blanco (convert("RGB") la volvía negra).
+        im = im.convert("RGBA")
+        blanco = Image.new("RGBA", im.size, (255, 255, 255, 255))
+        blanco.alpha_composite(im)
+        im = blanco
+    im = _encuadrar(im.convert("RGB"))
     im.thumbnail((1000, 1000))
     out = io.BytesIO()
     im.save(out, "WEBP", quality=82, method=6)
