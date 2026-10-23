@@ -50,23 +50,32 @@ const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva 
   const principal = incluyeIva ? conIva : neto;
   const secundario = incluyeIva ? neto : conIva;
   const etiqueta = incluyeIva ? "sin IVA" : "con IVA";
+  const foto = fotoProducto(p.imagen_url);
+  // Foto cuadrada del alto de la tarjeta a la izquierda; código, nombre y
+  // precio a la derecha con letra legible.
   return (
   <div className="relative">
     <button onClick={onAdd} data-testid={`pos-prod-${p.codigo}`}
-      className="w-full text-left border border-slate-200 rounded-md p-2 hover:border-brand-600 hover:bg-slate-50 transition-colors">
-      {fotoProducto(p.imagen_url) && <img src={fotoProducto(p.imagen_url)} alt="" className="h-10 w-10 object-contain mb-1 mx-auto" />}
-      <div className="text-[10px] text-slate-400 truncate">{p.codigo}</div>
-      <div className="text-xs font-medium line-clamp-2 h-7">{p.descripcion}</div>
-      <div className="flex items-center justify-between mt-0.5">
-        <div>
-          <span className="font-display font-bold text-brand-600 text-xs">{money(principal)}</span>
-          <span className="text-[9px] text-slate-400 ml-0.5">({etiqueta} {money(secundario)})</span>
-        </div>
-        <span className="flex items-center gap-0.5">
-          {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="text-[9px] text-amber-600 border-amber-300 h-4 leading-none">{p.vendidas}</Badge>}
-          <Badge variant="outline" className={`text-[11px] h-5 leading-none px-1.5 font-bold ${PRODUCT_EX_CLS(p.existencia)}`} data-testid={`pos-ex-${p.codigo}`}>{p.existencia}</Badge>
+      className="flex w-full items-stretch gap-2.5 overflow-hidden text-left border border-slate-200 rounded-md hover:border-brand-600 hover:bg-slate-50 transition-colors">
+      <span className="flex w-[88px] shrink-0 items-center justify-center self-stretch border-r border-slate-100 bg-white">
+        {foto
+          ? <img src={foto} alt="" loading="lazy" className="aspect-square h-full w-full object-contain p-1" />
+          : <Package className="h-8 w-8 text-slate-300" />}
+      </span>
+      <span className="flex min-h-[88px] min-w-0 flex-1 flex-col justify-between py-2 pr-2">
+        <span className="block pr-5 text-[11px] font-medium tracking-wide text-slate-500 truncate">{p.codigo}</span>
+        <span className="block text-[13px] font-semibold leading-snug text-slate-800 line-clamp-2">{p.descripcion}</span>
+        <span className="mt-1 flex items-end justify-between gap-2">
+          <span className="min-w-0">
+            <span className="block font-display text-[15px] font-bold leading-tight text-brand-600">{money(principal)}</span>
+            <span className="block text-[11px] text-slate-500">{etiqueta} {money(secundario)}</span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1">
+            {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 h-5 leading-none">{p.vendidas}</Badge>}
+            <Badge variant="outline" className={`text-xs h-6 leading-none px-2 font-bold ${PRODUCT_EX_CLS(p.existencia)}`} data-testid={`pos-ex-${p.codigo}`}>{p.existencia}</Badge>
+          </span>
         </span>
-      </div>
+      </span>
     </button>
     <button onClick={onFav} title={isFav ? "Quitar de favoritos" : "Agregar a favoritos"} data-testid={`pos-fav-${p.codigo}`}
       className="absolute top-0.5 right-0.5 p-0.5 text-slate-300 hover:text-amber-400 transition-colors">
