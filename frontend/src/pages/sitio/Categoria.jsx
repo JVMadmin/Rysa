@@ -1,20 +1,26 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowLeft, Mail, MessageCircle } from "lucide-react";
 import SitioLayout, { BOTON_CONTORNO_CLARO, BOTON_PRIMARIO, cotizarUrl, useContacto } from "@/components/sitio/SitioLayout";
 import TarjetaFlip from "@/components/sitio/TarjetaFlip";
+import CatalogoProductos from "@/components/sitio/CatalogoProductos";
 import { Cortina, EASE, Elemento, Escalonar, Regla, Revelar, TitularPalabras } from "@/components/sitio/motion";
 import { CATEGORIAS, aproximado, porSlug } from "@/data/categorias";
+import { MARCAS_SITIO } from "@/data/marcas";
+import { api } from "@/lib/api";
 
 export default function Categoria() {
   const { slug } = useParams();
   const cat = porSlug(slug);
   const c = useContacto();
+  const [datos, setDatos] = useState(null);
 
   useEffect(() => {
     if (cat) document.title = `${cat.nombre} — Grupo RYSA`;
     window.scrollTo(0, 0);
+    setDatos(null);
+    if (cat) api.get(`/publico/categorias/${cat.slug}`).then((r) => setDatos(r.data)).catch(() => setDatos({ productos: [], marcas: [] }));
   }, [cat]);
 
   if (!cat) return <Navigate to="/productos" replace />;
@@ -80,7 +86,14 @@ export default function Categoria() {
               <Revelar delay={0.1} className="border-t border-carbon-900 pt-6">
                 <h2 className="text-xs uppercase tracking-[0.2em] text-slate-500">Marcas en esta categoría</h2>
                 <ul className="mt-5 flex flex-wrap gap-x-6 gap-y-2">
-                  {cat.marcas.map((m) => <li key={m} className="titular-fino text-[1.35rem] text-carbon-900">{m}</li>)}
+                  {cat.marcas.map((m) => {
+                    const ficha = MARCAS_SITIO.find((x) => x.nombre.toUpperCase() === m.toUpperCase());
+                    return (
+                      <li key={m} className="titular-fino text-[1.35rem] text-carbon-900">
+                        {ficha ? <Link to={`/productos/marca/${ficha.slug}`} className="underline-offset-4 transition-colors hover:text-brand-600 hover:underline">{m}</Link> : m}
+                      </li>
+                    );
+                  })}
                 </ul>
               </Revelar>
             )}
@@ -88,6 +101,19 @@ export default function Categoria() {
               <Cortina src={cat.imagenSecundaria} alt={cat.imagenSecundariaAlt} loading="lazy" desde="abajo" className="aspect-[4/3] rounded-sm" />
             )}
           </aside>
+        </div>
+      </section>
+
+      <section aria-labelledby="productos-titulo" className="border-t border-slate-200 bg-white">
+        <div className="mx-auto max-w-[1240px] px-5 py-16 sm:px-8 sm:py-20">
+          <Revelar as="h2" id="productos-titulo" className="titular-fino text-[1.9rem] sm:text-[2.3rem]">Productos de {cat.corto.toLowerCase()}</Revelar>
+          <div className="mt-8">
+            <CatalogoProductos productos={datos?.productos} nombre={cat.corto} marcas={datos?.marcas || []} mostrarMarca />
+          </div>
+          <p className="mt-10 max-w-3xl text-xs leading-5 text-slate-500">
+            Precios de Grupo RYSA con IVA incluido, sujetos a cambio y a disponibilidad. Precio de mayoreo disponible para negocios.
+            Las imágenes marcadas como ilustrativas son de productos de la misma familia.
+          </p>
         </div>
       </section>
 

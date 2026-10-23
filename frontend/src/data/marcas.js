@@ -16,6 +16,9 @@ export const MARCAS_SITIO = [
   { slug: "poliplast", nombre: "Poliplast" },
   { slug: "coplasur", nombre: "Coplasur" },
   { slug: "tarasquito", nombre: "Tarasquito" },
+  { slug: "banaplastic", nombre: "Banaplastic" },
+  { slug: "anguiplast", nombre: "Anguiplast" },
+  { slug: "truper", nombre: "Truper" },
 ];
 
 export const marcaPorSlug = (slug) => MARCAS_SITIO.find((m) => m.slug === slug);

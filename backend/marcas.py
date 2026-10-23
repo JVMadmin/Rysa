@@ -51,7 +51,41 @@ MARCAS = [
      "resumen": "Bolsas plásticas.", "sitio": "", "catalogo": ""},
     {"slug": "tarasquito", "nombre": "Tarasquito", "lineas": ["TARASQUITO"],
      "resumen": "Desechables.", "sitio": "", "catalogo": ""},
+    {"slug": "banaplastic", "nombre": "Banaplastic", "lineas": ["BANAPLASTIC"],
+     "resumen": "Bolsas plásticas.", "sitio": "", "catalogo": ""},
+    {"slug": "anguiplast", "nombre": "Anguiplast", "lineas": ["ANGUIPLAST"],
+     "resumen": "Artículos plásticos.", "sitio": "", "catalogo": ""},
+    {"slug": "truper", "nombre": "Truper", "lineas": ["TRUPER"],
+     "resumen": "Herramienta para el campo y la ferretería: machetes, limas, piedras para afilar.",
+     "sitio": "https://www.truper.com", "catalogo": ""},
 ]
+
+# Muchos productos no tienen la marca en `linea` pero sí en la descripción
+# ("ROLLO NATURAL REYMA 18 X 26"): se reconoce por palabra completa.
+_MARCA_EN_TEXTO = [(m["slug"], re.compile(r"\b(" + "|".join(re.escape(l) for l in m["lineas"]) + r")\b"))
+                   for m in MARCAS]
+
+# Categorías del sitio (mismos slugs que frontend/src/data/categorias.js). El
+# ERP no guarda la familia del producto, así que se deduce de la descripción;
+# gana la primera regla que coincide. Abarrotes y bebidas no se publican.
+CATEGORIAS = [
+    ("reposteria", r"^(\d+(\.\d+)? X \d+.*(CENEFA|ADHESIVO|SELLO)|BASE\b|CENEFA|MOLDE|CAPACILLO|ADHESIVO|BROCHETA|PALILLO|VELA\b|COLORANTE|VAINILLA|GRENETINA|"
+                   r"PAPEL (CHINA|CREPE|ENCERADO|ESTRAZA|CEBOLLA|BLANCO|ALUMINIO)|ALUMINIO|CHAROLA DE ALUMINIO)|ALUMINIO|CAPACILLO"),
+    ("bolsas", r"^(BOLSA|ROLLO|ASA\b|CELOFAN|ZIP\b|VITAFILM|CLINGFILM|EMPLAYE|STRETCH|PELICULA|POLIBURBUJA)|POLISEDA|POLIPAPEL|CAMISETA"),
+    ("desechables", r"^(VASO|TAPA|CHAROLA|CONTENEDOR|CONT\b|MANTEL|BISAGRA|DOMO|PLATO|POPOTE|CUCHAR|TENEDOR|CUCHILLO|SERVILLETA|COPA|"
+                    r"ENVASE|CONO|ANFORA|CAJA PIZZA|CAJA PARA|PALITO|AGITADOR|SOUF|PORTAVASO|BOTELLA PET|BOTELLA \d)"),
+    ("limpieza", r"^(ESCOBA|TRAPEADOR|FIBRA|CEPILLO|JABON|DETERGENTE|LAVA|CLORO|PINO|SUAVIZANTE|GUANTE|MOP\b|RECOGEDOR|"
+                 r"JALADOR|ATOMIZADOR|DESENGRASANTE|AROMATIZANTE|FRANELA|JERGA|PAPEL HIGIENICO|PAPEL ROLLO|TOALLA|SANITAS|"
+                 r"CUBETA EXPRIMIDORA|PASTILLA|SACUDIDOR|MICROFIBRA|ESCOBETA|FABULOSO|SUAVITEL|CLORALEX)"),
+    ("recipientes", r"^(CUBETA|PALANGANA|TAMBO|BATEA|TINA\b|CANASTA|BOTE\b|BOTELLA|GARRAFA|GALON|HIELERA|BEBEDERO|JAULA|"
+                    r"EMBUDO|COLADOR|TABLA|PAVERA|MOLCAJETE|CESTO|HUACAL|JARRA|VITROLERO|ORGANIZADOR|CAJA ORGANIZADORA|"
+                    r"COMEDERO|CUBETAS|TINACO|BANDEJA|TAZON|RECIPIENTE|BOWL|ENSALADERA|TANQUE|JARDINERA|POLLERA|MESA\b)"),
+    ("ferreteria-campo", r"^(LONA|CINTA|CUERDA|MALLA|LIMA\b|FOCO|MORRAL|SOMBRERO|MACHETE|LAZO|CORDEL|TENSOR|COSTAL|MECAPAL|"
+                         r"PIEDRA|HILO|LIGA|PINZA|ENCENDEDOR|CERILLO|MANDIL|TENDEDERO|ACHA\b|HACHA|PILA|ENERGIZER|LLAVERO|"
+                         r"CANDADO|CLAVO|ALAMBRE|FUNDA|LINTERNA|NAVAJA|GUADAÑA|AZADON|PALA\b|RASTRILLO|RAFIA|AGUJA\b|PEGA\b|SOMBRILLA)|TRUPER"),
+]
+_CATEGORIAS_RX = [(slug, re.compile(rx)) for slug, rx in CATEGORIAS]
+CATEGORIA_SLUGS = {slug for slug, _ in CATEGORIAS}
 _POR_SLUG = {m["slug"]: m for m in MARCAS}
 
 # Fotos genéricas autoasignadas (no son del producto): no se publican.
@@ -72,6 +106,27 @@ def _linea(p: dict) -> str:
     return (p.get("linea") or "").strip().upper()
 
 
+def marca_de(p: dict) -> str:
+    """Slug de la marca: por `linea` o, si no la tiene, por la descripción."""
+    linea = _linea(p)
+    for m in MARCAS:
+        if linea in m["lineas"]:
+            return m["slug"]
+    desc = (p.get("descripcion") or "").upper()
+    for slug, rx in _MARCA_EN_TEXTO:
+        if rx.search(desc):
+            return slug
+    return ""
+
+
+def categoria_de(p: dict) -> str:
+    desc = re.sub(r"\s+", " ", (p.get("descripcion") or "").upper()).strip()
+    for slug, rx in _CATEGORIAS_RX:
+        if rx.search(desc):
+            return slug
+    return ""
+
+
 async def _activos(db) -> list:
     return await db.products.find({"estado": "activo"}, {
         "_id": 0, "id": 1, "codigo": 1, "descripcion": 1, "linea": 1, "unidad_medida": 1, "costo": 1,
@@ -87,6 +142,9 @@ def _publico(p: dict, pct, modo) -> dict:
         "precio": listas[0]["precio_con_iva"] if listas else 0.0,
         "imagen": _imagen(p),
         "imagen_fuente": fuente.get("origen") if _imagen(p) else "",
+        # Foto de otro producto de la misma familia (no es el artículo exacto).
+        "ilustrativa": bool(_imagen(p)) and str(fuente.get("origen") or "").startswith("familia"),
+        "marca": marca_de(p),
     }
 
 
@@ -96,10 +154,10 @@ def init(db):
         response.headers["Cache-Control"] = "public, max-age=600"
         conteo = {}
         for p in await _activos(db):
-            conteo[_linea(p)] = conteo.get(_linea(p), 0) + 1
+            conteo[marca_de(p)] = conteo.get(marca_de(p), 0) + 1
         out = []
         for m in MARCAS:
-            n = sum(conteo.get(l, 0) for l in m["lineas"])
+            n = conteo.get(m["slug"], 0)
             if n:
                 out.append({k: m[k] for k in ("slug", "nombre", "resumen", "sitio", "catalogo")} | {"productos": n})
         return out
@@ -111,8 +169,26 @@ def init(db):
             raise HTTPException(404, "Marca no encontrada")
         response.headers["Cache-Control"] = "public, max-age=300"
         pct, modo = await _config_precios(db)
-        prods = [_publico(p, pct, modo) for p in await _activos(db) if _linea(p) in m["lineas"]]
+        prods = [_publico(p, pct, modo) for p in await _activos(db) if marca_de(p) == slug]
         prods = [p for p in prods if p["precio"] > 0]
         return {k: m[k] for k in ("slug", "nombre", "resumen", "sitio", "catalogo")} | {"productos": prods}
+
+    @router.get("/categorias/{slug}")
+    async def categoria(slug: str, response: Response):
+        """Productos de una categoría del sitio con su marca (si se conoce) y
+        las marcas presentes, para filtrar en la página de la categoría."""
+        if slug not in CATEGORIA_SLUGS:
+            raise HTTPException(404, "Categoría no encontrada")
+        response.headers["Cache-Control"] = "public, max-age=300"
+        pct, modo = await _config_precios(db)
+        prods = [_publico(p, pct, modo) for p in await _activos(db) if categoria_de(p) == slug]
+        prods = [p for p in prods if p["precio"] > 0]
+        conteo = {}
+        for p in prods:
+            if p["marca"]:
+                conteo[p["marca"]] = conteo.get(p["marca"], 0) + 1
+        marcas = [{"slug": m["slug"], "nombre": m["nombre"], "productos": conteo[m["slug"]]}
+                  for m in MARCAS if m["slug"] in conteo]
+        return {"slug": slug, "productos": prods, "marcas": marcas}
 
     return router

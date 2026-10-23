@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowLeft, ExternalLink, FileText, MessageCircle, Search } from "lucide-react";
-import SitioLayout, { BOTON_CONTORNO_CLARO, cotizarUrl, useContacto } from "@/components/sitio/SitioLayout";
-import { EASE, Elemento, Escalonar, TitularPalabras } from "@/components/sitio/motion";
-import { api, fileUrl, money } from "@/lib/api";
+import { ArrowLeft, ExternalLink, FileText } from "lucide-react";
+import SitioLayout, { BOTON_CONTORNO_CLARO } from "@/components/sitio/SitioLayout";
+import CatalogoProductos from "@/components/sitio/CatalogoProductos";
+import { EASE, TitularPalabras } from "@/components/sitio/motion";
+import { api } from "@/lib/api";
 import { marcaPorSlug } from "@/data/marcas";
 
 // Catálogo de una marca: productos del inventario de Grupo RYSA con su precio
@@ -12,11 +13,9 @@ import { marcaPorSlug } from "@/data/marcas";
 // catálogo del fabricante cuando se identificó el producto.
 export default function Marca() {
   const { slug } = useParams();
-  const c = useContacto();
   const presentacion = marcaPorSlug(slug);
   const [datos, setDatos] = useState(null);
   const [error, setError] = useState("");
-  const [q, setQ] = useState("");
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -25,12 +24,6 @@ export default function Marca() {
       .then((r) => { setDatos(r.data); document.title = `${r.data.nombre} — Grupo RYSA`; })
       .catch(() => setError("No encontramos esta marca."));
   }, [slug]);
-
-  const productos = useMemo(() => {
-    const lista = datos?.productos || [];
-    const t = q.trim().toLowerCase();
-    return t ? lista.filter((p) => `${p.descripcion} ${p.codigo}`.toLowerCase().includes(t)) : lista;
-  }, [datos, q]);
 
   const nombre = datos?.nombre || presentacion?.nombre || "";
 
@@ -73,52 +66,12 @@ export default function Marca() {
         {error && <p className="text-slate-600">{error} <Link to="/productos" className="text-brand-600 underline">Ver productos</Link></p>}
         {!error && (
           <>
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <p className="text-sm text-slate-600">
-                {datos ? `${datos.productos.length} productos ${nombre} con precio Grupo RYSA` : "Cargando productos…"}
-              </p>
-              <label className="relative block w-full sm:w-80">
-                <span className="sr-only">Buscar en {nombre}</span>
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Buscar en ${nombre || "la marca"}`}
-                  className="h-11 w-full rounded-sm border border-slate-300 bg-white pl-9 pr-3 text-sm focus:border-carbon-900 focus:outline-none" />
-              </label>
-            </div>
-
-            <Escalonar as="ul" paso={0.03} className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4" key={`${slug}-${productos.length}`}>
-              {productos.map((p) => (
-                <Elemento as="li" key={p.id} y={16} className="group flex flex-col overflow-hidden rounded-sm border border-slate-200 bg-white transition-shadow hover:shadow-card-lg">
-                  <div className="relative flex aspect-square items-center justify-center bg-[#F6F5F2]">
-                    {p.imagen ? (
-                      <img src={fileUrl(p.imagen)} alt={p.descripcion} loading="lazy" decoding="async"
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                    ) : (
-                      <span className="titular-fino px-4 text-center text-[1.35rem] text-slate-400">{nombre}</span>
-                    )}
-                  </div>
-                  <div className="flex flex-1 flex-col p-4">
-                    <h3 className="text-[0.95rem] font-medium leading-snug text-carbon-900">{p.descripcion}</h3>
-                    <p className="mt-1 text-xs text-slate-500">{p.codigo} · {p.unidad}</p>
-                    <div className="mt-auto flex items-end justify-between gap-3 pt-4">
-                      <div>
-                        <div className="text-2xs uppercase tracking-[0.14em] text-slate-500">Precio con IVA</div>
-                        <div className="font-display text-xl font-bold text-carbon-900">{money(p.precio)}</div>
-                      </div>
-                      <a href={cotizarUrl(c, `${p.descripcion} (${p.codigo})`)} target={c.waUrl ? "_blank" : undefined} rel="noreferrer"
-                        className="inline-flex h-9 items-center gap-1.5 rounded-sm bg-brand-600 px-3 text-xs font-medium text-white transition-colors hover:bg-brand-700"
-                        aria-label={`Cotizar ${p.descripcion}`}>
-                        <MessageCircle className="h-3.5 w-3.5" /> Cotizar
-                      </a>
-                    </div>
-                  </div>
-                </Elemento>
-              ))}
-            </Escalonar>
+            <CatalogoProductos productos={datos?.productos} nombre={nombre} />
 
             {datos && (
               <p className="mt-10 max-w-3xl text-xs leading-5 text-slate-500">
                 Precios de Grupo RYSA con IVA incluido, por pieza o presentación indicada, sujetos a cambio y a disponibilidad.
-                Precio de mayoreo disponible para negocios. Las imágenes provienen del catálogo del fabricante y son ilustrativas.
+                Precio de mayoreo disponible para negocios. Las imágenes provienen del catálogo del fabricante o son de productos de la misma familia (ilustrativas).
                 {datos.sitio && <> Sitio del fabricante: <a href={datos.sitio} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline hover:text-carbon-900">{datos.sitio.replace(/^https?:\/\//, "")} <ExternalLink className="h-3 w-3" /></a>.</>}
               </p>
             )}
