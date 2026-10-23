@@ -352,21 +352,21 @@ export default function Ventas() {
       </div>
 
       <div className="card-soft overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50"><tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-            <th className="p-3 w-8">{can("venta.facturar") ? <input type="checkbox" checked={sel.length === facturables.length && facturables.length > 0} onChange={(e) => setSel(e.target.checked ? facturables.map((f) => f.id) : [])} data-testid="sel-todas" /> : null}</th>
+        <table className="w-full text-[18px] leading-snug">
+          <thead className="bg-slate-50"><tr className="text-left text-sm uppercase tracking-wider text-slate-500">
+            <th className="px-4 py-3.5 w-8">{can("venta.facturar") ? <input type="checkbox" className="h-5 w-5" checked={sel.length === facturables.length && facturables.length > 0} onChange={(e) => setSel(e.target.checked ? facturables.map((f) => f.id) : [])} data-testid="sel-todas" /> : null}</th>
             {[{ key: "estado", label: "Estado" }, { key: "folio", label: "Folio" }, { key: "fecha", label: "Fecha" }, { key: "cliente", label: "Cliente" }, { key: "vendedor", label: "Vendedor" }].map((col) => (
-              <th key={col.key} onClick={() => toggleSort(col.key)} className={`p-3 cursor-pointer select-none hover:text-brand-600 ${col.right ? "text-right" : "text-left"}`}>
+              <th key={col.key} onClick={() => toggleSort(col.key)} className={`px-4 py-3.5 cursor-pointer select-none hover:text-brand-600 ${col.right ? "text-right" : "text-left"}`}>
                 <span className={`inline-flex items-center gap-1 ${col.right ? "flex-row-reverse" : ""}`}>
                   {col.label}
                   {sort.key === col.key ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
                 </span>
               </th>
             ))}
-            <th className="p-3 text-right cursor-pointer select-none hover:text-brand-600" onClick={() => toggleSort("total")}>
+            <th className="px-4 py-3.5 text-right cursor-pointer select-none hover:text-brand-600" onClick={() => toggleSort("total")}>
               <span className="inline-flex items-center gap-1 flex-row-reverse">Total {sort.key === "total" ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-30" />}</span>
             </th>
-            <th className="p-3">Cond.</th><th className="p-3 text-center">Factura</th><th className="p-3"></th>
+            <th className="px-4 py-3.5">Cond.</th><th className="px-4 py-3.5 text-center">Factura</th><th className="px-4 py-3.5"></th>
           </tr></thead>
           <tbody>
             {loading && <tr><td colSpan={10} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
@@ -376,21 +376,21 @@ export default function Ventas() {
               const facturable = s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion" && !legacy;
               return (
               <tr key={s.id} className={`border-t border-slate-100 hover:bg-slate-50 ${s._abono ? "bg-blue-50/40" : ""}`} data-testid={`venta-row-${s.folio}`}>
-                <td className="p-3">{can("venta.facturar") && facturable ? <input type="checkbox" checked={sel.includes(s.id)} onChange={() => toggleSel(s.id)} data-testid={`sel-${s.folio}`} /> : null}</td>
-                <td className="p-3">
+                <td className="px-4 py-3.5">{can("venta.facturar") && facturable ? <input type="checkbox" className="h-5 w-5" checked={sel.includes(s.id)} onChange={() => toggleSel(s.id)} data-testid={`sel-${s.folio}`} /> : null}</td>
+                <td className="px-4 py-3.5">
                   {s._abono
                     ? <Badge className="bg-blue-100 text-blue-700">Abono a cuenta</Badge>
                     : <Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : s.estado === "cotizacion" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge>}
                   {legacy && <Badge className="ml-1 bg-brand-600 text-white">LEGACY</Badge>}
                 </td>
-                <td className="p-3 font-medium text-brand-600">{s.folio}</td>
-                <td className="p-3 text-slate-500">{s.fecha?.slice(0, 10)} {s.hora}</td>
-                <td className="p-3">{s.cliente_nombre}</td>
-                <td className="p-3 text-slate-500" data-testid={`venta-vendedor-${s.folio}`}>{s.vendedor_nombre || s.usuario_nombre}</td>
-                <td className="p-3 text-right font-semibold">{money(s.total)}</td>
-                <td className="p-3"><Badge variant="outline">{s.condicion}</Badge></td>
-                <td className="p-3 text-center">{s.facturado ? <Badge className="bg-emerald-100 text-emerald-700">Facturada</Badge> : <span className="text-slate-300 text-xs">—</span>}</td>
-                <td className="p-3">
+                <td className="px-4 py-3.5 font-medium text-brand-600">{s.folio}</td>
+                <td className="px-4 py-3.5 text-slate-500">{s.fecha?.slice(0, 10)} {s.hora}</td>
+                <td className="px-4 py-3.5">{s.cliente_nombre}</td>
+                <td className="px-4 py-3.5 text-slate-500" data-testid={`venta-vendedor-${s.folio}`}>{s.vendedor_nombre || s.usuario_nombre}</td>
+                <td className="px-4 py-3.5 text-right text-[20px] font-bold tabular-nums">{money(s.total)}</td>
+                <td className="px-4 py-3.5"><Badge variant="outline" className="text-sm">{s.condicion}</Badge></td>
+                <td className="px-4 py-3.5 text-center">{s.facturado ? <Badge className="bg-emerald-100 text-emerald-700 text-sm">Facturada</Badge> : <span className="text-slate-300 text-xs">—</span>}</td>
+                <td className="px-4 py-3.5">
                   <div className="flex gap-1 justify-end">
                     <Button size="icon" variant="ghost" onClick={() => setDetalle(s)} data-testid={`ver-${s.folio}`}><Eye className="w-4 h-4" /></Button>
                     {!s._abono && !legacy && <>
@@ -461,32 +461,32 @@ export default function Ventas() {
                 </div>
               )}
               <div className="text-slate-500 mb-2">{detalle.fecha?.slice(0, 16).replace("T", " ")} · Cliente: {detalle.cliente_nombre} · Vendedor: {detalle.vendedor_nombre || detalle.usuario_nombre}</div>
-              <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-xs text-slate-600">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-sm text-slate-600">
                 <span>Condición: <b>{detalle.condicion === "credito" ? "Crédito" : "Contado"}</b></span>
                 {sucursales.find((x) => x.id === detalle.sucursal_id)?.nombre && <span>Sucursal: <b>{sucursales.find((x) => x.id === detalle.sucursal_id).nombre}</b></span>}
                 {(detalle.pagos || []).length > 0 && <span>Pago: <b>{(detalle.pagos || []).map((p) => { const base = ({ efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", deposito: "Depósito", spei: "SPEI", otros: "Otro" })[p.metodo] || p.metodo; return p.metodo === "tarjeta" && p.card_type ? `${base} ${p.card_type === "debito" ? "Débito" : "Crédito"}` : base; }).join(" + ")}</b></span>}
                 {detalle.tipo_venta === "cotizacion" && <span className="text-amber-700"><b>Cotización</b></span>}
               </div>
-              <table className="w-full mb-3">
-                <thead><tr className="text-xs text-slate-400 text-left"><th>Cant</th><th>Und.</th><th>Producto</th><th className="text-right">Precio</th><th className="text-right">Desc.</th><th className="text-right">Importe</th></tr></thead>
+              <table className="w-full mb-3 text-[17px]">
+                <thead><tr className="text-sm text-slate-400 text-left"><th>Cant</th><th>Und.</th><th>Producto</th><th className="text-right">Precio</th><th className="text-right">Desc.</th><th className="text-right">Importe</th></tr></thead>
                 <tbody>{detalle.items.map((i, k) => (
                   <tr key={k} className="border-t border-slate-100">
-                    <td className="py-1">{i.cantidad}</td>
-                    <td className="py-1 text-slate-400">{i.unidad || "—"}</td>
-                    <td className="py-1">{i.descripcion}{i.codigo_legacy && i.codigo_legacy !== i.descripcion ? <span className="text-xs text-slate-400"> · Cod. {i.codigo_legacy}</span> : null}{i.comentario ? <span className="text-xs text-slate-400"> · {i.comentario}</span> : null}</td>
-                    <td className="py-1 text-right tabular-nums">{money(i.precio_bruto ?? i.precio)}</td>
-                    <td className="py-1 text-right tabular-nums text-slate-400">{i.descuento ? money(i.descuento) : "—"}</td>
-                    <td className="py-1 text-right font-medium tabular-nums">{money(i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0)))}</td>
+                    <td className="py-2">{i.cantidad}</td>
+                    <td className="py-2 text-slate-400">{i.unidad || "—"}</td>
+                    <td className="py-2">{i.descripcion}{i.codigo_legacy && i.codigo_legacy !== i.descripcion ? <span className="text-xs text-slate-400"> · Cod. {i.codigo_legacy}</span> : null}{i.comentario ? <span className="text-xs text-slate-400"> · {i.comentario}</span> : null}</td>
+                    <td className="py-2 text-right tabular-nums">{money(i.precio_bruto ?? i.precio)}</td>
+                    <td className="py-2 text-right tabular-nums text-slate-400">{i.descuento ? money(i.descuento) : "—"}</td>
+                    <td className="py-2 text-right font-medium tabular-nums">{money(i.importe_bruto ?? (i.cantidad * i.precio - (i.descuento || 0)))}</td>
                   </tr>
                 ))}</tbody>
               </table>
-              <div className="space-y-1 text-sm">
+              <div className="space-y-1.5 text-[17px]">
                 {detalle.descuento_total > 0 && <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{money(detalle.subtotal)}</span></div>}
                 {detalle.iva_total > 0 && <div className="flex justify-between text-slate-500"><span>IVA</span><span>{money(detalle.iva_total)}</span></div>}
                 {detalle.descuento_total > 0 && <div className="flex justify-between text-slate-500"><span>Descuento</span><span>-{money(detalle.descuento_total)}</span></div>}
                 <div className="flex justify-between font-bold text-lg pt-1 border-t border-slate-200"><span>Total</span><span>{money(detalle.total)}</span></div>
               </div>
-              {detalle.cambio > 0 && <div className="flex justify-end text-xs text-slate-500 mt-1">Cambio: {money(detalle.cambio)}</div>}
+              {detalle.cambio > 0 && <div className="flex justify-end text-sm text-slate-500 mt-1">Cambio: {money(detalle.cambio)}</div>}
               {detalle.cancelacion && <div className="mt-3 p-2 bg-red-50 text-red-700 rounded text-xs">Cancelada por {detalle.cancelacion.usuario}: {detalle.cancelacion.motivo}</div>}
             </div>
           )}

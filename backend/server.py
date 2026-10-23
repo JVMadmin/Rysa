@@ -2300,7 +2300,8 @@ async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = 
         flt, {"_id": 0, "id": 1, "codigo": 1, "sku": 1, "descripcion": 1,
               "clasificacion": 1, "categoria": 1, "imagen": 1, "IMAGEN": 1, "imagen_url": 1,
               "precios": 1, "existencia": 1, "unidad_medida": 1, "unimedida": 1,
-              "iva_tasa": 1, "impuesto": 1, "costo": 1}).sort("descripcion", 1).to_list(5000)
+              "iva_tasa": 1, "impuesto": 1, "costo": 1, "linea": 1}).sort("descripcion", 1).to_list(5000)
+    import marcas as _mc  # categoría y marca deducidas igual que en el sitio público
     # Listas con la misma regla que el POS (moneycalc.precios_lista): precio
     # NETO por lista (la app suma el IVA una vez) y con IVA ya redondeado.
     # El costo solo se usa para calcular; no se devuelve.
@@ -2318,6 +2319,8 @@ async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = 
             "codigo": d.get("codigo") or d.get("sku") or "",
             "sku": d.get("codigo") or d.get("sku") or "",
             "categoria": d.get("clasificacion") or d.get("categoria") or "",
+            "categoria_sitio": _mc.categoria_de(d),
+            "marca": _mc.marca_de(d),
             "imagen": d.get("imagen") or d.get("IMAGEN") or d.get("imagen_url") or "",
             "precio_publico": listas[0]["precio_con_iva"] if listas else 0.0,
             "precio": precio,

@@ -51,35 +51,34 @@ const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva 
   const secundario = incluyeIva ? neto : conIva;
   const etiqueta = incluyeIva ? "sin IVA" : "con IVA";
   const foto = fotoProducto(p.imagen_url);
-  // Foto cuadrada del alto de la tarjeta a la izquierda; código, nombre y
-  // precio a la derecha con letra legible.
+  // Caben 5 tarjetas por ventana: el alto sale del contenedor con scroll
+  // (container-type: size → 100cqh). Foto cuadrada del alto de la tarjeta a la
+  // izquierda; código, nombre, precio y existencia alineados a la derecha.
   return (
   <div className="relative">
     <button onClick={onAdd} data-testid={`pos-prod-${p.codigo}`}
-      className="flex w-full items-stretch gap-2.5 overflow-hidden text-left border border-slate-200 rounded-md hover:border-brand-600 hover:bg-slate-50 transition-colors">
-      <span className="flex w-[88px] shrink-0 items-center justify-center self-stretch border-r border-slate-100 bg-white">
+      className="flex h-[calc((100cqh-1.5rem)/5)] min-h-[104px] w-full items-stretch gap-3 overflow-hidden text-left border border-slate-200 rounded-md bg-white hover:border-brand-600 hover:bg-slate-50 transition-colors">
+      <span className="flex aspect-square h-full shrink-0 items-center justify-center border-r border-slate-100 bg-white">
         {foto
-          ? <img src={foto} alt="" loading="lazy" className="aspect-square h-full w-full object-contain p-1" />
-          : <Package className="h-8 w-8 text-slate-300" />}
+          ? <img src={foto} alt="" loading="lazy" className="h-full w-full object-contain p-1.5" />
+          : <Package className="h-10 w-10 text-slate-300" />}
       </span>
-      <span className="flex min-h-[88px] min-w-0 flex-1 flex-col justify-between py-2 pr-2">
-        <span className="block pr-5 text-[11px] font-medium tracking-wide text-slate-500 truncate">{p.codigo}</span>
-        <span className="block text-[13px] font-semibold leading-snug text-slate-800 line-clamp-2">{p.descripcion}</span>
-        <span className="mt-1 flex items-end justify-between gap-2">
-          <span className="min-w-0">
-            <span className="block font-display text-[15px] font-bold leading-tight text-brand-600">{money(principal)}</span>
-            <span className="block text-[11px] text-slate-500">{etiqueta} {money(secundario)}</span>
-          </span>
-          <span className="flex shrink-0 items-center gap-1">
-            {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300 h-5 leading-none">{p.vendidas}</Badge>}
-            <Badge variant="outline" className={`text-xs h-6 leading-none px-2 font-bold ${PRODUCT_EX_CLS(p.existencia)}`} data-testid={`pos-ex-${p.codigo}`}>{p.existencia}</Badge>
+      <span className="flex min-w-0 flex-1 flex-col items-end justify-between py-2 pr-3 text-right">
+        <span className="block max-w-full truncate pr-7 text-[15px] font-medium tracking-wide text-slate-500">{p.codigo}</span>
+        <span className="block text-[18px] font-semibold leading-tight text-slate-900 line-clamp-2">{p.descripcion}</span>
+        <span className="flex w-full items-end justify-end gap-3">
+          {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="mb-0.5 h-7 px-2 text-sm leading-none text-amber-600 border-amber-300">{p.vendidas} vend.</Badge>}
+          <Badge variant="outline" className={`mb-0.5 h-8 min-w-[2.75rem] justify-center px-2.5 text-base font-bold tabular-nums leading-none ${PRODUCT_EX_CLS(p.existencia)}`} data-testid={`pos-ex-${p.codigo}`}>{p.existencia}</Badge>
+          <span className="text-right">
+            <span className="block font-display text-[21px] font-bold leading-none tabular-nums text-brand-600">{money(principal)}</span>
+            <span className="mt-0.5 block text-sm tabular-nums text-slate-500">{etiqueta} {money(secundario)}</span>
           </span>
         </span>
       </span>
     </button>
     <button onClick={onFav} title={isFav ? "Quitar de favoritos" : "Agregar a favoritos"} data-testid={`pos-fav-${p.codigo}`}
-      className="absolute top-0.5 right-0.5 p-0.5 text-slate-300 hover:text-amber-400 transition-colors">
-      <Star className={`w-[15px] h-[15px] ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
+      className="absolute top-1 right-1 p-1 text-slate-300 hover:text-amber-400 transition-colors">
+      <Star className={`w-5 h-5 ${isFav ? "fill-amber-400 text-amber-400" : ""}`} />
     </button>
   </div>
   );
@@ -1254,7 +1253,7 @@ export default function POS({ windowId, windowLabel }) {
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto card-soft">
+        <div className="flex-1 overflow-y-auto card-soft [container-type:size]">
           {catLoading && !q ? (
             <div className="h-full flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-600" /></div>
           ) : q ? (
@@ -1264,7 +1263,7 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="mt-6 flex flex-wrap gap-2 justify-center text-xs text-slate-400">
                   <span className="flex items-center gap-1"><Keyboard className="w-3.5 h-3.5" /> Atajos:</span>
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F8</kbd> +cantidad</span>
-                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F9</kbd> âˆ’cantidad</span>
+                  <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F9</kbd> −cantidad</span>
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F7</kbd> verificar precio</span>
                   <span><kbd className="bg-slate-100 px-1.5 py-0.5 rounded">F6</kbd> precios del producto</span>
                 </div>
