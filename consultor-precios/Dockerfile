@@ -7,6 +7,10 @@ FROM node:20-alpine AS build
 WORKDIR /app
 
 # Args de entorno de build. Por defecto la API es relativa (mismo origen).
+# Subruta donde se publica (p. ej. /checador detrás del nginx de gruporysa.com).
+# Vacía = en la raíz del dominio/puerto.
+ARG PUBLIC_URL=""
+ENV PUBLIC_URL=$PUBLIC_URL
 ARG REACT_APP_PRICE_API_URL=""
 ARG REACT_APP_IMG_BASE=""
 ARG REACT_APP_SUCURSAL=""

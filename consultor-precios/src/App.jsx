@@ -188,7 +188,7 @@ export default function App() {
   return (
     <div className={"rysa-app" + (online ? "" : " rc-offline")}>
       <header className="rc-header">
-        <img src="/brand/logotipo-oscuro.webp" alt="Grupo RYSA" className="rc-logo" data-testid="logo" />
+        <img src={`${process.env.PUBLIC_URL}/brand/logotipo-oscuro.webp`} alt="Grupo RYSA" className="rc-logo" data-testid="logo" />
         <div className="rc-header-txt">
           <h1>Consultor de precios</h1>
           {SUCURSAL && <span>Sucursal {SUCURSAL}</span>}
