@@ -8211,6 +8211,10 @@ app.include_router(_autz.router)
 import marcas as _marcas  # noqa: E402
 app.include_router(_marcas.init(db))
 
+# Bandeja de correo (ventas@ y contacto@ por IMAP/SMTP de Hostinger).
+import correo as _correo  # noqa: E402
+app.include_router(_correo.router)
+
 # Configuración dinámica de CORS
 env = os.environ.get("ENVIRONMENT", "development").lower()
 cors_origins_env = os.environ.get("CORS_ORIGINS", "")

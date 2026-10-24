@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
   UserCog, ScrollText, LogOut, Menu, ChevronLeft, Settings, HandCoins, FileText, Stamp, BarChart3, Smartphone, Wrench,
   Search, ChevronDown, Radar, Route as RouteIcon, ShoppingBag, Truck, Images, ClipboardList, FileSignature, PieChart,
-  CreditCard, ShieldCheck, UserRound,
+  CreditCard, ShieldCheck, UserRound, Mail,
 } from "lucide-react";
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -40,6 +40,7 @@ const NAV = [
   { to: "/app/cotizaciones", label: "Cotizaciones", icon: FileSignature, perm: "venta.crear", section: "COMERCIAL" },
   { to: "/app/pedidos", label: "Pedidos", icon: ClipboardList, perm: "pedido.gestionar", section: "COMERCIAL" },
   { to: "/app/facturacion", label: "Facturación", icon: FileText, perm: "venta.facturar", section: "COMERCIAL" },
+  { to: "/app/correo", label: "Correo", icon: Mail, perm: "correo.ver", section: "COMERCIAL" },
 
   // FUERZA DE VENTAS · consolidada en 2 módulos por rol (regla 1):
   //   · Supervisión Comercial: solo admin/dueño/supervisor (supervision.ver)

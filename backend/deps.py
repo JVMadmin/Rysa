@@ -121,7 +121,7 @@ ROLE_PERMISSIONS = {
         "proveedor.ver", "proveedor.crear", "proveedor.editar",
         "compra.ver", "compra.crear", "compra.cancelar",
         "abono.ver", "abono.comprobante", "cuentas.ver",
-        "pedido.gestionar", "cxp.pagar",
+        "pedido.gestionar", "cxp.pagar", "correo.ver", "correo.enviar",
     },
     # VENDEDOR (piso): sucursal, caja física, POS, facturación, recargas y apoyo en campo.
     "vendedor": {
@@ -256,6 +256,11 @@ MODULES = {
     "autorizaciones": {
         "label": "Autorizar movimientos con código",
         "perms": {"autorizacion.otorgar"},
+    },
+    # Bandeja de ventas@ y contacto@ (correo.py): leer y responder.
+    "correo": {
+        "label": "Correo (ventas@ y contacto@)",
+        "perms": {"correo.ver", "correo.enviar"},
     },
 }
 

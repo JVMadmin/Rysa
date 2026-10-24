@@ -113,7 +113,7 @@ export default function Facturacion() {
       setVenta(r.data);
       if (r.data.facturado && r.data.cfdi) { setFactura({ cfdi_id: r.data.cfdi.id, uuid: r.data.cfdi.uuid, previa: true }); setPaso(2); }
       else setPaso(1);
-    } catch (err) { setError(formatApiError(err)); }
+    } catch (err) { setError(formatApiError(err?.response?.data?.detail)); }
     setOcupado(false);
   };
 
@@ -123,7 +123,7 @@ export default function Facturacion() {
     try {
       const r = await api.post("/publico/factura/emitir", { ...datosTicket(), folio: venta.folio, ...fiscal });
       setFactura(r.data); setPaso(2);
-    } catch (err) { setError(formatApiError(err)); }
+    } catch (err) { setError(formatApiError(err?.response?.data?.detail)); }
     setOcupado(false);
   };
 
