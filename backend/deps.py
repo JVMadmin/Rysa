@@ -122,6 +122,7 @@ ROLE_PERMISSIONS = {
         "compra.ver", "compra.crear", "compra.cancelar",
         "abono.ver", "abono.comprobante", "cuentas.ver",
         "pedido.gestionar", "cxp.pagar", "correo.ver", "correo.enviar",
+        "whatsapp.ver", "whatsapp.responder",
     },
     # VENDEDOR (piso): sucursal, caja física, POS, facturación, recargas y apoyo en campo.
     "vendedor": {
@@ -261,6 +262,11 @@ MODULES = {
     "correo": {
         "label": "Correo (ventas@ y contacto@)",
         "perms": {"correo.ver", "correo.enviar"},
+    },
+    # Bandeja de WhatsApp y conversaciones del Agente RYSA (whatsapp.py).
+    "whatsapp": {
+        "label": "WhatsApp (bandeja y Agente RYSA)",
+        "perms": {"whatsapp.ver", "whatsapp.responder"},
     },
 }
 

@@ -21,6 +21,7 @@ import Clientes from "@/pages/Clientes";
 import CuentasPorCobrar from "@/pages/CuentasPorCobrar";
 import Facturacion from "@/pages/Facturacion";
 import Correo from "@/pages/Correo";
+import WhatsApp from "@/pages/WhatsApp";
 import Reportes from "@/pages/Reportes";
 import TicketVerificar from "@/pages/TicketVerificar";
 import Caja from "@/pages/Caja";
@@ -99,6 +100,7 @@ function App() {
             <Route path="/app/pos" element={<MultiPos />} />
             <Route path="/app/recargas" element={<RequirePerm perm="recargas.usar"><Recargas /></RequirePerm>} />
             <Route path="/app/correo" element={<RequirePerm perm="correo.ver"><Correo /></RequirePerm>} />
+            <Route path="/app/whatsapp" element={<RequirePerm perm="whatsapp.ver"><WhatsApp /></RequirePerm>} />
             <Route path="/app/ventas" element={<Ventas />} />
             <Route path="/app/compras" element={<RequirePerm perm="compra.ver"><Compras /></RequirePerm>} />
             <Route path="/app/proveedores" element={<RequirePerm perm="proveedor.ver"><Proveedores /></RequirePerm>} />

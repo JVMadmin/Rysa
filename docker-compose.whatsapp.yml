@@ -1,0 +1,44 @@
+# ================================================================
+# RYSA WhatsApp (WAHA) - servicio Docker INDEPENDIENTE
+# Puente de WhatsApp Web para la bandeja y el Agente RYSA del ERP.
+# Motor GOWS (sin navegador, ligero). Solo escucha en la red interna
+# `rysa_net`: no tiene puerto público. El backend lo llama en
+# http://rysa_waha:3000 y WAHA avisa de cada mensaje al webhook del
+# backend con firma HMAC.
+#
+# Desplegar (en /opt/rysa/Rysa):
+#   docker compose -p rysa-whatsapp -f docker-compose.whatsapp.yml \
+#     --env-file .env.docker.whatsapp up -d
+# Y en .env.docker (backend): WAHA_URL, WAHA_API_KEY, WAHA_HMAC_KEY
+# con los mismos valores. Ver .env.docker.whatsapp.example.
+# ================================================================
+
+services:
+  rysa_waha:
+    image: devlikeapro/waha:${WAHA_TAG:-gows}
+    container_name: rysa_waha
+    restart: unless-stopped
+    environment:
+      WHATSAPP_DEFAULT_ENGINE: GOWS
+      WAHA_API_KEY: ${WAHA_API_KEY:?Define WAHA_API_KEY}
+      WHATSAPP_HOOK_HMAC_KEY: ${WAHA_HMAC_KEY:?Define WAHA_HMAC_KEY}
+      WAHA_DASHBOARD_ENABLED: "false"
+      WHATSAPP_SWAGGER_ENABLED: "false"
+      WAHA_LOCAL_STORE_BASE_DIR: /app/.sessions
+      WHATSAPP_FILES_FOLDER: /app/.media
+      TZ: America/Mexico_City
+    volumes:
+      - waha_sessions:/app/.sessions
+      - waha_media:/app/.media
+    networks:
+      - rysa_net
+    mem_limit: 512m
+
+volumes:
+  waha_sessions:
+  waha_media:
+
+networks:
+  rysa_net:
+    external: true
+    name: rysa_net

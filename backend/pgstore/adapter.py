@@ -21,6 +21,8 @@ from .database import get_engine
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 KNOWN_COLLECTIONS = [
+    # WhatsApp del ERP y Agente RYSA (0019)
+    "wa_conversaciones", "wa_mensajes",
     "users", "products", "clients", "sales", "cajas", "caja_movimientos",
     "inventory_movements", "audit_logs", "refresh_tokens", "login_attempts",
     "files", "settings", "categories", "suspended_sales", "cfdi_documents",

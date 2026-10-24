@@ -8215,6 +8215,10 @@ app.include_router(_marcas.init(db))
 import correo as _correo  # noqa: E402
 app.include_router(_correo.router)
 
+# WhatsApp del ERP (WAHA) y Agente RYSA con IA configurable.
+import whatsapp as _whatsapp  # noqa: E402
+app.include_router(_whatsapp.router)
+
 # Configuración dinámica de CORS
 env = os.environ.get("ENVIRONMENT", "development").lower()
 cors_origins_env = os.environ.get("CORS_ORIGINS", "")

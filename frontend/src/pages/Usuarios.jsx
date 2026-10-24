@@ -34,6 +34,7 @@ const FALLBACK_MODULOS = [
   ["configuracion", "Configuración"],
   ["autorizaciones", "Autorizar movimientos con código"],
   ["correo", "Correo (ventas@ y contacto@)"],
+  ["whatsapp", "WhatsApp (bandeja y Agente RYSA)"],
 ];
 
 const ADMIN_ROLES = ["admin", "admin_propietario", "admin_desarrollador"];
