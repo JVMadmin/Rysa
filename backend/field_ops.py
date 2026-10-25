@@ -20,6 +20,7 @@ import storage
 from deps import (
     db, iso_now, now_utc, get_current_user, require_permission,
     user_has_permission, log_audit, next_counter,
+    ahora_local, filtro_dias_local, fecha_local,
 )
 
 router = APIRouter(prefix="/api")
@@ -302,17 +303,18 @@ async def seller_dashboard(user: dict = Depends(get_current_user)):
     """Dashboard del vendedor autenticado (ventas, cobros, CxC, visitas)."""
     vid = user["id"]
     vname = user.get("name", "")
-    now = now_utc()
+    now = ahora_local()
     hoy = now.date().isoformat()
     mes = now.strftime("%Y-%m")
     base = {"vendedor_id": vid, "estado": "confirmada"}
 
+    # "Hoy" y "este mes" en la hora local de la sucursal (no UTC).
     ventas_hoy = await db.sales.find(
-        {**base, "fecha": {"$regex": "^" + hoy}},
+        {**base, "$and": [filtro_dias_local("fecha", hoy, hoy)]},
         {"_id": 0, "total": 1, "cliente_id": 1, "cliente_nombre": 1,
          "folio": 1, "fecha": 1}).to_list(100000)
     ventas_mes = await db.sales.find(
-        {**base, "fecha": {"$regex": "^" + mes}},
+        {**base, "$and": [filtro_dias_local("fecha", f"{mes}-01", hoy)]},
         {"_id": 0, "total": 1}).to_list(200000)
 
     clientes_hoy = {v.get("cliente_id") for v in ventas_hoy if v.get("cliente_id")}
@@ -320,13 +322,13 @@ async def seller_dashboard(user: dict = Depends(get_current_user)):
     cxc = await _cxc_de_cartera(vid, vname)
 
     abonos_hoy = await db.abonos.find(
-        {"usuario_id": vid, "fecha": {"$regex": "^" + hoy}},
+        {"usuario_id": vid, "$and": [filtro_dias_local("fecha", hoy, hoy)]},
         {"_id": 0, "monto": 1, "cliente_nombre": 1, "folio": 1, "fecha": 1}).to_list(100000)
 
     visitas = await db.visits.find({"vendedor_id": vid}, {"_id": 0}).to_list(100000)
     programadas = [v for v in visitas if v.get("estado") == "programada"]
     realizadas_hoy = [v for v in visitas
-                      if v.get("estado") == "realizada" and str(v.get("fecha", ""))[:10] == hoy]
+                      if v.get("estado") == "realizada" and fecha_local(v.get("fecha")) == hoy]
     proximas = sorted(
         [v for v in programadas if str(v.get("fecha_programada", ""))[:10] >= hoy],
         key=lambda v: v.get("fecha_programada", ""))[:5]
@@ -713,112 +715,122 @@ async def client_order_history(client_id: str, user: dict = Depends(get_current_
 
 @router.post("/seller/venta-directa")
 async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get_current_user)):
-    """Registra una Venta Directa desde la app móvil con control de idempotencia estricto
-    y asignación atómica de folios oficiales, evitando colisiones entre asesores en campo."""
-    import json
-    from pgstore.database import get_engine
-    from sqlalchemy import text
+    """Venta directa desde la app móvil.
+
+    Usa la misma transacción que el POS (pgstore/pos.py): la llave de
+    idempotencia se reserva al inicio (un reintento por mala señal devuelve la
+    misma venta, nunca una segunda), el folio sale dentro de la transacción,
+    se descuenta inventario con kardex y caja, saldo y auditoría se guardan
+    todo o nada. El inventario puede quedar negativo (la venta de campo no se
+    bloquea por existencia) y queda marcado en la venta."""
+    import pgstore.pos as _pgpos
+    from moneycalc import precios_lista
 
     if not data.idempotency_key or len(data.idempotency_key.strip()) < 8:
         raise HTTPException(400, "Se requiere idempotency_key único para registrar la venta")
-
     key = data.idempotency_key.strip()
-    eng = get_engine()
 
-    # 1. Verificación de Idempotencia: Si ya existe una venta con este idempotency_key,
-    # se retorna exactamente la venta previa con su folio oficial (sin duplicar).
-    async with eng.connect() as conn:
-        res = await conn.execute(
-            text('SELECT "id", "doc" FROM "sales" WHERE "doc"->>\'idempotency_key\' = :k LIMIT 1'),
-            {"k": key}
-        )
-        row = res.fetchone()
-        if row:
-            doc = json.loads(row[1]) if isinstance(row[1], str) else row[1]
-            return {
-                "ok": True,
-                "status": "success",
-                "duplicado": True,
-                "venta": doc,
-                "id": doc.get("id"),
-                "folio": doc.get("folio"),
-                "total": float(doc.get("total") or 0),
-                "mensaje": "Venta previamente registrada (confirmada)",
-            }
+    def _respuesta(doc: dict, duplicado: bool) -> dict:
+        return {
+            "ok": True, "status": "success", "duplicado": duplicado, "venta": doc,
+            "id": doc.get("id"), "folio": doc.get("folio"), "total": float(doc.get("total") or 0),
+            "mensaje": "Venta previamente registrada (confirmada)" if duplicado
+            else f"Venta directa {doc.get('folio')} registrada exitosamente.",
+        }
+
+    previa = await _pgpos._existing_by_key(key)
+    if previa:
+        return _respuesta(previa, True)
 
     if not data.items:
         raise HTTPException(400, "La venta no tiene productos")
 
-    # 1.1 Validar que el vendedor cuente con turno de caja abierto
     caja_abierta = await db.cajas.find_one({"usuario_id": user["id"], "estado": "abierta"}, {"_id": 0})
     if not caja_abierta:
         raise HTTPException(400, "Debes abrir tu turno de caja antes de registrar ventas.")
 
-    # 2. Obtener cliente
     cliente = None
     if data.cliente_id:
         cliente = await db.clients.find_one({"id": data.cliente_id}, {"_id": 0})
     cliente_nombre = (cliente.get("nombre") if cliente else "") or data.cliente_nombre or "Público General"
+    condicion = data.condicion or "contado"
+    if condicion == "credito" and not cliente:
+        raise HTTPException(400, "Selecciona un cliente para venta a crédito")
 
-    # 3. Calcular importes e impuestos
-    # Obtener los productos de la BD para usar el iva_tasa real (política RYSA: todos al 8%)
     product_ids = [it.product_id for it in data.items if it.product_id]
     products_map: dict = {}
     if product_ids:
-        async for prod in db.products.find({"id": {"$in": product_ids}}, {"id": 1, "iva_tasa": 1, "_id": 0}):
+        async for prod in db.products.find({"id": {"$in": product_ids}}, {"_id": 0}):
             products_map[prod["id"]] = prod
 
     subtotal = 0.0
     iva_total = 0.0
     items_out = []
+    fuera_de_lista = []
     for it in data.items:
         if it.cantidad <= 0:
             continue
+        prod_doc = products_map.get(it.product_id)
+        if it.product_id and not prod_doc:
+            raise HTTPException(400, f"Producto {it.codigo or it.product_id} no existe")
+        prod_doc = prod_doc or {}
         imp = round(it.cantidad * it.precio, 2)
-        # Usar iva_tasa de la BD como fuente de verdad; fallback 8% (política RYSA)
-        prod_doc = products_map.get(it.product_id, {})
+        # IVA de la BD como fuente de verdad; fallback 8% (política RYSA)
         tasa = float(prod_doc.get("iva_tasa") or it.iva_tasa or 8)
         iva_lin = round(imp * (tasa / 100.0), 2) if tasa else 0.0
+        # Precio por debajo de la lista más baja (y del mínimo): se registra,
+        # pero queda marcado para revisión en la venta y en la bitácora.
+        netos = [float(x.get("precio") or 0) for x in precios_lista(prod_doc) if float(x.get("precio") or 0) > 0]
+        piso = min(netos + ([float(prod_doc.get("precio_minimo") or 0)] if float(prod_doc.get("precio_minimo") or 0) > 0 else [])) if netos else 0
+        bajo = bool(piso) and it.precio + 0.005 < piso
+        if bajo:
+            fuera_de_lista.append(f"{prod_doc.get('codigo') or it.codigo} a {it.precio:.2f} (mín. {piso:.2f})")
         subtotal += imp
         iva_total += iva_lin
         items_out.append({
             "product_id": it.product_id,
-            "codigo": it.codigo,
-            "descripcion": it.descripcion,
-            "unidad": it.unidad or "PZA",
+            "codigo": prod_doc.get("codigo") or it.codigo,
+            "descripcion": prod_doc.get("descripcion") or it.descripcion,
+            "unidad": it.unidad or prod_doc.get("unidad_medida") or "PZA",
             "cantidad": it.cantidad,
             "precio": it.precio,
             "iva_tasa": tasa,
+            "costo": float(prod_doc.get("costo") or 0),
             "subtotal": imp,
             "iva": iva_lin,
             "total": imp + iva_lin,
+            **({"precio_fuera_de_lista": True} if bajo else {}),
         })
 
     if not items_out:
         raise HTTPException(400, "No hay partidas con cantidad válida")
 
     total = round(subtotal + iva_total, 2)
+    if condicion == "credito":
+        disponible = float(cliente.get("limite_credito", 0) or 0) - float(cliente.get("saldo", 0) or 0)
+        if not cliente.get("credito_autorizado", False):
+            raise HTTPException(400, "El cliente no tiene crédito autorizado")
+        if total > disponible + 0.01:
+            raise HTTPException(400, f"Excede el crédito disponible ({round(disponible, 2)})")
 
-    # 4. Asignación ATÓMICA del folio único de venta (V-XXXXXX)
-    folio = await next_counter("venta", "V", 6)
-
-    # 5. Estructurar documento de venta
     now_dt = now_utc()
-    sale_id = _uid()
-    saldo = total if data.condicion == "credito" else 0.0
+    forma_pago = data.forma_pago or "efectivo"
     doc = {
-        "id": sale_id,
-        "folio": folio,
+        "id": _uid(),
+        "folio": None,
         "caja_id": caja_abierta["id"],
-        "fecha": data.fecha or iso_now()[:10],
+        "fecha": data.fecha or iso_now(),
         "hora": now_dt.strftime("%H:%M"),
         "origen": "movil_campo",
         "tipo_venta": "venta_directa",
-        "condicion": data.condicion or "contado",
-        "forma_pago": data.forma_pago or "efectivo",
+        "condicion": condicion,
+        "forma_pago": forma_pago,
+        "pagos": [{"metodo": forma_pago, "monto": total}] if condicion == "contado" else [],
         "cliente_id": data.cliente_id or "",
         "cliente_nombre": cliente_nombre,
         "cliente_codigo": (cliente.get("codigo") if cliente else "") or data.cliente_codigo or "",
+        "usuario_id": user["id"],
+        "usuario_nombre": user.get("name", "Asesor Móvil"),
         "vendedor_id": user["id"],
         "vendedor_nombre": user.get("name", "Asesor Móvil"),
         "items": items_out,
@@ -826,7 +838,7 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
         "subtotal": round(subtotal, 2),
         "iva_total": round(iva_total, 2),
         "total": total,
-        "saldo": saldo,
+        "saldo": total if condicion == "credito" else 0.0,
         "estado": "confirmada",
         "factura": False,
         "facturado": False,
@@ -837,51 +849,27 @@ async def seller_venta_directa(data: VentaDirectaInput, user: dict = Depends(get
         "idempotency_key": key,
         "created_at": iso_now(),
     }
+    if fuera_de_lista:
+        doc["precio_fuera_de_lista"] = fuera_de_lista
+    override_inv = {"allow_negative_inventory": True, "override_user_id": user["id"],
+                    "override_user_nombre": user.get("name"), "override_reason": "venta de campo",
+                    "override_timestamp": iso_now()}
+    try:
+        creada = await _pgpos.crear_venta_pg(
+            user=user, sale=doc, items=items_out, pagos=doc["pagos"], total=total,
+            es_cotizacion=False, caja=caja_abierta, condicion=condicion, cliente=cliente,
+            folio=None, serie=("venta", "V", 6), idempotency_key=key,
+            override_inv=override_inv, validar_credito=True)
+    except _pgpos.VentaError as e:
+        raise HTTPException(status_code=e.status, detail=e.message)
 
-    # 6. Insertar en db.sales
-    await db.sales.insert_one(doc)
-
-    # 6.1 Si es contado en efectivo, registrar movimiento en caja
-    if (data.condicion or "contado") == "contado" and (data.forma_pago or "efectivo") == "efectivo":
-        mov_doc = {
-            "id": _uid(),
-            "caja_id": caja_abierta["id"],
-            "usuario_id": user["id"],
-            "usuario_nombre": user.get("name", "Vendedor"),
-            "tipo": "venta",
-            "concepto": f"Venta directa {folio} - {cliente_nombre}",
-            "referencia": folio,
-            "monto": total,
-            "fecha": iso_now(),
-        }
-        await db.caja_movimientos.insert_one(mov_doc)
-
-    # 7. Actualizar saldo del cliente si es venta a crédito
-    if data.condicion == "credito" and data.cliente_id:
-        await db.clients.update_one(
-            {"id": data.cliente_id},
-            {"$inc": {"saldo": total}}
-        )
-
-    # 8. Auditoría
-    await log_audit(
-        usuario=user,
-        accion="VENTA_DIRECTA_MOVIL",
-        entidad="VENTA",
-        registro_id=sale_id,
-        detalle=f"Venta directa móvil {folio} ({cliente_nombre}) por ${total:,.2f} MXN"
-    )
-
-    return {
-        "ok": True,
-        "status": "success",
-        "duplicado": False,
-        "venta": doc,
-        "id": sale_id,
-        "folio": folio,
-        "total": total,
-        "mensaje": f"Venta directa {folio} registrada exitosamente.",
-    }
+    duplicado = creada.get("id") != doc["id"]
+    if not duplicado:
+        await log_audit(
+            usuario=user, accion="VENTA_DIRECTA_MOVIL", entidad="VENTA", registro_id=creada["id"],
+            detalle=f"Venta directa móvil {creada.get('folio')} ({cliente_nombre}) por ${total:,.2f} MXN"
+                    + (f" · precio bajo lista: {', '.join(fuera_de_lista)}" if fuera_de_lista else ""))
+    return _respuesta(creada, duplicado)
 
 
 class SellerCajaAbrirInput(BaseModel):

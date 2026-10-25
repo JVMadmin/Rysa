@@ -418,11 +418,9 @@ async def validar_precios_manuales(user: dict, items: list) -> list:
 
 
 async def registrar_precios_manuales(user: dict, venta: dict, items: list, autorizaciones: list):
-    """Marca como usadas las autorizaciones y deja cada precio manual en la bitácora."""
-    for aid in autorizaciones:
-        await db.autorizaciones.update_one({"id": aid}, {"$set": {
-            "usado": True, "usado_at": iso_now(),
-            "venta_id": venta.get("id"), "venta_folio": venta.get("folio")}})
+    """Deja cada precio manual en la bitácora. Las autorizaciones ya quedaron
+    marcadas como usadas dentro de la transacción de la venta (pgstore/pos.py),
+    así una misma autorización no sirve para dos ventas simultáneas."""
     for it in items:
         if it.get("precio_manual"):
             await log_audit(user, "PRECIO_MANUAL", "venta", venta.get("id") or "",

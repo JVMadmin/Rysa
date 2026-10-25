@@ -14,7 +14,9 @@ Garantías:
 - Si en el Editor de formatos hay una plantilla ACTIVA para el tipo, se usa
   esa (doc_engine); si no, o si falla, el predeterminado de storage.py.
 """
+import asyncio
 import hashlib
+import logging
 import uuid
 from datetime import timedelta
 
@@ -22,6 +24,37 @@ import doc_engine
 import formatos_api
 import storage
 from deps import db, iso_now, now_utc
+
+
+logger = logging.getLogger(__name__)
+
+# Un trabajo de generación por venta a la vez: si el POS pide el ticket
+# mientras se pregenera, espera a ese mismo trabajo en lugar de duplicarlo.
+_CANDADOS: dict = {}
+# Pregeneración en segundo plano de una venta a la vez: con un solo vCPU no
+# conviene dibujar varios PDF en paralelo con los cobros.
+_COLA_PDF = asyncio.Semaphore(1)
+_TAREAS: set = set()
+
+
+def _candado(sale_id: str) -> asyncio.Lock:
+    lock = _CANDADOS.get(sale_id)
+    if lock is None:
+        lock = _CANDADOS[sale_id] = asyncio.Lock()
+    return lock
+
+
+def pregenerar_en_segundo_plano(sale_id: str) -> None:
+    """Genera ticket y carta después de responder el cobro (best-effort)."""
+    async def _trabajo():
+        async with _COLA_PDF:
+            try:
+                await asegurar_documentos(sale_id)
+            except Exception as e:  # se generan bajo demanda si falla
+                logger.warning("Pre-generación de documentos pendiente %s: %s", sale_id, str(e)[:120])
+    t = asyncio.create_task(_trabajo())
+    _TAREAS.add(t)
+    t.add_done_callback(_TAREAS.discard)
 
 
 def _uid() -> str:
@@ -78,7 +111,20 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
                               base_url: str = "") -> dict:
     """Devuelve {formato: {"url","path","regenerado"}} garantizando que exista
     UN archivo por venta+formato. Si ya está generado lo reutiliza tal cual.
-    base_url: raíz pública del sitio para el QR de comprobante de pago."""
+    base_url: raíz pública del sitio para el QR de comprobante de pago.
+
+    El dibujo del PDF y la escritura a disco corren en un hilo para no
+    congelar el único proceso del servidor mientras atiende otros cobros."""
+    lock = _candado(sale_id)
+    try:
+        async with lock:
+            return await _asegurar(sale_id, formatos, regenerar, base_url)
+    finally:
+        if not lock.locked():
+            _CANDADOS.pop(sale_id, None)
+
+
+async def _asegurar(sale_id, formatos, regenerar, base_url) -> dict:
     sale = await db.sales.find_one({"id": sale_id}, {"_id": 0})
     if not sale:
         raise ValueError("Venta no encontrada")
@@ -108,12 +154,12 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
         if fmt == "ticket":
             pdf_bytes = await formatos_api.pdf_personalizado(
                 "ticket", doc_engine.contexto_venta(sale, settings), settings) \
-                or storage.build_ticket_pdf(sale, settings)
+                or await asyncio.to_thread(storage.build_ticket_pdf, sale, settings)
             filename = f"ticket-{sale.get('folio')}.pdf"
         elif fmt == "carta":
             pdf_bytes = await formatos_api.pdf_personalizado(
                 "carta_venta", doc_engine.contexto_venta(sale, settings, cliente), settings) \
-                or storage.build_letter_pdf(sale, settings, cliente)
+                or await asyncio.to_thread(storage.build_letter_pdf, sale, settings, cliente)
             filename = f"carta-{sale.get('folio')}.pdf"
         elif fmt == "cotizacion":
             # QR de comprobante de pago (§17-18): enlace/token PERSISTENTE por
@@ -143,13 +189,13 @@ async def asegurar_documentos(sale_id: str, formatos=("ticket", "carta"),
                 pago_url = ""
             pdf_bytes = await formatos_api.pdf_personalizado(
                 "cotizacion", doc_engine.contexto_venta(sale, settings, cliente, cuentas, pago_url), settings) \
-                or storage.build_cotizacion_pdf(sale, settings, cliente, cuentas, pago_url=pago_url)
+                or await asyncio.to_thread(storage.build_cotizacion_pdf, sale, settings, cliente, cuentas, pago_url=pago_url)
             filename = f"cotizacion-{sale.get('folio')}.pdf"
         else:
             continue
 
         path = f"tickets/{_folio_clean(sale)}-{_hash8(sale)}-{fmt}.pdf"
-        result = storage.put_object(path, pdf_bytes, "application/pdf")
+        result = await asyncio.to_thread(storage.put_object, path, pdf_bytes, "application/pdf")
         stored = result.get("path", path)
         await _registrar_archivo(stored, filename,
                                  result.get("size", len(pdf_bytes)), sale_id)

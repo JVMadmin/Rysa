@@ -13,6 +13,7 @@ Todas las rutas requieren el permiso `config`.
 """
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -106,7 +107,7 @@ async def pdf_personalizado(tipo: str, ctx: dict, settings: dict) -> bytes | Non
     if not cfg:
         return None
     try:
-        return doc_engine.render(cfg, ctx, settings)
+        return await asyncio.to_thread(doc_engine.render, cfg, ctx, settings)
     except Exception as e:
         logger.error("Plantilla activa de %s falló; se usa el predeterminado: %s", tipo, str(e)[:200])
         return None

@@ -38,6 +38,55 @@ def now_utc() -> datetime:
 def iso_now() -> str:
     return now_utc().isoformat()
 
+# --- Fechas en la zona del negocio ---
+# Las marcas de tiempo se guardan en UTC (ISO). "Hoy", "este mes" y los rangos
+# por día se calculan en la hora de la sucursal: México centro, UTC-6 fijo
+# desde 2022 (sin horario de verano). Las ventas LEGACY guardan solo la fecha
+# local "AAAA-MM-DD".
+TZ_NEGOCIO = timezone(timedelta(hours=float(os.environ.get("TZ_OFFSET_HORAS", "-6") or -6)))
+
+
+def ahora_local() -> datetime:
+    return now_utc().astimezone(TZ_NEGOCIO)
+
+
+def hoy_local() -> str:
+    return ahora_local().date().isoformat()
+
+
+def inicio_dia_utc(fecha_local: str) -> str:
+    """ISO UTC del inicio del día local (00:00 en la sucursal)."""
+    d = datetime.strptime(fecha_local[:10], "%Y-%m-%d").replace(tzinfo=TZ_NEGOCIO)
+    return d.astimezone(timezone.utc).isoformat()
+
+
+def filtro_dias_local(campo: str, desde: str | None, hasta: str | None) -> dict | None:
+    """Filtro de rango por días LOCALES (inclusivo) para un campo de fecha que
+    mezcla marcas UTC ISO (ventas del ERP) y fechas "AAAA-MM-DD" (LEGACY).
+    Ponerlo dentro de "$and" para no chocar con otros "$or"."""
+    if not desde and not hasta:
+        return None
+    iso, solo_fecha = [{campo: {"$regex": "T"}}], [{campo: {"$regex": r"^\d{4}-\d{2}-\d{2}$"}}]
+    if desde:
+        iso.append({campo: {"$gte": inicio_dia_utc(desde)}})
+        solo_fecha.append({campo: {"$gte": desde[:10]}})
+    if hasta:
+        sig = (datetime.strptime(hasta[:10], "%Y-%m-%d").date() + timedelta(days=1)).isoformat()
+        iso.append({campo: {"$lt": inicio_dia_utc(sig)}})
+        solo_fecha.append({campo: {"$lt": sig}})
+    return {"$or": [{"$and": iso}, {"$and": solo_fecha}]}
+
+
+def fecha_local(valor) -> str:
+    """Fecha local "AAAA-MM-DD" de una marca guardada (UTC ISO o solo fecha)."""
+    s = str(valor or "")
+    if len(s) <= 10:
+        return s
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(TZ_NEGOCIO).date().isoformat()
+    except ValueError:
+        return s[:10]
+
 # --- Password hashing ---
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")

@@ -4,11 +4,16 @@ Implementa la creación/finalización de una venta como UNA única transacción
 atómica sobre la misma conexión:
 
     BEGIN
-      ├── validar + bloquear inventario (SELECT ... FOR UPDATE por producto)
+      ├── reservar la llave de idempotencia (un reintento espera y devuelve la misma venta)
+      ├── folio (solo si la venta se guarda: sin huecos por ventas rechazadas)
+      ├── validar + bloquear inventario (un SELECT ... FOR UPDATE ordenado por id:
+      │   dos cajas con los mismos productos no se bloquean entre sí)
       ├── crear venta (con items y pagos embebidos)
-      ├── descontar inventario + kardex (inventory_movements)
+      ├── descontar inventario + kardex (inventory_movements), sumando renglones
+      │   repetidos del mismo producto
       ├── registrar pago (dentro de la venta) + movimiento de caja
-      ├── saldo cliente (crédito)
+      ├── saldo cliente (crédito, revalidando el límite con la fila bloqueada)
+      ├── consumir autorizaciones de precio manual (una sola vez)
       └── auditoría
     COMMIT / ROLLBACK
 
@@ -80,6 +85,21 @@ async def _existing_by_key(idempotency_key: str):
     return dict(row2[0]) if row2 else None
 
 
+class _Duplicada(Exception):
+    """La llave de idempotencia ya pertenece a otra venta (reintento)."""
+
+
+async def folio_en_tx(conn, nombre: str, prefijo: str, ancho: int) -> str:
+    """Siguiente folio dentro de la transacción de la venta: si la venta se
+    revierte, el número vuelve a quedar libre (sin huecos). La fila de
+    `sequences` queda bloqueada hasta el COMMIT, lo que ordena los folios."""
+    seq = (await conn.execute(
+        text('INSERT INTO "sequences" (name, seq) VALUES (:n, 1) '
+             'ON CONFLICT (name) DO UPDATE SET seq = "sequences".seq + 1 RETURNING seq'),
+        {"n": nombre})).scalar()
+    return f"{prefijo}{str(int(seq)).zfill(ancho)}"
+
+
 class VentaError(Exception):
     """Error de negocio controlado (se traduce a HTTP sin colapsar la API)."""
 
@@ -91,7 +111,8 @@ class VentaError(Exception):
 
 async def crear_venta_pg(*, user, sale, items, pagos, total, es_cotizacion,
                          caja, condicion, cliente, folio, idempotency_key=None,
-                         fault=None, override_inv=None):
+                         fault=None, override_inv=None, serie=None,
+                         autorizaciones=None, validar_credito=False):
     """Persiste la venta atómicamente en PostgreSQL.
 
     `sale` es el documento completo de la venta ya construido por el endpoint
@@ -102,71 +123,111 @@ async def crear_venta_pg(*, user, sale, items, pagos, total, es_cotizacion,
 
     `override_inv` (dict opcional) autoriza inventario negativo en esta venta
     (rol verificado por el endpoint con `inventario.autorizar_negativo`).
+
+    `serie` = (secuencia, prefijo, ancho): el folio se asigna DENTRO de la
+    transacción cuando `folio` es None. `autorizaciones`: ids de autorización
+    de precio manual que esta venta consume (una sola vez). `validar_credito`:
+    revalida el límite de crédito con la fila del cliente bloqueada.
     """
     if idempotency_key:
         existing = await _existing_by_key(idempotency_key)
         if existing:
             return existing
+        await ensure_idempotency_table()
 
     user_id = user.get("id")
     user_name = user.get("name")
 
     try:
         async with transaction() as conn:
-            # A) Inventario: bloquear fila del producto y validar existencia
+            _id = sale["id"]
+            # 0) Idempotencia al INICIO: un reintento simultáneo con la misma llave
+            #    espera a que termine el primero y luego devuelve esa misma venta,
+            #    sin hacer el trabajo ni consumir folio.
+            if idempotency_key:
+                ok = (await conn.execute(
+                    text('INSERT INTO "sale_idempotency" (idempotency_key, sale_id) '
+                         'VALUES (:k, :s) ON CONFLICT (idempotency_key) DO NOTHING RETURNING sale_id'),
+                    {"k": idempotency_key, "s": _id})).first()
+                if ok is None:
+                    raise _Duplicada()
+
+            # 1) Folio dentro de la transacción (sin huecos si la venta falla)
+            if folio is None and serie:
+                folio = await folio_en_tx(conn, *serie)
+                sale["folio"] = folio
+
+            # A) Inventario: bloquear las filas en orden fijo (por id) y validar la
+            #    existencia contra la suma de todos los renglones del producto.
             plan = []
             if not es_cotizacion:
+                ids = sorted({it["product_id"] for it in items if it.get("product_id")})
+                prods = {}
+                if ids:
+                    for row in (await conn.execute(
+                            text('SELECT "id","doc" FROM products WHERE "id" = ANY(:ids) ORDER BY "id" FOR UPDATE'),
+                            {"ids": ids})).fetchall():
+                        prods[row[0]] = dict(row[1])
+                pedido = {}
                 for it in items:
-                    if not it.get("product_id"):
+                    pid = it.get("product_id")
+                    if not pid:
                         continue  # línea sin inventario (p. ej. recarga remitida)
-                    row = (await conn.execute(
-                        text('SELECT "id","doc" FROM products WHERE "id" = CAST(:i AS text) FOR UPDATE'),
-                        {"i": it["product_id"]})).first()
-                    if row is None:
+                    if pid not in prods:
                         raise VentaError(400, f"Producto {it.get('codigo')} no existe")
-                    prod = dict(row[1])
+                    cant_base = round(float(it["cantidad"]) * float(it.get("factor") or 1.0), 3)
+                    pedido[pid] = round(pedido.get(pid, 0.0) + cant_base, 3)
+                for pid, total_base in pedido.items():
+                    prod = prods[pid]
                     if prod.get("estado") != "activo":
                         raise VentaError(400, f"Producto {prod.get('codigo')} no está activo")
                     controles = prod.get("controles", {}) or {}
                     controlar = controles.get("controlar_inventario", True)
                     permitir_neg = controles.get("permitir_inventario_negativo", False)
                     exist_antes = float(prod.get("existencia", 0) or 0)
+                    if controlar and not permitir_neg and not override_inv and exist_antes < total_base:
+                        raise VentaError(409,
+                                         f"Existencia insuficiente de {prod.get('codigo')} "
+                                         f"(disp: {exist_antes} {prod.get('unidad_medida','PZA')}, req: {total_base})")
+                # Un movimiento de kardex por renglón, con la existencia corrida.
+                corrida = {pid: float(prods[pid].get("existencia", 0) or 0) for pid in pedido}
+                for it in items:
+                    pid = it.get("product_id")
+                    if not pid:
+                        continue
+                    prod = prods[pid]
                     cant_comercial = float(it["cantidad"])
                     factor = float(it.get("factor") or 1.0)
                     cant_base = round(cant_comercial * factor, 3)
-                    if controlar and not permitir_neg and not override_inv and exist_antes < cant_base:
-                        raise VentaError(409,
-                                         f"Existencia insuficiente de {prod.get('codigo')} "
-                                         f"(disp: {exist_antes} {prod.get('unidad_medida','PZA')}, req: {cant_base})")
-                    plan.append({"id": it["product_id"], "cant": cant_base,
+                    anterior = corrida[pid]
+                    corrida[pid] = round(anterior - cant_base, 3)
+                    plan.append({"id": pid, "cant": cant_base, "item": it,
                                  "cant_comercial": cant_comercial, "factor": factor,
                                  "presentacion": it.get("presentacion") or prod.get("unidad_medida", "PZA"),
-                                 "anterior": exist_antes,
-                                 "resultante": round(exist_antes - cant_base, 3),
+                                 "anterior": anterior, "resultante": corrida[pid],
                                  "descripcion": prod.get("descripcion", ""),
                                  "codigo": prod.get("codigo", ""),
                                  "costo": float(prod.get("costo") or 0)})
 
             # B) Crear venta (items y pagos quedan embebidos en el documento)
-            _id = sale["id"]
             await _insert_sale(conn, sale)
             if fault == "venta":
                 raise RuntimeError("FAULT:venta (después de crear venta, antes de inventario)")
 
-            # C) Descontar inventario + kardex
+            # C) Descontar inventario (una vez por producto) + kardex (por renglón)
             if not es_cotizacion:
-                for inv in plan:
-                    # Descontar inventario en columna tipada y en JSONB + incrementar 'vendidas'
+                for pid, final in corrida.items():
+                    vendidas = round(float(prods[pid].get("existencia", 0) or 0) - final, 3)
                     await conn.execute(
                         text('UPDATE products SET "existencia" = :ne, '
                              'doc = jsonb_set(jsonb_set(jsonb_set(doc, \'{existencia}\', CAST(:nej AS jsonb), true), '
                              '\'{updated_at}\', CAST(:upd AS jsonb), true), '
                              '\'{vendidas}\', CAST(CAST(COALESCE((doc->>\'vendidas\')::numeric,0) + CAST(:vdj AS numeric) AS text) AS jsonb), true) '
                              'WHERE "id" = CAST(:i AS text)'),
-                        {"ne": inv["resultante"], "nej": json.dumps(inv["resultante"]),
-                         "vdj": float(inv["cant"]), "upd": json.dumps(now_iso()), "i": inv["id"]})
-                    it = next(x for x in items if x["product_id"] == inv["id"])
-                    await _insert_movimiento(conn, inv, it, folio, user_id, user_name)
+                        {"ne": final, "nej": json.dumps(final),
+                         "vdj": vendidas, "upd": json.dumps(now_iso()), "i": pid})
+                for inv in plan:
+                    await _insert_movimiento(conn, inv, inv["item"], folio, user_id, user_name)
                 if fault == "inventario":
                     raise RuntimeError("FAULT:inventario (después de descontar inventario)")
 
@@ -186,15 +247,36 @@ async def crear_venta_pg(*, user, sale, items, pagos, total, es_cotizacion,
             if fault == "pago":
                 raise RuntimeError("FAULT:pago (después de registrar pago/caja)")
 
-            # E) Crédito: aumenta el saldo del cliente
+            # E) Crédito: aumenta el saldo del cliente. Con `validar_credito` el
+            #    límite se revisa en el mismo UPDATE: dos ventas simultáneas del
+            #    mismo cliente ya no pueden pasarlo.
             if condicion == "credito" and cliente:
-                await conn.execute(
+                cond_limite = ''
+                if validar_credito:
+                    cond_limite = (' AND COALESCE("saldo",0) + :t <= COALESCE("limite_credito", '
+                                   '(doc->>\'limite_credito\')::numeric, 0) + 0.01')
+                r = (await conn.execute(
                     text('UPDATE clients SET "saldo" = COALESCE("saldo",0) + :t, '
                          'doc = jsonb_set(doc, \'{saldo}\', '
                          'CAST(CAST(COALESCE((doc->>\'saldo\')::numeric,0) + CAST(:t2 AS numeric) AS text) AS jsonb), true) '
-                         'WHERE "id" = CAST(:i AS text)'),
+                         'WHERE "id" = CAST(:i AS text)' + cond_limite + ' RETURNING "saldo"'),
                     {"t": float(sale.get("total", total)), "t2": float(sale.get("total", total)),
-                     "i": cliente["id"]})
+                     "i": cliente["id"]})).first()
+                if r is None and validar_credito:
+                    raise VentaError(409, "La venta excede el crédito disponible del cliente")
+
+            # E2) Autorizaciones de precio manual: se consumen aquí, una sola vez.
+            for aid in (autorizaciones or []):
+                usada = (await conn.execute(
+                    text('UPDATE autorizaciones SET doc = doc || jsonb_build_object('
+                         '\'usado\', true, \'usado_at\', CAST(:f AS text), '
+                         '\'venta_id\', CAST(:s AS text), \'venta_folio\', CAST(:fo AS text)) '
+                         'WHERE "id" = CAST(:a AS text) AND COALESCE(doc->>\'usado\', \'false\') <> \'true\' '
+                         'RETURNING "id"'),
+                    {"f": now_iso(), "s": _id, "fo": folio or "", "a": aid})).first()
+                if usada is None:
+                    raise VentaError(409, "Una autorización de precio manual ya se usó en otra venta. "
+                                          "Vuelve a autorizarla con F6.")
             if fault == "caja":
                 raise RuntimeError("FAULT:caja (después de movimiento de caja)")
 
@@ -209,14 +291,13 @@ async def crear_venta_pg(*, user, sale, items, pagos, total, es_cotizacion,
             if fault == "audit":
                 raise RuntimeError("FAULT:audit (después de auditoría)")
 
-            # G) Idempotencia
-            if idempotency_key:
-                await conn.execute(
-                    text('INSERT INTO "sale_idempotency" (idempotency_key, sale_id) '
-                         'VALUES (:k, :s)'),
-                    {"k": idempotency_key, "s": _id})
         # COMMIT implícito al salir de transaction()
         return sale
+    except _Duplicada:
+        existing = await _existing_by_key(idempotency_key)
+        if existing:
+            return existing
+        raise VentaError(409, "Esta venta ya se está registrando; vuelve a intentar en unos segundos")
     except IntegrityError as e:
         # Reintento concurrente con la misma idempotency_key -> devolver la venta existente
         if idempotency_key and getattr(e.orig, "sqlstate", "") == "23505":

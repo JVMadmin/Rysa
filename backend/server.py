@@ -15,6 +15,7 @@ if _env_active_os in ("development", "production"):
     if _env_file.exists():
         load_dotenv(_env_file, override=True)
 
+import asyncio
 import io
 import uuid
 import re
@@ -40,7 +41,7 @@ from deps import (
     user_has_permission, next_counter, log_audit, revoke_user_sessions, MODULES,
     ROLE_PERMISSIONS, ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS,
     ver_todas_ventas, DEFAULT_MODULES_NON_PRIVILEGED,
-    es_rol_privilegiado,
+    es_rol_privilegiado, ahora_local, hoy_local, filtro_dias_local, fecha_local, inicio_dia_utc,
 )
 import pgstore.pos as _pgpos
 import pgstore.cxc as _pgcxc
@@ -1091,7 +1092,8 @@ async def login(data: LoginInput, response: Response, request: Request):
     await check_login_rate_limit(ip, email)
 
     user = await db.users.find_one({"email": email})
-    if not user or not verify_password(data.password, user["password_hash"]):
+    # bcrypt tarda ~250 ms en 1 vCPU: en un hilo para no congelar a los demás.
+    if not user or not await asyncio.to_thread(verify_password, data.password, user["password_hash"]):
         await record_failed_login(ip, email)
         await log_audit({"id": None, "name": email or "?"}, "LOGIN_FAILURE", "auth",
                         detalle=(email or "sin correo"), ip=ip, user_agent=ua)
@@ -2009,6 +2011,33 @@ def parse_client_row(row: dict):
     return data, errores
 
 
+_CACHE_COMPRAS = {"hasta": 0.0, "clave": "", "datos": ({}, {})}
+
+
+async def _compras_por_cliente() -> tuple:
+    """Compras del mes y del año por cliente (sin LEGACY), sumadas en SQL con
+    el índice de fecha y guardadas 60 s. Antes cada llamada a /clients (el POS
+    la hace al abrir) traía hasta 20,000 ventas completas para sumarlas aquí."""
+    ahora = ahora_local()
+    clave = ahora.strftime("%Y-%m-%d")
+    if _CACHE_COMPRAS["clave"] == clave and _CACHE_COMPRAS["hasta"] > time.monotonic():
+        return _CACHE_COMPRAS["datos"]
+    from pgstore.database import get_engine
+    from sqlalchemy import text as _sql
+    mes_ini = inicio_dia_utc(ahora.strftime("%Y-%m-01"))
+    anio_ini = inicio_dia_utc(f"{ahora.year}-01-01")
+    async with get_engine().connect() as conn:
+        rows = (await conn.execute(_sql(
+            "SELECT doc->>'cliente_id', COALESCE(SUM(total) FILTER (WHERE doc->>'fecha' >= :m), 0), "
+            "COALESCE(SUM(total), 0) FROM sales "
+            "WHERE doc->>'fecha' >= :a AND doc->>'estado' = 'confirmada' "
+            "AND doc->>'source' IS DISTINCT FROM 'LEGACY' AND COALESCE(doc->>'cliente_id', '') <> '' "
+            "GROUP BY 1"), {"m": mes_ini, "a": anio_ini})).fetchall()
+    datos = ({r[0]: float(r[1]) for r in rows}, {r[0]: float(r[2]) for r in rows})
+    _CACHE_COMPRAS.update(hasta=time.monotonic() + 60, clave=clave, datos=datos)
+    return datos
+
+
 @api.get("/clients")
 async def list_clients(q: Optional[str] = None, estado: Optional[str] = None,
                        tipo: Optional[str] = None, filtro: Optional[str] = None,
@@ -2020,23 +2049,7 @@ async def list_clients(q: Optional[str] = None, estado: Optional[str] = None,
                                  vendedor=vendedor, rfc=rfc, telefono=telefono,
                                  fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
     clients = await db.clients.find(query, {"_id": 0}).sort("nombre", 1).to_list(5000)
-    now = now_utc()
-    mes = now.strftime("%Y-%m")
-    anio = str(now.year)
-    # Estadísticas operativas del cliente: excluyen documentos LEGACY
-    # (el histórico se consulta en su propia pestaña, no contamina stats).
-    sales = await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}},
-                                {"_id": 0, "cliente_id": 1, "total": 1, "fecha": 1}).to_list(20000)
-    mes_map, anio_map = {}, {}
-    for s in sales:
-        cid = s.get("cliente_id")
-        if not cid:
-            continue
-        f = s.get("fecha", "")
-        if f[:7] == mes:
-            mes_map[cid] = mes_map.get(cid, 0) + s["total"]
-        if f[:4] == anio:
-            anio_map[cid] = anio_map.get(cid, 0) + s["total"]
+    mes_map, anio_map = await _compras_por_cliente()
     for c in clients:
         c["compras_mes"] = round(mes_map.get(c["id"], 0), 2)
         c["compras_anio"] = round(anio_map.get(c["id"], 0), 2)
@@ -2755,9 +2768,9 @@ async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
     if q:
         rx = {"$regex": sanitize_search_term(q), "$options": "i"}
         query["$or"] = [{"folio": rx}, {"cliente_nombre": rx}]
-    # Rango de fechas traducido al query (comparación lexicográfica ISO en
-    # PostgreSQL) para poder paginar y contar en la BD sin traer todo.
-    now = now_utc()
+    # Rango de fechas traducido al query para paginar y contar en la BD sin
+    # traer todo. Los días son de la hora local de la sucursal (deps.TZ_NEGOCIO).
+    now = ahora_local()
     d = desde[:10] if desde else None
     h = hasta[:10] if hasta else None
     if rango and rango not in ("all", "rango"):
@@ -2773,16 +2786,12 @@ async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
             d = last_prev.strftime("%Y-%m-01"); h = last_prev.date().isoformat()
         elif rango == "anio":
             d = f"{now.year}-01-01"; h = now.date().isoformat()
-    if d:
-        query["fecha"] = {"$gte": d}
-    if h:
-        try:
-            # Exclusivo al día siguiente: cubre fechas date-only (LEGACY) y
-            # datetimes ISO del mismo día.
-            h_next = (datetime.strptime(h, "%Y-%m-%d").date() + timedelta(days=1)).isoformat()
-            query.setdefault("fecha", {})["$lt"] = h_next
-        except ValueError:
-            pass
+    try:
+        rango_f = filtro_dias_local("fecha", d, h)
+    except ValueError:
+        rango_f = None
+    if rango_f:
+        query["$and"] = query.get("$and", []) + [rango_f]
     if page is not None and page > 0:
         ps = max(1, min(int(page_size or 50), 200))
         total = await db.sales.count_documents(query)
@@ -2917,8 +2926,11 @@ async def _crear_venta(user: dict, data: SaleInput):
     # Precio manual: autorización de un solo uso si no es administrador/dueño.
     autorizaciones_usadas = await _autz.validar_precios_manuales(user, items)
 
+    # El folio se asigna dentro de la transacción de la venta (pgstore/pos.py):
+    # una venta rechazada ya no deja hueco en la numeración.
+    folio = None
     if es_cotizacion:
-        folio = await next_counter("cotizacion", "COT", 6)
+        serie = ("cotizacion", "COT", 6)
         estado = "cotizacion"
         # Regla de vencimiento de cotizaciones: SIEMPRE emisión + 2 días
         # (calculado en el servidor; no editable desde el POS).
@@ -2938,7 +2950,7 @@ async def _crear_venta(user: dict, data: SaleInput):
             if total > disponible + 0.01:
                 raise HTTPException(400, f"Excede el crédito disponible ({round(disponible, 2)})")
             saldo = total
-        folio = await next_counter("venta", "V", 6)
+        serie = ("venta", "V", 6)
         estado = "confirmada"
     sale = {
         "id": uid(), "folio": folio, "fecha": iso_now(),
@@ -2961,21 +2973,19 @@ async def _crear_venta(user: dict, data: SaleInput):
             user=user, sale=sale, items=items, pagos=pagos, total=total,
             es_cotizacion=es_cotizacion, caja=caja, condicion=data.condicion,
             cliente=cliente, folio=folio, idempotency_key=data.idempotency_key,
-            override_inv=override_inv)
+            override_inv=override_inv, serie=serie,
+            autorizaciones=autorizaciones_usadas, validar_credito=True)
     except _pgpos.VentaError as e:
         raise HTTPException(status_code=e.status, detail=e.message)
     await _autz.registrar_precios_manuales(user, creada, items, autorizaciones_usadas)
 
-    # Generador ÚNICO de documentos: pre-genera ticket + carta UNA vez aquí;
-    # vista previa / descarga / impresión / WhatsApp / correo usarán SIEMPRE
-    # estos mismos archivos. Best-effort: si falla, se generan bajo demanda.
+    # Generador ÚNICO de documentos: ticket + carta se generan UNA vez, en
+    # segundo plano (fuera de la respuesta del cobro). Si el POS los pide antes
+    # de que terminen, documentos.py espera al mismo trabajo en lugar de
+    # duplicarlo.
     if not es_cotizacion:
-        try:
-            import documentos as _docs
-            await _docs.asegurar_documentos(creada["id"])
-        except Exception as e:
-            logger.warning("Pre-generación de documentos pendiente %s: %s",
-                           folio, str(e)[:120])
+        import documentos as _docs
+        _docs.pregenerar_en_segundo_plano(creada["id"])
     return creada
 
 # =========================================================================
@@ -6903,7 +6913,7 @@ async def sale_qr_png(sale_id: str, size: int = 240, destino: Optional[str] = No
                         headers={"Cache-Control": "no-store"})
 
 @api.post("/sales/{sale_id}/ticket-pdf")
-async def sale_ticket_pdf(sale_id: str, regenerar: bool = True,
+async def sale_ticket_pdf(sale_id: str, regenerar: bool = False,
                           user: dict = Depends(get_current_user)):
     """PDF del ticket. Generador ÚNICO (documentos.py): la primera llamada
     crea el archivo y las siguientes devuelven EXACTAMENTE el mismo PDF —

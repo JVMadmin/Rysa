@@ -45,6 +45,8 @@ KNOWN_COLLECTIONS = [
     "jornadas",
     # Códigos de autorización (hash por usuario) y autorizaciones emitidas
     "codigos_autorizacion", "autorizaciones",
+    # Solicitudes de abono desde la app de campo (antes faltaba: respondía 500)
+    "solicitudes_abono",
 ]
 
 # Campos de dinero/cantidad espejados a columnas NUMERIC reales.
@@ -290,6 +292,20 @@ def _apply_projection(doc: dict, projection) -> dict:
     return {k: v for k, v in doc.items() if include.get(k) != 0}
 
 
+def _sql_inclusion(projection) -> list:
+    """Claves de una proyección de inclusión que se pueden armar en SQL.
+
+    Con `{"total": 1, "cliente_id": 1}` la consulta trae solo esos campos en
+    vez del documento completo (en `sales` cada doc trae sus renglones y pesa
+    ~1.2 KB). Devuelve [] si la proyección es de exclusión o tiene rutas."""
+    if not projection:
+        return []
+    keys = [k for k, v in projection.items() if int(v) != 0]
+    if not keys or not all(_IDENT_RE.match(str(k)) for k in keys):
+        return []
+    return keys
+
+
 def _extract_key(doc: dict) -> str:
     if "_id" in doc:
         return str(doc["_id"])
@@ -308,7 +324,10 @@ class Cursor:
         self._limit = None
 
     def sort(self, field, direction=1):
-        self.order_by.append((field, direction))
+        if isinstance(field, (list, tuple)):
+            self.order_by.extend((f, d) for f, d in field)
+        else:
+            self.order_by.append((field, direction))
         return self
 
     def skip(self, n):
@@ -323,12 +342,16 @@ class Cursor:
         await _ensure_table(self.collection)
         p = {}
         where = compile_filter(self.collection, self.flt, p)
-        sql = f"SELECT t.doc AS doc FROM {_quote(self.collection)} t"
+        inc = _sql_inclusion(self.projection)
+        sel = ("jsonb_build_object(" + ", ".join(f"'{k}', t.doc->'{k}'" for k in inc) + ")") if inc else "t.doc"
+        sql = f"SELECT {sel} AS doc FROM {_quote(self.collection)} t"
         if where:
             sql += " WHERE " + where
-        for field, direction in self.order_by:
-            fexpr = _field_expr(field)
-            sql += f" ORDER BY {fexpr} {'ASC' if direction >= 0 else 'DESC'}"
+        if self.order_by:
+            # Columnas tipadas (NUMERIC) se ordenan como número: antes
+            # `vendidas` se ordenaba como texto ("9" antes que "120").
+            sql += " ORDER BY " + ", ".join(
+                f"{_expr_for(f, self.collection)} {'ASC' if d >= 0 else 'DESC'}" for f, d in self.order_by)
         lim = self._limit if self._limit is not None else limit_override
         if lim is not None:
             sql += f" LIMIT {int(lim)}"
@@ -386,6 +409,20 @@ class PGCollection:
 
     def find(self, flt=None, projection=None):
         return Cursor(self.name, flt or {}, projection)
+
+    async def replace_one(self, flt, doc, upsert=False):
+        """Reemplaza el documento completo (antes no existía y fallaba guardar
+        rutas de vendedores en Supervisión)."""
+        doc = {k: v for k, v in dict(doc).items() if k != "_id"}
+        existe = await self.find_one(flt)
+        if existe is None:
+            if not upsert:
+                return 0
+            await self.insert_one(doc)
+            return 1
+        await self.delete_one(flt)
+        await self.insert_one({**doc, "_id": existe.get("_id", doc.get("id"))} if existe.get("_id") else doc)
+        return 1
 
     async def insert_one(self, doc):
         await _ensure_table(self.name)
