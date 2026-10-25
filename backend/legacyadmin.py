@@ -192,6 +192,13 @@ async def _status_payload(conn) -> dict:
                         "created_at": str(snap_row[2]),
                         "source_hash": snap_row[3]}
             cambios = snap_row[4]
+    # Última vez que se usó el sistema anterior: fecha del ticket más reciente
+    # en los DBF cargados (y cuándo se cargaron).
+    ultimo_ticket = None
+    if staging_ok:
+        r = (await conn.execute(text(
+            "SELECT max(legacy_fecha::text) FROM legacy_tickets"))).first()
+        ultimo_ticket = str(r[0])[:19] if r and r[0] else None
     etapas = {
         "discovery": staging_ok > 0,       # staging implica discovery previo
         "analyze": staging_ok > 0,
@@ -222,6 +229,11 @@ async def _status_payload(conn) -> dict:
         "batch": batch,
         "snapshot": snapshot,
         "cambios": cambios,
+        "ultimo_uso": {
+            "ultimo_ticket": ultimo_ticket,
+            "datos_cargados": snapshot["created_at"] if snapshot else None,
+            "ultima_importacion": batch["finished_at"] if batch else None,
+        },
         "staging": {
             "tickets": int(tickets), "detalles": int(details),
             "cxc_ready": int(cxc_ready), "cxc_saldo": round(cxc_saldo, 2),

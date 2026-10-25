@@ -61,6 +61,25 @@ function Barra({ etiqueta, pct }) {
 
 /* -------------------------------- pantalla -------------------------------- */
 
+const fmtFechaLegacy = (v) => {
+  if (!v) return null;
+  const d = new Date(String(v).replace(" ", "T"));
+  if (Number.isNaN(d.getTime())) return String(v);
+  const soloFecha = /^\d{4}-\d{2}-\d{2}(T00:00(:00)?)?$/.test(String(v).trim());
+  return d.toLocaleString("es-MX", soloFecha
+    ? { day: "2-digit", month: "long", year: "numeric" }
+    : { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+};
+
+const FechaLegacy = ({ etiqueta, valor, destacado, vacio = "Sin datos" }) => (
+  <div>
+    <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{etiqueta}</p>
+    <p className={`mt-1 font-display font-black tracking-tight ${destacado ? "text-2xl" : "text-lg"} ${valor ? "text-slate-900" : "text-slate-400"}`}>
+      {fmtFechaLegacy(valor) || vacio}
+    </p>
+  </div>
+);
+
 export default function LegacyMigration() {
   const [status, setStatus] = useState(null);
   const [validacion, setValidacion] = useState(null);
@@ -272,6 +291,15 @@ export default function LegacyMigration() {
       {!status.enabled && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex items-center gap-2 text-sm font-semibold text-amber-900">
           <Lock className="w-4 h-4" /> LEGACY_MIGRATION_ENABLED=false · la importación está deshabilitada en este entorno
+        </div>
+      )}
+
+      {/* Último uso del sistema anterior */}
+      {status.ultimo_uso && (
+        <div className="card-soft p-5 grid grid-cols-1 md:grid-cols-3 gap-4" data-testid="legacy-ultimo-uso">
+          <FechaLegacy etiqueta="Último ticket en el sistema anterior" valor={status.ultimo_uso.ultimo_ticket} destacado />
+          <FechaLegacy etiqueta="Datos del legacy cargados" valor={status.ultimo_uso.datos_cargados} />
+          <FechaLegacy etiqueta="Última importación a RYSA" valor={status.ultimo_uso.ultima_importacion} vacio="Aún no se importa el historial" />
         </div>
       )}
 

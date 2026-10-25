@@ -42,6 +42,41 @@ const PRODUCT_EX_CLS = (ex) => {
   return "bg-green-100 text-green-700 border-green-300";
 };
 
+// Búsqueda predictiva en memoria: sin acentos ni mayúsculas, todas las palabras
+// deben aparecer (en cualquier orden) en código, descripción, marca, sinónimos o
+// códigos de barras.
+const norm = (v) => String(v ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+// Grupo del chip de marca/categoría: misma regla que GET /categories.
+const grupoDe = (p) => (String(p.categoria || "").trim() || String(p.linea || "").trim() || String(p.clasificacion || "").trim()).toUpperCase();
+const indexar = (prods) => prods.map((p) => ({
+  p,
+  cod: norm(p.codigo),
+  desc: norm(p.descripcion),
+  barras: (p.codigos_barras || []).map((b) => String(b).trim()),
+  grupo: grupoDe(p),
+  h: norm([p.codigo, p.descripcion, p.sku, p.linea, p.clasificacion, p.categoria,
+    ...(Array.isArray(p.sinonimos) ? p.sinonimos : [p.sinonimos]), ...(p.codigos_barras || [])].filter(Boolean).join(" ")),
+}));
+const buscarEnIndice = (val, indice, max = 30) => {
+  const q = norm(val);
+  if (!q) return [];
+  const tokens = q.split(/\s+/);
+  const out = [];
+  for (const it of indice) {
+    if (!tokens.every((t) => it.h.includes(t))) continue;
+    let r = 5;
+    if (it.cod === q || it.barras.includes(val.trim())) r = 0;
+    else if (it.cod.startsWith(q)) r = 1;
+    else if (it.desc.startsWith(tokens[0])) r = 2;
+    else if (tokens.every((t) => it.desc.includes(" " + t) || it.desc.startsWith(t))) r = 3;
+    else if (it.desc.includes(tokens[0])) r = 4;
+    out.push([r, it]);
+  }
+  out.sort((a, b) => a[0] - b[0] || a[1].desc.localeCompare(b[1].desc));
+  return out.slice(0, max).map(([, it]) => it.p);
+};
+const fmtEx = (ex) => { const n = Number(ex || 0); return Number.isInteger(n) ? n : +n.toFixed(2); };
+
 const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva }) => {
   const neto = priceOf(p);
   const tasa = tasaIva(p);
@@ -69,7 +104,10 @@ const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva 
         <span className="block text-sm font-semibold leading-snug text-slate-900 line-clamp-2">{p.descripcion}</span>
         <span className="flex w-full items-end justify-end gap-3">
           {mostrarSold && p.vendidas > 0 && <Badge variant="outline" className="h-5 px-1.5 text-[11px] leading-none text-amber-600 border-amber-300">{p.vendidas} vend.</Badge>}
-          <Badge variant="outline" className={`h-6 min-w-[2.25rem] justify-center px-2 text-sm font-bold tabular-nums leading-none ${PRODUCT_EX_CLS(p.existencia)}`} data-testid={`pos-ex-${p.codigo}`}>{p.existencia}</Badge>
+          <span className={`flex h-8 min-w-[3.25rem] shrink-0 flex-col items-center justify-center rounded-md border-2 px-2 leading-none ${PRODUCT_EX_CLS(p.existencia)}`} title="Existencia" data-testid={`pos-ex-${p.codigo}`}>
+            <span className="text-[9px] font-semibold uppercase tracking-wider opacity-80">Exist.</span>
+            <span className="text-base font-extrabold tabular-nums">{fmtEx(p.existencia)}</span>
+          </span>
           <span className="flex items-baseline gap-2 text-right">
             <span className="text-[11px] tabular-nums text-slate-500">{etiqueta} {money(secundario)}</span>
             <span className="font-display text-base font-bold leading-none tabular-nums text-brand-600">{money(principal)}</span>
@@ -162,6 +200,8 @@ export default function POS({ windowId, windowLabel }) {
   const [categoriaSel, setCategoriaSel] = useState("");
   const [vista, setVista] = useState("todos"); // todos | favoritos | mas_vendidos
   const [catalogo, setCatalogo] = useState([]);
+  const [indice, setIndice] = useState(null);   // catálogo activo completo en memoria (búsqueda instantánea)
+  const searchTimer = useRef();
   const [favIds, setFavIds] = useState(new Set());
   const [catLoading, setCatLoading] = useState(false);
   // --- Abono de crédito desde POS ---
@@ -399,7 +439,14 @@ export default function POS({ windowId, windowLabel }) {
     const t = setInterval(async () => {
       await refreshFolio();
       if (qRef.current) {
-        try { const { data } = await api.get("/products", { params: { q: qRef.current, estado: "activo" } }); setResults(data.slice(0, 20)); } catch {}
+        try {
+          const { data } = await api.get("/products", { params: { q: qRef.current, estado: "activo" } });
+          const frescos = new Map((data || []).map((p) => [p.id, p]));
+          setIndice((prev) => {
+            if (!prev) { setResults((data || []).slice(0, 30)); return prev; }
+            return prev.map((it) => (frescos.has(it.p.id) ? { ...it, p: frescos.get(it.p.id) } : it));
+          });
+        } catch {}
       }
     }, 10000);
     return () => clearInterval(t);
@@ -428,11 +475,38 @@ export default function POS({ windowId, windowLabel }) {
 
   const loadSuspended = async () => { const { data } = await api.get("/sales-suspended"); setSuspended(data); };
 
-  const search = async (val) => {
+  // Carga todo el catálogo activo (páginas de 500) para buscar y filtrar en memoria.
+  const cargarIndice = useCallback(async () => {
+    try {
+      const todos = [];
+      for (let skip = 0; ; skip += 500) {
+        const { data } = await api.get("/products", { params: { estado: "activo", skip, limit: 500 } });
+        todos.push(...(data || []));
+        if (!data || data.length < 500) break;
+      }
+      setIndice(indexar(todos));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    cargarIndice();
+    const t = setInterval(cargarIndice, 180000);
+    return () => clearInterval(t);
+  }, [cargarIndice]);
+  // Al recargar el índice (existencias nuevas) se rehace la búsqueda en pantalla.
+  useEffect(() => { if (indice && qRef.current) setResults(buscarEnIndice(qRef.current, indice)); }, [indice]);
+
+  const search = (val) => {
     setQ(val); qRef.current = val;
-    if (val.length < 1) return setResults([]);
-    const { data } = await api.get("/products", { params: { q: val, estado: "activo" } });
-    setResults(data.slice(0, 20));
+    clearTimeout(searchTimer.current);
+    if (!val.trim()) return setResults([]);
+    if (indice) return setResults(buscarEnIndice(val, indice));
+    // Mientras carga el índice: servidor con espera corta, descartando respuestas viejas.
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const { data } = await api.get("/products", { params: { q: val, estado: "activo" } });
+        if (qRef.current === val) setResults(data.slice(0, 30));
+      } catch {}
+    }, 180);
   };
 
   // Carga las categorías + favoritos una vez
@@ -448,20 +522,17 @@ export default function POS({ windowId, windowLabel }) {
   };
 
   // Carga el catálogo según vista (todos/favoritos/más vendidos) y categoría
-  const loadCatalogo = useCallback(async (vistaActual, catActual) => {
+  const loadCatalogo = useCallback(async (vistaActual) => {
     setCatLoading(true);
     try {
       let data = [];
-      if (vistaActual === "favoritos") {
+      if (vistaActual === "todos") {
+        data = [];   // sale del índice en memoria (catalogoVisible)
+      } else if (vistaActual === "favoritos") {
         const { data: prods } = await api.get("/favorites");
         data = prods || [];
       } else if (vistaActual === "mas_vendidos") {
         const { data: prods } = await api.get("/products/bestsellers", { params: { estado: "activo", limit: 40 } });
-        data = prods || [];
-      } else {
-        const params = { estado: "activo", skip: 0, limit: 200 };
-        if (catActual) params.categoria = catActual;
-        const { data: prods } = await api.get("/products", { params });
         data = prods || [];
       }
       setCatalogo(data);
@@ -469,7 +540,15 @@ export default function POS({ windowId, windowLabel }) {
   }, []);
 
   useEffect(() => { loadCatalogMeta(); }, []);
-  useEffect(() => { loadCatalogo(vista, categoriaSel); }, [vista, categoriaSel, loadCatalogo]);
+  useEffect(() => { loadCatalogo(vista); }, [vista, loadCatalogo]);
+  // Lo que muestra el catálogo: "Todos" sale del índice; la marca/categoría se filtra en memoria.
+  const CAT_MAX = 200;
+  const catalogoFiltrado = useMemo(() => {
+    const base = vista === "todos" ? (indice || []).map((it) => it.p) : catalogo;
+    return categoriaSel && vista !== "favoritos" ? base.filter((p) => grupoDe(p) === categoriaSel.trim().toUpperCase()) : base;
+  }, [vista, indice, catalogo, categoriaSel]);
+  const catalogoVisible = catalogoFiltrado.slice(0, CAT_MAX);
+  const catalogoCargando = catLoading || (vista === "todos" && !indice);
 
   // Lector de código de barras: al presionar Enter, agrega el producto exacto (código o código de barras).
   const onSearchKey = async (e) => {
@@ -478,7 +557,7 @@ export default function POS({ windowId, windowLabel }) {
     const val = q.trim();
     if (!val) return;
     const matches = (p) => p.codigo?.toLowerCase() === val.toLowerCase() || (p.codigos_barras || []).some((b) => String(b) === val);
-    let hit = results.find(matches) || (results.length === 1 ? results[0] : null);
+    let hit = results.find(matches) || (indice || []).find((it) => matches(it.p))?.p || (results.length === 1 ? results[0] : null);
     if (!hit) {
       try {
         const { data } = await api.get("/products", { params: { q: val, estado: "activo" } });
@@ -1330,7 +1409,7 @@ export default function POS({ windowId, windowLabel }) {
         )}
 
         <div className="flex-1 overflow-y-auto card-soft [container-type:size]">
-          {catLoading && !q ? (
+          {catalogoCargando && !q ? (
             <div className="h-full flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-brand-600" /></div>
           ) : q ? (
             results.length === 0 ? (
@@ -1352,16 +1431,19 @@ export default function POS({ windowId, windowLabel }) {
               </div>
             )
           ) : (
-            catalogo.length === 0 ? (
+            catalogoVisible.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-300 p-10">
                 {vista === "favoritos" ? <Star className="w-12 h-12 mb-2" /> : <Package className="w-12 h-12 mb-2" />}
                 <p className="text-sm text-slate-400">{vista === "favoritos" ? "Aún no tienes productos favoritos. Marca la estrella de un producto para guardarlo." : "Sin productos en esta vista."}</p>
               </div>
             ) : (
               <div className="grid grid-cols-1 gap-1 p-1">
-                {catalogo.map((p) => (
+                {catalogoVisible.map((p) => (
                   <ProductCard key={p.id} p={p} onAdd={() => addToCart(p)} priceOf={priceOf} isFav={favIds.has(p.id)} onFav={(e) => toggleFav(e, p.id)} mostrarSold={vista === "mas_vendidos"} incluyeIva={incluyeIva} />
                 ))}
+                {catalogoFiltrado.length > CAT_MAX && (
+                  <p className="py-2 text-center text-xs text-slate-400">Mostrando {CAT_MAX} de {catalogoFiltrado.length}. Usa el buscador o elige una marca.</p>
+                )}
               </div>
             )
           )}
