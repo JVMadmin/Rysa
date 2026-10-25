@@ -2809,8 +2809,15 @@ async def list_sales(rango: Optional[str] = None, estado: Optional[str] = None,
     elif vendedor_id:
         query["vendedor_id"] = vendedor_id
     if q:
-        rx = {"$regex": sanitize_search_term(q), "$options": "i"}
-        query["$or"] = [{"folio": rx}, {"cliente_nombre": rx}]
+        # Primero las coincidencias por folio o cliente con el índice de texto
+        # (trigram, ILIKE) y luego el filtro por id: antes PostgreSQL recorría
+        # las ventas por fecha evaluando la expresión regular en cada una (~1 s).
+        termino = "%" + str(q).strip().replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_") + "%"
+        ids = [r[0] for r in await _sql_rows(
+            "SELECT id FROM (SELECT id FROM sales WHERE doc->>'folio' ILIKE :t "
+            "UNION SELECT id FROM sales WHERE doc->>'cliente_nombre' ILIKE :t) x LIMIT 20000",
+            {"t": termino})]
+        query["id"] = {"$in": ids or ["__ninguno__"]}
     # Rango de fechas traducido al query para paginar y contar en la BD sin
     # traer todo. Los días son de la hora local de la sucursal (deps.TZ_NEGOCIO).
     now = ahora_local()
