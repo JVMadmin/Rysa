@@ -111,8 +111,8 @@ async def simular_o_aplicar(carpeta: Path, aplicar: bool) -> None:
                                         "ON CONFLICT (product_id, nombre) DO NOTHING"),
                                    {"pr": f"pres_{pid}", "i": pid, "n": um, "p": pl["precio_sin_iva"], "c": costo})
                 await conn.execute(text("INSERT INTO import_snapshots (id, batch_id, tabla, registro_id, estado_previo, created_at) "
-                                        "VALUES (:i, :b, 'products_creado', :r, CAST('{"creado": true}' AS jsonb), now())"),
-                                   {"i": "snap_" + uuid.uuid4().hex, "b": batch, "r": pid})
+                                        "VALUES (:i, :b, 'products_creado', :r, CAST(:prev AS jsonb), now())"),
+                                   {"i": "snap_" + uuid.uuid4().hex, "b": batch, "r": pid, "prev": '{"creado": true}'})
         sin_legacy = sum(len(v) for k, v in por_codigo.items() if k and k not in legacy)
         stats = {"legacy": len(legacy), "actualizados": act, "ya_iguales": igual, "creados": creados,
                  "en_erp_sin_legacy": sin_legacy}
