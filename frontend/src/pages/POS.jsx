@@ -499,11 +499,22 @@ export default function POS({ windowId, windowLabel, activo = true }) {
       setIndice(indexar(r.data || []));
     } catch {}
   }, []);
+  // Existencias al día sin volver a bajar el catálogo: un mapa {id: existencia}
+  // de ~60 KB cada minuto y justo después de cada venta.
+  const refrescarExistencias = useCallback(async () => {
+    try {
+      const { data } = await api.get("/products/existencias");
+      setIndice((prev) => (prev ? prev.map((it) => (
+        data[it.p.id] !== undefined && data[it.p.id] !== it.p.existencia
+          ? { ...it, p: { ...it.p, existencia: data[it.p.id] } } : it)) : prev));
+    } catch {}
+  }, []);
   useEffect(() => {
     cargarIndice();
     const t = setInterval(() => { if (enPantalla()) cargarIndice(); }, 180000);
-    return () => clearInterval(t);
-  }, [cargarIndice]); // eslint-disable-line
+    const e = setInterval(() => { if (enPantalla()) refrescarExistencias(); }, 60000);
+    return () => { clearInterval(t); clearInterval(e); };
+  }, [cargarIndice, refrescarExistencias]); // eslint-disable-line
   // Al recargar el índice (existencias nuevas) se rehace la búsqueda en pantalla.
   useEffect(() => { if (indice && qRef.current) setResults(buscarEnIndice(qRef.current, indice)); }, [indice]);
 
@@ -1061,6 +1072,7 @@ export default function POS({ windowId, windowLabel, activo = true }) {
       };
       const { data } = await api.post("/sales", payload);
       cobroKeyRef.current = null;
+      refrescarExistencias();
       // Reset completo: la siguiente venta comienza limpia (Público General,
       // carrito vacío, contado, directa, sin descuentos ni modales abiertos).
       resetPos();

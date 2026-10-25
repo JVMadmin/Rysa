@@ -1446,6 +1446,21 @@ async def products_pos_index(request: Request, user: dict = Depends(get_current_
     return Response(content=_CACHE_POS_INDEX["cuerpo"], media_type="application/json", headers=cab)
 
 
+_CACHE_EXIST = {"hasta": 0.0, "datos": {}}
+
+
+@api.get("/products/existencias")
+async def products_existencias(user: dict = Depends(get_current_user)):
+    """Existencia actual de cada producto activo, {id: existencia} (~60 KB).
+
+    El POS la pide cada minuto y tras cada venta para actualizar su catálogo
+    en memoria sin volver a descargarlo completo. Se reutiliza 3 s."""
+    if _CACHE_EXIST["hasta"] < time.monotonic():
+        filas = await _sql_rows("SELECT id, COALESCE(existencia, 0) FROM products WHERE doc->>'estado' = 'activo'")
+        _CACHE_EXIST.update(hasta=time.monotonic() + 3, datos={r[0]: float(r[1]) for r in filas})
+    return _CACHE_EXIST["datos"]
+
+
 # --- Catálogo POS: más vendidos y favoritos por usuario ---
 @api.get("/products/bestsellers")
 async def list_bestsellers(estado: Optional[str] = None, limit: int = 24,

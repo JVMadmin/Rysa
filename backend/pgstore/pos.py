@@ -216,12 +216,16 @@ async def crear_venta_pg(*, user, sale, items, pagos, total, es_cotizacion,
 
             # C) Descontar inventario (una vez por producto) + kardex (por renglón)
             if not es_cotizacion:
+                # La venta solo toca existencia y vendidas: marca `existencia_at` y
+                # no `updated_at`, que queda para ediciones del producto. Así el
+                # catálogo del POS en caché (/products/pos-index) no se rehace
+                # con cada venta; las existencias van por /products/existencias.
                 for pid, final in corrida.items():
                     vendidas = round(float(prods[pid].get("existencia", 0) or 0) - final, 3)
                     await conn.execute(
                         text('UPDATE products SET "existencia" = :ne, '
                              'doc = jsonb_set(jsonb_set(jsonb_set(doc, \'{existencia}\', CAST(:nej AS jsonb), true), '
-                             '\'{updated_at}\', CAST(:upd AS jsonb), true), '
+                             '\'{existencia_at}\', CAST(:upd AS jsonb), true), '
                              '\'{vendidas}\', CAST(CAST(COALESCE((doc->>\'vendidas\')::numeric,0) + CAST(:vdj AS numeric) AS text) AS jsonb), true) '
                              'WHERE "id" = CAST(:i AS text)'),
                         {"ne": final, "nej": json.dumps(final),
@@ -388,7 +392,7 @@ async def cancela_venta_pg(*, user, sale_id: str, motivo: str):
             await conn.execute(
                 text(f'UPDATE {_quote("products")} SET "existencia" = :ne, '
                      'doc = jsonb_set(jsonb_set(jsonb_set(doc, \'{existencia}\', CAST(:nej AS jsonb), true), '
-                     '\'{updated_at}\', CAST(:upd AS jsonb), true), '
+                     '\'{existencia_at}\', CAST(:upd AS jsonb), true), '
                      '\'{vendidas}\', CAST(CAST(COALESCE((doc->>\'vendidas\')::numeric,0) - CAST(:vnd AS numeric) AS text) AS jsonb), true) '
                      f'WHERE "id" = CAST(:i AS text)'),
                 {"ne": nuevo, "nej": json.dumps(nuevo), "vnd": cant_base,
