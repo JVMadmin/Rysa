@@ -77,6 +77,17 @@ def filtro_dias_local(campo: str, desde: str | None, hasta: str | None) -> dict 
     return {"$or": [{"$and": iso}, {"$and": solo_fecha}]}
 
 
+def hora_local(valor) -> str:
+    """"HH:MM" local de una marca UTC ISO; "" si solo trae fecha."""
+    s = str(valor or "")
+    if "T" not in s:
+        return ""
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(TZ_NEGOCIO).strftime("%H:%M")
+    except ValueError:
+        return ""
+
+
 def fecha_local(valor) -> str:
     """Fecha local "AAAA-MM-DD" de una marca guardada (UTC ISO o solo fecha)."""
     s = str(valor or "")

@@ -7,12 +7,14 @@ import {
   FileStack, ChevronRight, AlertTriangle, Upload, Sparkles,
 } from "lucide-react";
 import { api, formatApiError } from "@/lib/api";
+import { fmtFechaHora } from "@/lib/fechas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ConfirmProvider";
 
 // ════════════════════════════════════════════════════════════════════════
 // Catálogos
@@ -222,9 +224,9 @@ function ListaEditable({ items, onChange, nuevo, render, disabled, etiquetaAgreg
         <div key={i} className="rounded-md border border-slate-200 bg-slate-50/60 p-2">
           <div className="mb-1 flex items-center justify-end gap-1">
             {!disabled && <>
-              <button onClick={() => mover(i, -1)} className="text-slate-400 hover:text-slate-700"><ArrowUp className="h-3.5 w-3.5" /></button>
-              <button onClick={() => mover(i, 1)} className="text-slate-400 hover:text-slate-700"><ArrowDown className="h-3.5 w-3.5" /></button>
-              <button onClick={() => onChange(items.filter((_, k) => k !== i))} className="text-slate-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
+              <button onClick={() => mover(i, -1)} title="Subir renglón" aria-label="Subir renglón" className="text-slate-400 hover:text-slate-700"><ArrowUp className="h-3.5 w-3.5" /></button>
+              <button onClick={() => mover(i, 1)} title="Bajar renglón" aria-label="Bajar renglón" className="text-slate-400 hover:text-slate-700"><ArrowDown className="h-3.5 w-3.5" /></button>
+              <button onClick={() => onChange(items.filter((_, k) => k !== i))} title="Eliminar renglón" aria-label="Eliminar renglón" className="text-slate-400 hover:text-red-600"><Trash2 className="h-3.5 w-3.5" /></button>
             </>}
           </div>
           {render(it, (v) => set(i, v))}
@@ -649,6 +651,7 @@ export default function MachotesEditor() {
   const [nombre, setNombre] = useState("");
   const [nota, setNota] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  const confirmar = useConfirm();
   const hist = useRef({ pila: [], idx: -1 });
 
   const infoTipo = catalogo.find((t) => t.tipo === tipo);
@@ -687,9 +690,9 @@ export default function MachotesEditor() {
   useEffect(() => { (async () => { const tipos = await cargarCatalogo(); const t = tipos[0]; if (t) { setTipo(t.tipo); abrir(t.tipo, t.activo?.template_id || "sistema"); } })(); }, [cargarCatalogo, abrir]);
   useEffect(() => { api.get(`/formatos/${tipo}/documentos-recientes`).then((r) => setRecientes(r.data)).catch(() => setRecientes([])); }, [tipo]);
 
-  const confirmarSalir = () => !sucio || window.confirm("Tienes cambios sin guardar. ¿Descartarlos?");
-  const elegirTipo = (t) => { if (t === tipo || !confirmarSalir()) return; const info = catalogo.find((x) => x.tipo === t); setTipo(t); setOrigen("ejemplo"); setFolio(""); abrir(t, info?.activo?.template_id || "sistema"); };
-  const elegirPlantilla = (id) => { if (!confirmarSalir()) return; abrir(tipo, id); };
+  const confirmarSalir = async () => !sucio || !!(await confirmar({ titulo: "Tienes cambios sin guardar", mensaje: "¿Descartarlos?", accion: "Descartar cambios", peligro: true }));
+  const elegirTipo = async (t) => { if (t === tipo || !(await confirmarSalir())) return; const info = catalogo.find((x) => x.tipo === t); setTipo(t); setOrigen("ejemplo"); setFolio(""); abrir(t, info?.activo?.template_id || "sistema"); };
+  const elegirPlantilla = async (id) => { if (!(await confirmarSalir())) return; abrir(tipo, id); };
 
   // Atajos de teclado: deshacer / rehacer / guardar
   useEffect(() => {
@@ -767,13 +770,13 @@ export default function MachotesEditor() {
   };
   const activar = async () => { if (sucio) return toast.error("Guarda los cambios antes de usar este formato"); if (await ejecutar(() => api.post(`/formatos/${tipo}/activar`, { template_id: seleccion }), "Este formato ya se usa en los documentos nuevos")) { await cargarCatalogo(); abrir(tipo, seleccion); } };
   const usarPredeterminado = async () => {
-    if (!window.confirm("Los documentos nuevos volverán a generarse con el formato predeterminado del sistema. Tus formatos personalizados se conservan. ¿Continuar?")) return;
+    if (!(await confirmar({ titulo: "¿Usar el formato predeterminado?", mensaje: "Los documentos nuevos volverán a generarse con el formato predeterminado del sistema. Tus formatos personalizados se conservan.", accion: "Usar predeterminado" }))) return;
     if (await ejecutar(() => api.post(`/formatos/${tipo}/usar-predeterminado`), "Formato predeterminado restaurado")) { await cargarCatalogo(); if (plantilla) abrir(tipo, seleccion); }
   };
-  const restaurar = async (v) => { if (!window.confirm(`Se creará una versión nueva con el contenido de la versión ${v}. El historial se conserva. ¿Continuar?`)) return; if (await ejecutar(() => api.post(`/formatos/plantillas/${seleccion}/restaurar/${v}`), `Versión ${v} restaurada`)) { setDlg(null); await cargarCatalogo(); abrir(tipo, seleccion); } };
+  const restaurar = async (v) => { if (!(await confirmar({ titulo: `¿Restaurar la versión ${v}?`, mensaje: `Se creará una versión nueva con el contenido de la versión ${v}. El historial se conserva.`, accion: "Restaurar" }))) return; if (await ejecutar(() => api.post(`/formatos/plantillas/${seleccion}/restaurar/${v}`), `Versión ${v} restaurada`)) { setDlg(null); await cargarCatalogo(); abrir(tipo, seleccion); } };
   const verVersion = async (v) => { const r = await ejecutar(() => api.get(`/formatos/plantillas/${seleccion}/versiones/${v}`)); if (r) { cambiar(r.data.configuracion); setDlg(null); toast.info(`Cargada la versión ${v} en el editor (sin guardar). Guarda para conservarla como versión nueva.`); } };
   const eliminar = async () => { if (await ejecutar(() => api.delete(`/formatos/plantillas/${seleccion}`), "Formato eliminado")) { setDlg(null); await cargarCatalogo(); abrir(tipo, "sistema"); } };
-  const descartar = () => { if (window.confirm("¿Descartar los cambios no guardados?")) { const c = JSON.parse(cfgGuardada); setCfg(c); resetHist(c); setSel(null); } };
+  const descartar = async () => { if (await confirmar({ titulo: "¿Descartar los cambios no guardados?", accion: "Descartar", peligro: true })) { const c = JSON.parse(cfgGuardada); setCfg(c); resetHist(c); setSel(null); } };
 
   const enUsoNombre = infoTipo?.activo ? (infoTipo.plantillas.find((p) => p.id === infoTipo.activo.template_id)?.nombre || "Personalizado") : null;
 
@@ -922,7 +925,7 @@ export default function MachotesEditor() {
               <div key={v.version} className="flex items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
                 <div className="flex-1">
                   <div className="text-sm font-medium text-slate-700">Versión {v.version}{v.version === plantilla.version_actual && <span className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">actual</span>}</div>
-                  <div className="text-[11px] text-slate-400">{v.fecha?.slice(0, 16).replace("T", " ")} · {v.creado_por}{v.nota ? ` · ${v.nota}` : ""}</div>
+                  <div className="text-[11px] text-slate-400">{fmtFechaHora(v.fecha)} · {v.creado_por}{v.nota ? ` · ${v.nota}` : ""}</div>
                 </div>
                 <Button size="sm" variant="ghost" onClick={() => verVersion(v.version)}>Abrir</Button>
                 {v.version !== plantilla.version_actual && <Button size="sm" variant="outline" onClick={() => restaurar(v.version)}><RotateCcw className="mr-1 h-3.5 w-3.5" />Restaurar</Button>}

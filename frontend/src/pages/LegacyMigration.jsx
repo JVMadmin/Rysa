@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { fmtFechaHora } from "@/lib/fechas";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -515,7 +516,7 @@ export default function LegacyMigration() {
                 {Object.entries(dataStatus.tablas_clave || {}).map(([f, v]) => (
                   <div key={f} className="rounded-md border border-slate-200 p-2 text-xs">
                     <div className="font-medium text-slate-700">{f}</div>
-                    <div className="text-slate-400">{nf.format(Math.round(v.bytes / 1024))} KB · {v.modificado?.slice(0, 16)}</div>
+                    <div className="text-slate-400">{nf.format(Math.round(v.bytes / 1024))} KB · {fmtFechaHora(v.modificado)}</div>
                   </div>
                 ))}
               </div>
@@ -652,7 +653,7 @@ export default function LegacyMigration() {
                     <tr key={s.snapshot_id} className="border-t border-slate-100">
                       <td className="p-2 font-mono text-xs">{s.snapshot_id}</td>
                       <td className="p-2 font-mono text-xs">{s.batch_id || "—"}</td>
-                      <td className="p-2">{(s.created_at || "").slice(0, 16).replace("T", " ")}</td>
+                      <td className="p-2">{fmtFechaHora(s.created_at)}</td>
                       <td className="p-2 font-mono text-[10px] text-slate-400">{s.source_hash || "—"}</td>
                       <td className="p-2 text-right text-emerald-600 font-medium">{nf.format((t.nuevos || 0) + (c.nuevos || 0))}</td>
                       <td className="p-2 text-right text-slate-400">{nf.format((t.sin_cambios || 0) + (c.sin_cambios || 0))}</td>

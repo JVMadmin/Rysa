@@ -3,6 +3,7 @@ import POS from "@/pages/POS";
 import { Button } from "@/components/ui/button";
 import { Plus, X, ShoppingCart } from "lucide-react";
 import { CartContext } from "@/context/CartContext";
+import { useConfirm } from "@/components/ConfirmProvider";
 
 let _seq = 2;
 
@@ -11,7 +12,8 @@ function one(id, label) {
 }
 
 export default function MultiPos() {
-  const { clearCartState } = useContext(CartContext);
+  const { clearCartState, carts } = useContext(CartContext);
+  const confirmar = useConfirm();
   // Se abre con UNA ventana: cada ventana montada descarga catálogo y clientes y
   // consulta el servidor por su cuenta. La segunda se abre con "Nueva ventana".
   const [windows, setWindows] = useState(() => [{ id: 1, label: "POS 1" }]);
@@ -22,7 +24,13 @@ export default function MultiPos() {
     setWindows((w) => [...w, { id, label: `POS ${id}` }]);
     setActive(id);
   };
-  const close = (id) => {
+  const close = async (id) => {
+    const n = (carts?.[id]?.cart || []).length;
+    if (n && !(await confirmar({
+      titulo: "¿Cerrar esta ventana?",
+      mensaje: `Tiene ${n} ${n === 1 ? "artículo" : "artículos"} en el ticket y se perderán.`,
+      accion: "Cerrar ventana", peligro: true,
+    }))) return;
     clearCartState(id);
     setWindows((w) => {
       const rest = w.filter((x) => x.id !== id);

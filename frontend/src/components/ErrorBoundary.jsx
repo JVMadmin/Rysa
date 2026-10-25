@@ -23,15 +23,16 @@ export default class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <div className={`${this.props.compacto ? "py-16" : "min-h-screen bg-slate-50"} flex items-center justify-center p-6`}>
           <div className="card-soft p-8 max-w-md text-center">
             <AlertTriangle className="w-12 h-12 mx-auto text-amber-500 mb-4" />
             <h1 className="font-display font-bold text-xl mb-2">
               Algo salió mal
             </h1>
             <p className="text-sm text-slate-500 mb-4">
-              Ocurrió un error inesperado en la aplicación. Intenta recargar la
-              página.
+              {this.props.compacto
+                ? "Esta pantalla tuvo un error. Puedes seguir usando el menú o recargarla."
+                : "Ocurrió un error inesperado en la aplicación. Intenta recargar la página."}
             </p>
             {this.state.error && (
               <p className="text-xs text-slate-400 mb-4 font-mono break-all">
@@ -43,7 +44,7 @@ export default class ErrorBoundary extends React.Component {
             )}
             <button
               onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition-colors"
             >
               Recargar página
             </button>

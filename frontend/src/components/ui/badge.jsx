@@ -18,6 +18,13 @@ const badgeVariants = cva(
           "border-transparent bg-success/10 text-success",
         warning:
           "border-transparent bg-warning/10 text-warning",
+        // Estados (estándar): peligro con texto rojo oscuro, info solo en mensajes, neutro gris.
+        danger:
+          "border-transparent bg-destructive/10 text-destructive",
+        info:
+          "border-transparent bg-blue-50 text-blue-700",
+        neutral:
+          "border-transparent bg-slate-100 text-slate-600",
         outline: "border border-slate-200 text-slate-600 bg-white",
       },
     },

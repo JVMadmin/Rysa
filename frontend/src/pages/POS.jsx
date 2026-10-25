@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl, fotoProducto } from "@/lib/api";
 import { numeroALetras } from "@/lib/utils";
 import { fmtFecha, fmtFechaHora } from "@/lib/fechas";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { useAuth } from "@/context/AuthContext";
 import { useCart, CartContext } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
@@ -131,6 +132,7 @@ export default function POS({ windowId, windowLabel, activo = true }) {
   activoRef.current = activo;
   const enPantalla = () => activoRef.current && document.visibilityState === "visible";
   const cobroKeyRef = useRef(null);   // llave anti-duplicados del cobro en curso
+  const pedirConfirmacion = useConfirm();
   const location = useLocation();
   const nav = useNavigate();
   const { user, can } = useAuth();
@@ -1095,7 +1097,13 @@ export default function POS({ windowId, windowLabel, activo = true }) {
     await api.post("/sales/suspend", { cliente_id: clienteId, items: cart, descuento_global: totals.descGlobalAmount, condicion, pagos: [], lista_precios: Number(lista), tipo_venta: tipoVenta });
     toast.success("Venta suspendida"); resetPos(); loadSuspended();
   };
-  const recuperar = async (s) => { setCart(s.payload.items); setDescGlobal(s.payload.descuento_global || 0); setClienteId(s.payload.cliente_id || clienteId); await api.delete(`/sales-suspended/${s.id}`); setSuspOpen(false); loadSuspended(); toast.info("Venta recuperada"); };
+  const recuperar = async (s) => {
+    if (cart.length && !(await pedirConfirmacion({
+      titulo: "¿Reemplazar el ticket actual?",
+      mensaje: `El ticket tiene ${cart.length} ${cart.length === 1 ? "artículo" : "artículos"}. Al recuperar la venta suspendida se reemplazan. Si quieres conservarlo, suspéndelo primero o ábrelo en una ventana nueva.`,
+      accion: "Reemplazar",
+    }))) return;
+    setCart(s.payload.items); setDescGlobal(s.payload.descuento_global || 0); setClienteId(s.payload.cliente_id || clienteId); await api.delete(`/sales-suspended/${s.id}`); setSuspOpen(false); loadSuspended(); toast.info("Venta recuperada"); };
 
   // Registrar abono directo al saldo del cliente desde el POS
   const guardarAbono = async () => {
@@ -1424,7 +1432,7 @@ export default function POS({ windowId, windowLabel, activo = true }) {
                 className={`flex items-center gap-1 text-[11px] whitespace-nowrap px-2 py-1 rounded border ${incluyeIva ? "border-brand-600 text-brand-600 bg-brand-600/5" : "border-slate-200 text-slate-400"}`}
                 data-testid="pos-incluye-iva">
                 <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center ${incluyeIva ? "bg-brand-600 border-brand-600" : "border-slate-300"}`}>{incluyeIva && <Check className="w-3 h-3 text-white" />}</span>
-                IVA (8%) aplicado
+                IVA ({settings.iva_tasa ?? 8}%) aplicado
               </button>
             </div>
             {totals.descGlobalAmount > 0 && <div className="text-xs text-brand-600">Descuento global{descMode === "%" ? ` (${descGlobal}%)` : ""}: -{money(totals.descGlobalAmount)}</div>}
@@ -1446,7 +1454,16 @@ export default function POS({ windowId, windowLabel, activo = true }) {
             <Input ref={searchRef} autoFocus value={q} onChange={(e) => search(e.target.value)} onKeyDown={onSearchKey} placeholder="Buscar producto..." className="pl-8 h-9 text-sm" data-testid="pos-search-input" />
           </div>
           <Button variant="outline" className="h-9 text-xs px-2" onClick={() => { setPriceCheckOpen(true); setTimeout(() => pcRef.current?.focus(), 100); }} data-testid="verificar-precio-btn"><Tag className="w-3 h-3 mr-1" /> Precio <kbd className="ml-1 text-[9px] bg-slate-100 px-1 rounded">F7</kbd></Button>
-          <Button variant="outline" className="h-9 text-xs px-2" onClick={() => setSuspOpen(true)} data-testid="ver-suspendidas"><PlayCircle className="w-3 h-3 mr-1" /> {suspended.length}</Button>
+          <Button variant="outline" className="h-9 text-xs px-2" onClick={() => setSuspOpen(true)} data-testid="ver-suspendidas"
+            title="Ventas suspendidas" aria-label={`Ventas suspendidas: ${suspended.length}`}><PlayCircle className="w-3 h-3 mr-1" /> {suspended.length}</Button>
+        </div>
+        {/* Atajos siempre visibles (antes solo aparecían cuando una búsqueda no encontraba nada). */}
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500" data-testid="pos-atajos">
+          <span><kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-mono">Enter</kbd> agrega por código o lector</span>
+          <span><kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-mono">F6</kbd> precios</span>
+          <span><kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-mono">F7</kbd> verificar</span>
+          <span><kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-mono">F8</kbd>/<kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-mono">F9</kbd> cantidad</span>
+          <span><kbd className="rounded border border-slate-200 bg-slate-50 px-1 font-mono">Ctrl+Enter</kbd> cobrar</span>
         </div>
 
         {/* Vista del catálogo: todos / favoritos / más vendidos */}
@@ -1586,7 +1603,7 @@ export default function POS({ windowId, windowLabel, activo = true }) {
               <Input value={nc.telefono} onChange={(e) => setNc((s) => ({ ...s, telefono: e.target.value }))} className="mt-1" data-testid="pos-nc-telefono" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">WhatsApp</Label>
               <Input value={nc.whatsapp} onChange={(e) => setNc((s) => ({ ...s, whatsapp: e.target.value }))} className="mt-1" data-testid="pos-nc-whatsapp" /></div>
-            <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Email</Label>
+            <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Correo</Label>
               <Input value={nc.correo} onChange={(e) => setNc((s) => ({ ...s, correo: e.target.value }))} className="mt-1" data-testid="pos-nc-correo" /></div>
             <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Dirección</Label>
               <Input value={nc.direccion} onChange={(e) => setNc((s) => ({ ...s, direccion: e.target.value }))} className="mt-1" data-testid="pos-nc-direccion" /></div>
@@ -1788,7 +1805,7 @@ export default function POS({ windowId, windowLabel, activo = true }) {
             {suspended.length === 0 && <p className="text-sm text-slate-400">No hay ventas suspendidas.</p>}
             {suspended.map((s) => (
               <div key={s.id} className="flex items-center justify-between border border-slate-200 rounded-md p-3">
-                <div><div className="text-sm font-medium">{s.payload.items.length} productos</div><div className="text-xs text-slate-400">{s.fecha?.slice(0, 16).replace("T", " ")}</div></div>
+                <div><div className="text-sm font-medium">{s.payload.items.length} productos</div><div className="text-xs text-slate-400">{fmtFechaHora(s.fecha)}</div></div>
                 <Button size="sm" onClick={() => recuperar(s)} className="bg-brand-600 hover:bg-brand-700"><PlayCircle className="w-4 h-4 mr-1" /> Recuperar</Button>
               </div>
             ))}
@@ -2124,8 +2141,8 @@ export default function POS({ windowId, windowLabel, activo = true }) {
             <div className="space-y-3">
               <div className="rounded-lg bg-brand-50 p-3 text-sm space-y-1">
                 <div className="flex justify-between gap-2"><span className="text-slate-500 shrink-0">Cliente</span><b className="truncate">{cotizacion.cliente_nombre || "Público General"}</b></div>
-                <div className="flex justify-between"><span className="text-slate-500">Emisión</span><b>{String(cotizacion.fecha || "").slice(0, 10)}</b></div>
-                <div className="flex justify-between"><span className="text-slate-500">Vence (auto: emisión + 2 días)</span><b>{String(cotizacion.fecha_vencimiento || "").slice(0, 10) || "—"}</b></div>
+                <div className="flex justify-between"><span className="text-slate-500">Emisión</span><b>{fmtFecha(cotizacion.fecha)}</b></div>
+                <div className="flex justify-between"><span className="text-slate-500">Vence (auto: emisión + 2 días)</span><b>{cotizacion.fecha_vencimiento ? fmtFecha(String(cotizacion.fecha_vencimiento).slice(0, 10)) : "—"}</b></div>
                 <div className="flex justify-between"><span className="text-slate-500">Partidas</span><b>{(cotizacion.items || []).length}</b></div>
                 <div className="flex justify-between border-t border-brand-100 pt-1">
                   <span className="font-bold text-brand-600">TOTAL (IVA incluido)</span>
@@ -2207,7 +2224,7 @@ export default function POS({ windowId, windowLabel, activo = true }) {
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-display font-black text-brand-600">{posComp.abono.folio}</div>
-                    <div className="text-[11px] text-slate-500">{(posComp.abono.fecha || new Date().toISOString()).slice(0, 10)} {(posComp.abono.fecha || "").slice(11, 16)}</div>
+                    <div className="text-[11px] text-slate-500">{fmtFechaHora(posComp.abono.fecha || new Date().toISOString())}</div>
                   </div>
                 </div>
                 <div className="p-4 space-y-3">

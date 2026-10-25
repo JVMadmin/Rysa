@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { fmtFecha, fmtFechaHora } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "sonner";
 import { Loader2, Receipt, Eye, RefreshCw, Search, ArrowRightCircle, FileText, Link2, Copy, QrCode, CheckCircle2, XCircle } from "lucide-react";
 
@@ -24,6 +26,7 @@ function ComprobantesPago({ cot }) {
   const [info, setInfo] = useState(null);
   const [busy, setBusy] = useState("");
   const [verBlob, setVerBlob] = useState("");
+  const confirmar = useConfirm();
 
   const cargar = async () => {
     try { setInfo((await api.get(`/sales/${cot.id}/comprobantes`)).data); }
@@ -39,7 +42,7 @@ function ComprobantesPago({ cot }) {
     catch { toast.error("No se pudo copiar"); }
   };
   const regenerar = async () => {
-    if (!window.confirm("¿Regenerar el enlace? El QR anterior dejará de funcionar de inmediato.")) return;
+    if (!(await confirmar({ titulo: "¿Regenerar el enlace?", mensaje: "El QR anterior dejará de funcionar de inmediato.", accion: "Regenerar", peligro: true }))) return;
     setBusy("reg");
     try {
       await api.post(`/sales/${cot.id}/pago-link?regenerar=true`);
@@ -51,8 +54,9 @@ function ComprobantesPago({ cot }) {
   const accion = async (id, act) => {
     let comentario = "";
     if (act === "rechazar") {
-      comentario = window.prompt("Comentario del rechazo (opcional):") ?? "";
-      if (comentario === null) return;
+      const r = await confirmar({ titulo: "Rechazar comprobante", etiquetaMotivo: "Comentario del rechazo", pedirMotivo: true, accion: "Rechazar", peligro: true });
+      if (!r) return;
+      comentario = r.motivo;
     }
     setBusy(id + act);
     try {
@@ -88,7 +92,7 @@ function ComprobantesPago({ cot }) {
       </div>
       <p className="text-[11px] text-slate-400 -mt-2">
         El QR dentro del PDF apunta aquí. Regenerar revoca el enlace anterior.
-        {info?.link?.expires_at && <> Vigente hasta <b>{String(info.link.expires_at).slice(0, 10)}</b>.</>}
+        {info?.link?.expires_at && <> Vigente hasta <b>{fmtFecha(info.link.expires_at)}</b>.</>}
       </p>
 
       {(info?.evidencias || []).length === 0 && (
@@ -103,14 +107,14 @@ function ComprobantesPago({ cot }) {
                 <span className="font-semibold">Comprobante #{(info.evidencias.length - i)}</span>
                 <Badge className={cls}>{label}</Badge>
               </div>
-              <div className="text-slate-500">{(e.created_at || "").slice(0, 16).replace("T", " ")} · {e.metodo}{e.referencia ? ` · Ref: ${e.referencia}` : ""}</div>
+              <div className="text-slate-500">{fmtFechaHora(e.created_at)} · {e.metodo}{e.referencia ? ` · Ref: ${e.referencia}` : ""}</div>
               <div className="text-[10px] text-slate-400 truncate">{e.original_filename} · {Math.round((e.file_size || 0) / 1024)} KB{e.reviewed_by ? ` · revisó ${e.reviewed_by}` : ""}</div>
               {e.review_comentario && <div className="text-[11px] text-slate-500 italic">"{e.review_comentario}"</div>}
               {e.abono_folio && <div className="text-[11px] text-emerald-700 font-medium">Abono aplicado a CxC: {e.abono_folio}</div>}
               <div className="flex gap-1.5 pt-0.5">
                 <Button size="sm" variant="outline" onClick={() => verArchivo(e)} disabled={!!busy}><Eye className="w-3.5 h-3.5 mr-1" /> Ver</Button>
                 {e.estado === "pendiente" && <>
-                  <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => accion(e.id, "aprobar")} disabled={!!busy}
+                  <Button size="sm" onClick={() => accion(e.id, "aprobar")} disabled={!!busy}
                           data-testid={`ev-aprobar-${i}`}><CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Aprobar</Button>
                   <Button size="sm" variant="destructive" onClick={() => accion(e.id, "rechazar")} disabled={!!busy}
                           data-testid={`ev-rechazar-${i}`}><XCircle className="w-3.5 h-3.5 mr-1" /> Rechazar</Button>
@@ -232,11 +236,11 @@ export default function Cotizaciones() {
                     <td className="p-2 font-medium text-brand-600">{c.folio}</td>
                     <td className="p-2">{c.cliente_nombre || "—"}</td>
                     <td className="p-2 text-slate-500">{c.vendedor_nombre || "—"}</td>
-                    <td className="p-2 text-slate-500">{(c.fecha || "").slice(0, 10)}</td>
+                    <td className="p-2 text-slate-500">{fmtFecha(c.fecha)}</td>
                     <td className="p-2 text-right font-semibold">{money(c.total)}</td>
                     <td className="p-2"><Badge className={cls}>{label}</Badge>{c.convertida_folio && <span className="ml-1 text-[10px] text-green-600">→ {c.convertida_folio}</span>}</td>
                     <td className="p-2 text-right whitespace-nowrap">
-                      <Button size="sm" variant="ghost" onClick={() => setDet(c)}><Eye className="w-4 h-4" /></Button>
+                      <Button size="sm" variant="ghost" onClick={() => setDet(c)} title="Ver cotización" aria-label="Ver cotización"><Eye className="w-4 h-4" /></Button>
                       {c.estado === "cotizacion" && can("venta.crear") && (
                         <Button size="sm" className="bg-brand-600 hover:bg-brand-700" onClick={() => { setConv(c); setConvForm({ condicion: "contado", metodo: "efectivo", monto: "", vendedor_id: "" }); }} data-testid={`convertir-${c.folio}`}>
                           <ArrowRightCircle className="w-3.5 h-3.5 mr-1" /> Vender
@@ -260,7 +264,7 @@ export default function Cotizaciones() {
               <div className="grid grid-cols-2 gap-3">
                 <div><Label className="text-xs text-slate-400">Cliente</Label><div className="font-semibold">{det.cliente_nombre || "—"}</div></div>
                 <div><Label className="text-xs text-slate-400">Vendedor</Label><div>{det.vendedor_nombre || "—"}</div></div>
-                <div><Label className="text-xs text-slate-400">Fecha</Label><div>{(det.fecha || "").slice(0, 16).replace("T", " ")}</div></div>
+                <div><Label className="text-xs text-slate-400">Fecha</Label><div>{fmtFechaHora(det.fecha)}</div></div>
                 <div><Label className="text-xs text-slate-400">Estado</Label><div className="capitalize">{det.estado}</div></div>
               </div>
               <div className="border rounded-md overflow-hidden">

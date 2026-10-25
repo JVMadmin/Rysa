@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { fmtFechaHora } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,7 +105,7 @@ export default function CajaAperturaModal({ open, onOpenChange, onAbierta }) {
                 <div><Label className="text-xs text-slate-400">Sesión</Label><div className="font-mono font-bold">{cajaActual.caja_nombre}</div></div>
                 <div><Label className="text-xs text-slate-400">Usuario</Label><div>{cajaActual.usuario_nombre}</div></div>
                 <div><Label className="text-xs text-slate-400">Sucursal</Label><div>{sucursalNombre}</div></div>
-                <div><Label className="text-xs text-slate-400">Apertura</Label><div>{(cajaActual.fecha_apertura || "").slice(0, 16).replace("T", " ")}</div></div>
+                <div><Label className="text-xs text-slate-400">Apertura</Label><div>{fmtFechaHora(cajaActual.fecha_apertura)}</div></div>
                 <div className="col-span-2"><Label className="text-xs text-slate-400">Monto inicial</Label><div className="font-display text-xl font-black">{money(cajaActual.fondo_inicial)}</div></div>
               </div>
             </div>

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { fmtFecha } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,27 +14,35 @@ import { format } from "date-fns";
 
 export default function CuentasPorPagar() {
   const [data, setData] = useState(null);
+  // `loading` solo cubre la primera carga (página completa); las recargas por
+  // filtro usan `recargando` y no desmontan el contenido (no se pierde el foco).
   const [loading, setLoading] = useState(true);
+  const [recargando, setRecargando] = useState(false);
   const [f, setF] = useState({ desde: "", hasta: "", proveedor: "", estado: "todos" });
+  // El filtro de proveedor espera 300 ms sin teclear antes de consultar.
+  const [proveedorQ, setProveedorQ] = useState("");
+  useEffect(() => { const t = setTimeout(() => setProveedorQ(f.proveedor.trim()), 300); return () => clearTimeout(t); }, [f.proveedor]);
+  const reqId = useRef(0);
   const [detOpen, setDetOpen] = useState(null);
   const [pagarOpen, setPagarOpen] = useState(null);
   const [pagoForm, setPagoForm] = useState({ monto: "", metodo_pago: "transferencia", referencia: "" });
   const [exporting, setExporting] = useState("");
 
   const load = async () => {
-    setLoading(true);
+    const req = ++reqId.current;
+    setRecargando(true);
     try {
       const params = {};
       if (f.desde) params.desde = f.desde;
       if (f.hasta) params.hasta = f.hasta;
-      if (f.proveedor) params.proveedor = f.proveedor;
+      if (proveedorQ) params.proveedor = proveedorQ;
       const { data } = await api.get("/cxp", { params });
-      setData(data);
-    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
-    finally { setLoading(false); }
+      if (req === reqId.current) setData(data);
+    } catch (e) { if (req === reqId.current) toast.error(formatApiError(e.response?.data?.detail)); }
+    finally { if (req === reqId.current) { setLoading(false); setRecargando(false); } }
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [f.desde, f.hasta, f.proveedor, f.estado]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [f.desde, f.hasta, proveedorQ, f.estado]);
 
   const handlePagar = async () => {
     if (!pagoForm.monto || Number(pagoForm.monto) <= 0) return toast.error("Ingresa un monto válido");
@@ -124,6 +133,7 @@ export default function CuentasPorPagar() {
             <Label className="text-xs uppercase text-slate-400">Proveedor</Label>
             <Input value={f.proveedor} onChange={(e) => setF(s => ({...s, proveedor: e.target.value}))} placeholder="Nombre o ID" className="mt-1 h-9 w-48" />
           </div>
+          {recargando && <Loader2 className="w-4 h-4 mt-5 animate-spin text-brand-600" aria-label="Actualizando" data-testid="cxp-recargando" />}
         </div>
       </div>
 
@@ -142,7 +152,7 @@ export default function CuentasPorPagar() {
                     <td className="p-2 font-medium">{f.folio}</td>
                     <td className="p-2">{f.proveedor_nombre}</td>
                     <td className="p-2 text-slate-500">{f.factura_numero || "—"}</td>
-                    <td className="p-2 text-right text-red-600">{f.fecha_vencimiento?.slice(0, 10)}</td>
+                    <td className="p-2 text-right text-red-600">{fmtFecha(f.fecha_vencimiento)}</td>
                     <td className="p-2 text-right">{money(f.total)}</td>
                     <td className="p-2 text-right font-semibold text-red-600">{money(f.saldo)}</td>
                     <td className="p-2"><Button size="sm" variant="outline" onClick={() => setPagarOpen(f)} data-testid={`pagar-${f.id}`}>Pagar</Button></td>
@@ -169,7 +179,7 @@ export default function CuentasPorPagar() {
                     <td className="p-2 font-medium">{f.folio}</td>
                     <td className="p-2">{f.proveedor_nombre}</td>
                     <td className="p-2 text-slate-500">{f.factura_numero || "—"}</td>
-                    <td className="p-2 text-right text-amber-600">{f.fecha_vencimiento?.slice(0, 10)}</td>
+                    <td className="p-2 text-right text-amber-600">{fmtFecha(f.fecha_vencimiento)}</td>
                     <td className="p-2 text-right">{money(f.total)}</td>
                     <td className="p-2 text-right font-semibold text-amber-600">{money(f.saldo)}</td>
                     <td className="p-2"><Button size="sm" variant="outline" onClick={() => setPagarOpen(f)} data-testid={`pagar-${f.id}`}>Pagar</Button></td>
@@ -221,7 +231,7 @@ export default function CuentasPorPagar() {
                 <div><Label className="text-xs text-slate-400">Abonado</Label><div>{money(detOpen.abonado)}</div></div>
                 <div><Label className="text-xs text-slate-400">Saldo</Label><div className="font-semibold">{money(detOpen.saldo)}</div></div>
                 <div><Label className="text-xs text-slate-400">Factura</Label><div>{detOpen.factura_numero || "—"}</div></div>
-                <div><Label className="text-xs text-slate-400">Fecha</Label><div>{detOpen.fecha_recepcion?.slice(0, 10)}</div></div>
+                <div><Label className="text-xs text-slate-400">Fecha</Label><div>{fmtFecha(detOpen.fecha_recepcion)}</div></div>
               </div>
             </div>
           )}

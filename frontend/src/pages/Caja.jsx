@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { fmtHora, fmtFechaHora } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { etiquetaEstado, etiquetaRol } from "@/lib/etiquetas";
 import { toast } from "sonner";
 import { Wallet, Lock, Unlock, ArrowDownCircle, ArrowUpCircle, Loader2, History, Search, Users, ArrowUpDown, HandCoins, Printer, FileSpreadsheet, ClipboardCheck } from "lucide-react";
 
@@ -19,6 +21,9 @@ export default function Caja() {
   const [mov, setMov] = useState({ tipo: "entrada", concepto: "", monto: "", referencia: "" });
   const [movFoto, setMovFoto] = useState(null);      // File del comprobante (§3.5)
   const [fotoSubiendo, setFotoSubiendo] = useState(false);
+  // Vista previa de la foto: una sola URL por archivo, liberada al cambiarla o al salir.
+  const movFotoUrl = useMemo(() => (movFoto ? URL.createObjectURL(movFoto) : ""), [movFoto]);
+  useEffect(() => () => { if (movFotoUrl) URL.revokeObjectURL(movFotoUrl); }, [movFotoUrl]);
   const [bloqueoRetiro, setBloqueoRetiro] = useState(null); // {mensaje,disponible,puede_forzar}
   // Bandeja de evidencias (solo admin)
   const [evidencias, setEvidencias] = useState([]);
@@ -33,6 +38,8 @@ export default function Caja() {
   const [repCaja, setRepCaja] = useState(null);   // {caja_nombre,usuario_nombre,fondo_inicial,fecha_apertura,fecha_cierre}
   const [repDesglose, setRepDesglose] = useState(null);
   const [hist, setHist] = useState([]);
+  const [histLoading, setHistLoading] = useState(true);
+  const [histErr, setHistErr] = useState("");
   const [histDesde, setHistDesde] = useState("");
   const [histHasta, setHistHasta] = useState("");
   const [histEstado, setHistEstado] = useState("all");
@@ -82,8 +89,15 @@ export default function Caja() {
     if (histHasta) params.hasta = histHasta;
     if (histEstado !== "all") params.estado = histEstado;
     if (histOperador !== "all") params.usuario_id = histOperador;
-    const { data } = await api.get("/caja/historial", { params });
-    setHist(data);
+    setHistLoading(true); setHistErr("");
+    try {
+      const { data } = await api.get("/caja/historial", { params });
+      setHist(data);
+    } catch (e) {
+      setHistErr(e.response?.data?.detail ? formatApiError(e.response.data.detail) : "No se pudo cargar el historial. Verifica tu conexión.");
+    } finally {
+      setHistLoading(false);
+    }
   };
 
   const loadOperadores = async () => {
@@ -98,8 +112,9 @@ export default function Caja() {
     }
   };
 
+  // Solo la primera carga muestra el indicador de página completa; las
+  // recargas (p. ej. tras cerrar caja) no desmontan la vista ni el reporte.
   const load = async () => {
-    setLoading(true);
     try {
       const { data } = await api.get("/caja/actual");
       setData(data);
@@ -285,15 +300,15 @@ export default function Caja() {
                   const imprimible = ["retiro", "entrada", "gasto", "devolucion"].includes(m.tipo);
                   return (
                     <tr key={m.id} className="border-t border-slate-100">
-                      <td className="p-3 text-slate-500">{m.fecha?.slice(11, 16)}</td>
-                      <td className="p-3"><Badge variant="outline">{m.folio ? `${m.tipo} · ${m.folio}` : m.tipo}</Badge></td>
+                      <td className="p-3 text-slate-500">{fmtHora(m.fecha)}</td>
+                      <td className="p-3"><Badge variant="outline">{m.folio ? `${etiquetaEstado(m.tipo)} · ${m.folio}` : etiquetaEstado(m.tipo)}</Badge></td>
                       <td className="p-3">{m.concepto}</td><td className="p-3 text-slate-500">{m.referencia}</td>
                       <td className={`p-3 text-right font-semibold ${en > 0 ? "text-green-600" : "text-slate-300"}`}>{en > 0 ? money(en) : "—"}</td>
                       <td className={`p-3 text-right font-semibold ${sa > 0 ? "text-red-600" : "text-slate-300"}`}>{sa > 0 ? money(sa) : "—"}</td>
                       <td className="p-3 text-right font-medium tabular-nums">{money(saldo)}</td>
                       <td className="p-3 text-center">
                         {imprimible && (
-                          <Button size="icon" variant="ghost" title={m.tipo === "retiro" ? "Ticket de entrega de efectivo" : "Comprobante"} disabled={compBusy === m.id} onClick={() => abrirComprobante(m)} data-testid={`ticket-${m.folio || m.id}`}>
+                          <Button size="icon" variant="ghost" title={m.tipo === "retiro" ? "Ticket de entrega de efectivo" : "Comprobante"} aria-label={m.tipo === "retiro" ? "Ticket de entrega de efectivo" : "Ver comprobante"} disabled={compBusy === m.id} onClick={() => abrirComprobante(m)} data-testid={`ticket-${m.folio || m.id}`}>
                             {compBusy === m.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
                           </Button>
                         )}
@@ -354,8 +369,8 @@ export default function Caja() {
                       const f = (m.fecha || "");
                       return (
                         <tr key={i} className="border-t border-slate-100">
-                          <td className="p-2 text-slate-500 whitespace-nowrap">{f.slice(11, 16)}</td>
-                          <td className="p-2"><Badge variant="outline">{m.tipo}</Badge></td>
+                          <td className="p-2 text-slate-500 whitespace-nowrap">{fmtHora(f)}</td>
+                          <td className="p-2"><Badge variant="outline">{etiquetaEstado(m.tipo)}</Badge></td>
                           <td className="p-2">{m.concepto}</td>
                           <td className="p-2 text-slate-400">{m.referencia || "—"}</td>
                           <td className="p-2 text-right text-green-700">{entrada ? money(entrada) : ""}</td>
@@ -385,8 +400,8 @@ export default function Caja() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
             <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Caja</div><div className="font-semibold">{repCaja?.caja_nombre || "Caja"}</div></div>
             <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Cajero</div><div className="font-semibold">{repCaja?.usuario_nombre || "—"}</div></div>
-            <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Apertura</div><div className="font-medium">{(repCaja?.fecha_apertura || "").slice(0, 16).replace("T", " ") || "—"}</div></div>
-            <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Cierre</div><div className="font-medium">{(repCaja?.fecha_cierre || cierre?.fecha_cierre || "").slice(0, 16).replace("T", " ") || "—"}</div></div>
+            <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Apertura</div><div className="font-medium">{fmtFechaHora(repCaja?.fecha_apertura) || "—"}</div></div>
+            <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Cierre</div><div className="font-medium">{fmtFechaHora(repCaja?.fecha_cierre || cierre?.fecha_cierre) || "—"}</div></div>
           </div>
 
           {/* Arqueo */}
@@ -457,8 +472,8 @@ export default function Caja() {
                         const f = (m.fecha || "");
                         return (
                           <tr key={m.id || i} className="border-t border-slate-100">
-                            <td className="p-2 text-slate-500 whitespace-nowrap">{f.slice(11, 16)}</td>
-                            <td className="p-2"><Badge variant="outline">{m.folio ? `${m.tipo} ${m.folio}` : m.tipo}</Badge></td>
+                            <td className="p-2 text-slate-500 whitespace-nowrap">{fmtHora(f)}</td>
+                            <td className="p-2"><Badge variant="outline">{m.folio ? `${etiquetaEstado(m.tipo)} ${m.folio}` : etiquetaEstado(m.tipo)}</Badge></td>
                             <td className="p-2 max-w-[180px] truncate" title={m.concepto}>{m.concepto}</td>
                             <td className="p-2 text-slate-400">{m.referencia || "—"}</td>
                             <td className="p-2 text-slate-400">{m.usuario_nombre || "—"}</td>
@@ -496,7 +511,7 @@ export default function Caja() {
               </Button>
             </div>
             <p className="text-[11px] text-slate-400 mt-1.5">
-              El corte incluye el ledger completo con saldo corrido; las ventas incluyen folio, cliente, método y total.
+              El corte incluye la bitácora completa con saldo corrido; las ventas incluyen folio, cliente, método y total.
             </p>
           </div>
 
@@ -527,9 +542,9 @@ export default function Caja() {
                     <tr key={o.usuario_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`caja-global-${o.usuario_id}`}>
                       <td className="p-2 font-semibold text-slate-800">{o.caja ? o.caja.caja_nombre : (o.caja_numero ? `Caja ${o.caja_numero}` : "—")}</td>
                       <td className="p-2">{o.usuario_nombre}</td>
-                      <td className="p-2 text-slate-500">{o.role}</td>
-                      <td className="p-2"><Badge className={o.estado === "abierta" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}>{o.estado}</Badge></td>
-                      <td className="p-2 text-slate-500">{o.caja ? (o.caja.fecha_apertura || "").slice(0, 16).replace("T", " ") : "—"}</td>
+                      <td className="p-2 text-slate-500">{etiquetaRol(o.role)}</td>
+                      <td className="p-2"><Badge className={o.estado === "abierta" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}>{etiquetaEstado(o.estado)}</Badge></td>
+                      <td className="p-2 text-slate-500">{o.caja ? fmtFechaHora(o.caja.fecha_apertura) : "—"}</td>
                       <td className="p-2 text-right">{o.caja ? money(o.caja.fondo_inicial) : "—"}</td>
                       <td className="p-2 text-right">{o.resumen ? money(o.resumen.efectivo_esperado) : "—"}</td>
                       <td className="p-2 text-right">
@@ -567,7 +582,7 @@ export default function Caja() {
                 {(operadores || []).map((o) => <SelectItem key={o.usuario_id} value={o.usuario_id}>{o.usuario_nombre}</SelectItem>)}
               </SelectContent>
             </Select>
-            <Button variant="outline" className="h-9" onClick={loadHist} data-testid="hist-buscar"><Search className="w-4 h-4" /></Button>
+            <Button variant="outline" className="h-9" onClick={loadHist} title="Buscar" aria-label="Buscar" data-testid="hist-buscar"><Search className="w-4 h-4" /></Button>
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -585,14 +600,16 @@ export default function Caja() {
               <th className="p-2"></th>
             </tr></thead>
             <tbody>
-              {hist.length === 0 && <tr><td colSpan={10} className="p-6 text-center text-slate-400">Sin registros en el rango.</td></tr>}
-              {sortedHist.map((c) => (
+              {histLoading && hist.length === 0 && <tr><td colSpan={10} className="p-6 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-brand-600" /></td></tr>}
+              {!histLoading && histErr && <tr><td colSpan={10} className="p-6 text-center"><p className="text-sm text-red-600 mb-2">{histErr}</p><Button variant="outline" size="sm" onClick={loadHist} data-testid="hist-reintentar">Reintentar</Button></td></tr>}
+              {!histLoading && !histErr && hist.length === 0 && <tr><td colSpan={10} className="p-6 text-center text-slate-400">Sin registros en el rango.</td></tr>}
+              {!histErr && sortedHist.map((c) => (
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`caja-hist-${c.id}`}>
                   <td className="p-2 font-semibold text-slate-800">{c.caja_nombre || "Caja"}</td>
-                  <td className="p-2"><Badge className={c.estado === "abierta" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}>{c.estado}</Badge></td>
+                  <td className="p-2"><Badge className={c.estado === "abierta" ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}>{etiquetaEstado(c.estado)}</Badge></td>
                   <td className="p-2">{c.usuario_nombre}</td>
-                  <td className="p-2 text-slate-500">{(c.fecha_apertura || "").slice(0, 16).replace("T", " ")}</td>
-                  <td className="p-2 text-slate-500">{c.fecha_cierre ? c.fecha_cierre.slice(0, 16).replace("T", " ") : "—"}</td>
+                  <td className="p-2 text-slate-500">{fmtFechaHora(c.fecha_apertura)}</td>
+                  <td className="p-2 text-slate-500">{c.fecha_cierre ? fmtFechaHora(c.fecha_cierre) : "—"}</td>
                   <td className="p-2 text-right">{money(c.fondo_inicial)}</td>
                   <td className="p-2 text-right">{c.cierre ? money(c.cierre.efectivo_esperado) : "—"}</td>
                   <td className="p-2 text-right">{c.cierre ? money(c.cierre.efectivo_contado) : "—"}</td>
@@ -610,7 +627,7 @@ export default function Caja() {
         <div className="card-soft p-4 space-y-3" data-testid="caja-evidencias">
           <div className="flex items-center justify-between">
             <h3 className="font-display font-bold flex items-center gap-2">📷 Evidencias por revisar ({evidencias.length})</h3>
-            <Button size="sm" variant="ghost" onClick={loadEvidencias}><Search className="w-4 h-4" /></Button>
+            <Button size="sm" variant="ghost" onClick={loadEvidencias} title="Actualizar evidencias" aria-label="Actualizar evidencias"><Search className="w-4 h-4" /></Button>
           </div>
           <div className="grid md:grid-cols-2 gap-3">
             {evidencias.map((ev) => (
@@ -619,9 +636,9 @@ export default function Caja() {
                   <img src={fileUrl(ev.evidencia_url)} alt="comprobante" className="w-16 h-16 object-cover rounded-md border" loading="lazy" />
                 </a>
                 <div className="min-w-0 flex-1 text-sm">
-                  <div className="font-semibold capitalize">{ev.tipo} {ev.folio ? `· ${ev.folio}` : ""}</div>
+                  <div className="font-semibold">{etiquetaEstado(ev.tipo)} {ev.folio ? `· ${ev.folio}` : ""}</div>
                   <div className="text-slate-500 truncate">{ev.concepto}</div>
-                  <div className="text-xs text-slate-400">{(ev.fecha || "").slice(0, 16).replace("T", " ")} · {ev.usuario_nombre} · {ev.caja_nombre}</div>
+                  <div className="text-xs text-slate-400">{fmtFechaHora(ev.fecha)} · {ev.usuario_nombre} · {ev.caja_nombre}</div>
                   <Badge variant="outline" className="mt-1 text-[10px] uppercase">{ev.evidencia_estado}</Badge>
                 </div>
                 <Button size="sm" variant="outline" onClick={() => revisarEvidencia(ev.id)} data-testid={`evid-revisar-${ev.id}`}>
@@ -638,8 +655,8 @@ export default function Caja() {
           <DialogHeader><DialogTitle className="font-display">Corte de caja · {detCaja?.caja_nombre || "Caja"} · {detCaja?.usuario_nombre}</DialogTitle></DialogHeader>
           {detCaja && (
             <div className="text-sm space-y-1">
-              <div className="flex justify-between"><span>Apertura</span><span>{(detCaja.fecha_apertura || "").slice(0, 16).replace("T", " ")}</span></div>
-              <div className="flex justify-between"><span>Cierre</span><span>{detCaja.fecha_cierre ? detCaja.fecha_cierre.slice(0, 16).replace("T", " ") : "En operación"}</span></div>
+              <div className="flex justify-between"><span>Apertura</span><span>{fmtFechaHora(detCaja.fecha_apertura)}</span></div>
+              <div className="flex justify-between"><span>Cierre</span><span>{detCaja.fecha_cierre ? fmtFechaHora(detCaja.fecha_cierre) : "En operación"}</span></div>
               <div className="flex justify-between"><span>Fondo inicial</span><span>{money(detCaja.fondo_inicial)}</span></div>
               {detCaja.cierre && <>
                 <div className="flex justify-between"><span>Efectivo esperado</span><span>{money(detCaja.cierre.efectivo_esperado)}</span></div>
@@ -668,7 +685,7 @@ export default function Caja() {
                       const saldo = Number(detCaja.fondo_inicial || 0) + detCaja.movimientos.slice(0, i + 1).reduce((acc, x) => acc + (["venta", "entrada"].includes(x.tipo) ? Number(x.monto) : 0) - (["retiro", "gasto", "devolucion"].includes(x.tipo) ? Number(x.monto) : 0), 0);
                       return (
                         <div key={m.id} className="flex justify-between py-1 text-xs text-slate-600 border-b border-slate-50">
-                          <span className="truncate pr-2">{m.fecha?.slice(11, 16)} · {m.tipo} · {m.concepto}</span>
+                          <span className="truncate pr-2">{fmtHora(m.fecha)} · {etiquetaEstado(m.tipo)} · {m.concepto}</span>
                           <span className={`whitespace-nowrap tabular-nums ${en > 0 ? "text-green-600" : sa > 0 ? "text-red-600" : "text-slate-400"}`}>{en > 0 ? `+${money(en)}` : sa > 0 ? `-${money(sa)}` : "—"} · {money(saldo)}</span>
                         </div>
                       );
@@ -726,7 +743,7 @@ export default function Caja() {
                   </label>
                   {movFoto && (
                     <>
-                      <img src={URL.createObjectURL(movFoto)} alt="evidencia" className="w-10 h-10 object-cover rounded-md border" />
+                      <img src={movFotoUrl} alt="evidencia" className="w-10 h-10 object-cover rounded-md border" />
                       <button type="button" onClick={() => setMovFoto(null)} className="text-slate-400 hover:text-red-600 text-sm">Quitar</button>
                     </>
                   )}

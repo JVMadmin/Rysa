@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { fmtFecha, hoyLocal } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,8 +8,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { etiquetaEstado } from "@/lib/etiquetas";
 import { toast } from "sonner";
-import { Loader2, Plus, ShoppingCart, Eye, Trash2, RefreshCw, CheckCircle2, ArrowRightCircle } from "lucide-react";
+import { Loader2, Plus, Pencil, ShoppingCart, Eye, Trash2, RefreshCw, CheckCircle2, ArrowRightCircle } from "lucide-react";
 
 const ESTADOS = {
   borrador: ["bg-slate-100 text-slate-600", "Borrador"],
@@ -22,6 +25,7 @@ const METODOS = [["efectivo", "Efectivo"], ["tarjeta", "Tarjeta"], ["transferenc
 
 export default function Pedidos() {
   const { can } = useAuth();
+  const confirmar = useConfirm();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -38,7 +42,7 @@ export default function Pedidos() {
   const [convForm, setConvForm] = useState({ condicion: "contado", metodo: "efectivo", monto: "" });
   const [convSaving, setConvSaving] = useState(false);
 
-  const blank = () => ({ cliente_id: "", fecha_pedido: new Date().toISOString().slice(0, 10), fecha_entrega: "", notas: "", items: [] });
+  const blank = () => ({ cliente_id: "", fecha_pedido: hoyLocal(), fecha_entrega: "", notas: "", items: [] });
   const [form, setForm] = useState(blank());
 
   const load = async () => {
@@ -103,8 +107,8 @@ export default function Pedidos() {
   };
 
   const cambiarEstado = async (p, estado) => {
-    if (estado === "cancelado" && !window.confirm(`¿Cancelar el pedido ${p.folio}?`)) return;
-    try { await api.post(`/pedidos/${p.id}/estado`, { estado }); toast.success(`Pedido ${p.folio}: ${estado}`); load(); }
+    if (estado === "cancelado" && !(await confirmar({ titulo: `¿Cancelar el pedido ${p.folio}?`, accion: "Cancelar pedido", cancelar: "Volver", peligro: true }))) return;
+    try { await api.post(`/pedidos/${p.id}/estado`, { estado }); toast.success(`Pedido ${p.folio}: ${etiquetaEstado(estado)}`); load(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -183,14 +187,14 @@ export default function Pedidos() {
                   <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`pedido-${p.folio}`}>
                     <td className="p-2 font-medium text-brand-600">{p.folio}</td>
                     <td className="p-2">{p.cliente_nombre || "—"}</td>
-                    <td className="p-2 text-slate-500">{(p.fecha_pedido || "").slice(0, 10)}</td>
-                    <td className="p-2 text-slate-500">{(p.fecha_entrega || "").slice(0, 10) || "—"}</td>
+                    <td className="p-2 text-slate-500">{fmtFecha(p.fecha_pedido)}</td>
+                    <td className="p-2 text-slate-500">{fmtFecha(p.fecha_entrega) || "—"}</td>
                     <td className="p-2 text-right font-semibold">{money(p.total)}</td>
                     <td className="p-2"><Badge className={cls}>{label}</Badge>{p.convertida_folio && <span className="ml-1 text-[10px] text-green-600">→ {p.convertida_folio}</span>}</td>
                     <td className="p-2 text-right whitespace-nowrap">
-                      <Button size="sm" variant="ghost" onClick={() => setDet(p)}><Eye className="w-4 h-4" /></Button>
+                      <Button size="sm" variant="ghost" onClick={() => setDet(p)} title="Ver pedido" aria-label="Ver pedido"><Eye className="w-4 h-4" /></Button>
                       {["borrador", "confirmado", "surtido"].includes(p.estado) && (
-                        <Button size="sm" variant="outline" onClick={() => abrirEditar(p)}><Plus className="w-3.5 h-3.5" /></Button>
+                        <Button size="sm" variant="outline" onClick={() => abrirEditar(p)} title="Editar pedido" aria-label="Editar pedido"><Pencil className="w-3.5 h-3.5" /></Button>
                       )}
                       {["borrador", "confirmado", "surtido"].includes(p.estado) && can("venta.crear") && (
                         <Button size="sm" className="bg-brand-600 hover:bg-brand-700 ml-1" onClick={() => { setConv(p); setConvForm({ condicion: "contado", metodo: "efectivo", monto: "" }); }} data-testid={`convertir-pedido-${p.folio}`}>
@@ -215,8 +219,8 @@ export default function Pedidos() {
               <div className="grid grid-cols-2 gap-3">
                 <div><Label className="text-xs text-slate-400">Cliente</Label><div className="font-semibold">{det.cliente_nombre || "—"}</div></div>
                 <div><Label className="text-xs text-slate-400">Vendedor</Label><div>{det.vendedor_nombre || "—"}</div></div>
-                <div><Label className="text-xs text-slate-400">Fecha pedido</Label><div>{(det.fecha_pedido || "").slice(0, 10)}</div></div>
-                <div><Label className="text-xs text-slate-400">Entrega</Label><div>{(det.fecha_entrega || "").slice(0, 10) || "—"}</div></div>
+                <div><Label className="text-xs text-slate-400">Fecha pedido</Label><div>{fmtFecha(det.fecha_pedido)}</div></div>
+                <div><Label className="text-xs text-slate-400">Entrega</Label><div>{fmtFecha(det.fecha_entrega) || "—"}</div></div>
               </div>
               <div className="border rounded-md overflow-hidden">
                 <table className="w-full text-xs">
@@ -294,7 +298,7 @@ export default function Pedidos() {
                       <td className="p-2 max-w-[180px] truncate">{i.descripcion}</td>
                       <td className="p-2"><Input type="number" value={i.solicitado} onChange={(e) => upItem(k, "solicitado", e.target.value)} className="h-6 w-20 text-right p-1" /></td>
                       <td className="p-2"><Input type="number" value={i.precio} onChange={(e) => upItem(k, "precio", e.target.value)} className="h-6 w-24 text-right p-1" /></td>
-                      <td className="p-2"><button type="button" onClick={() => delItem(k)}><Trash2 className="w-4 h-4 text-slate-400 hover:text-red-600" /></button></td>
+                      <td className="p-2"><button type="button" onClick={() => delItem(k)} title="Eliminar renglón" aria-label="Eliminar renglón"><Trash2 className="w-4 h-4 text-slate-400 hover:text-red-600" /></button></td>
                     </tr>
                   ))}</tbody>
                 </table>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { hoyLocal, inicioMesLocal } from "@/lib/fechas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,8 +23,8 @@ export default function Finanzas() {
   const [r, setR] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [desde, setDesde] = useState(() => new Date().toISOString().slice(0, 7) + "-01");
-  const [hasta, setHasta] = useState(() => new Date().toISOString().slice(0, 10));
+  const [desde, setDesde] = useState(() => inicioMesLocal());
+  const [hasta, setHasta] = useState(() => hoyLocal());
   const [exporting, setExporting] = useState("");
 
   const load = async () => {

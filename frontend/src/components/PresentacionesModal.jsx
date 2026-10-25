@@ -5,12 +5,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { api, formatApiError, money } from "@/lib/api";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "sonner";
 import { Boxes, Plus, Trash2, Edit2, Check, X, Barcode, Package, Info, Loader2 } from "lucide-react";
 
 const SUGERENCIAS = ["CAJA", "PAQUETE", "DISPLAY", "BULTO", "REJA", "DOCENA", "CIENTO", "SIX-PACK"];
 
 export default function PresentacionesModal({ open, onClose, product, onUpdated }) {
+  const confirmar = useConfirm();
   const [loading, setLoading] = useState(false);
   const [presentations, setPresentations] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -118,7 +120,7 @@ export default function PresentacionesModal({ open, onClose, product, onUpdated 
     if (p.es_base) {
       return toast.error("No se puede eliminar la unidad base del producto");
     }
-    if (!window.confirm(`¿Seguro que deseas eliminar la presentación ${p.nombre}?`)) return;
+    if (!(await confirmar({ titulo: `¿Eliminar la presentación ${p.nombre}?`, accion: "Eliminar", peligro: true }))) return;
 
     try {
       await api.delete(`/products/${product.id}/presentations/${p.id}`);

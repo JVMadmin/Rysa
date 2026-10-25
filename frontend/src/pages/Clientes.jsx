@@ -11,6 +11,8 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { TableScroller } from "@/components/TableScroller";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { etiquetaEstado } from "@/lib/etiquetas";
 import { toast } from "sonner";
 import { MapContainer, TileLayer, Marker, useMapEvents } from "react-leaflet";
 import L from "leaflet";
@@ -91,8 +93,10 @@ const isEmptyVal = (v) => v === undefined || v === null || v === "" || v === 0 |
 
 export default function Clientes() {
   const { can } = useAuth();
+  const confirmar = useConfirm();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState("");
   const [q, setQ] = useState("");
   const [filtro, setFiltro] = useState("all");
   const [fEstado, setFEstado] = useState("");
@@ -154,10 +158,14 @@ export default function Clientes() {
   };
 
   const load = async () => {
-    setLoading(true);
+    setLoading(true); setLoadErr("");
     const params = makeParams();
-    const { data } = await api.get("/clients", { params });
-    setRows(data); setLoading(false);
+    try {
+      const { data } = await api.get("/clients", { params });
+      setRows(data);
+    } catch (e) {
+      setLoadErr(e.response?.data?.detail ? formatApiError(e.response.data.detail) : "No se pudieron cargar los clientes. Verifica tu conexión.");
+    } finally { setLoading(false); }
   };
     // § Búsqueda en vivo (debounce): filtra mientras se escribe.
   const mountedRef = useRef(false);
@@ -224,6 +232,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
 
   // Toggle rápido de crédito
   const toggleCredito = async (c, valor) => {
+    if (!valor && !(await confirmar({ titulo: `¿Quitar el crédito a ${c.nombre}?`, mensaje: "Ya no podrá comprar a crédito hasta que se lo vuelvas a autorizar.", accion: "Quitar crédito", peligro: true }))) return;
     setRows((rs) => rs.map((x) => (x.id === c.id ? { ...x, credito_autorizado: valor } : x)));
     try {
       await api.patch(`/clients/${c.id}/credito-toggle`, { valor });
@@ -235,6 +244,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
   };
   // Cambio rápido de estado
   const changeEstado = async (c, estado) => {
+    if (estado === "inactivo" && !(await confirmar({ titulo: `¿Marcar a ${c.nombre} como inactivo?`, mensaje: "Dejará de aparecer para nuevas ventas. Puedes reactivarlo después.", accion: "Marcar inactivo", peligro: true }))) return;
     setRows((rs) => rs.map((x) => (x.id === c.id ? { ...x, estado } : x)));
     try { await api.patch(`/clients/${c.id}/estado`, null, { params: { estado } }); toast.success("Estado actualizado"); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); load(); }
@@ -325,7 +335,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
     <div className="space-y-5" data-testid="clientes-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="font-display text-2xl font-black tracking-tight">Clientes</h1>
-          <p className="text-slate-500 text-sm">{rows.length} clientes · estructura completa (52 campos)</p></div>
+          <p className="text-slate-500 text-sm">{rows.length} clientes · todas las columnas</p></div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={downloadPlantilla} data-testid="cli-plantilla"><FileDown className="w-4 h-4 mr-1" /> Plantilla</Button>
           {can("importar") && <Button variant="outline" onClick={() => fileRef.current.click()} data-testid="cli-import-btn"><Upload className="w-4 h-4 mr-1" /> Importar</Button>}
@@ -399,8 +409,9 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
           </tr></thead>
           <tbody className="text-base">
             {loading && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
-            {!loading && pageRows.length === 0 && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center text-slate-400"><Users className="w-8 h-8 mx-auto mb-2" />Sin clientes.</td></tr>}
-            {!loading && pageRows.map((c) => {
+            {!loading && loadErr && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center"><AlertTriangle className="w-8 h-8 mx-auto mb-2 text-brand-600" /><p className="text-sm text-slate-600 mb-3">{loadErr}</p><Button variant="outline" onClick={load} data-testid="cli-reintentar">Reintentar</Button></td></tr>}
+            {!loading && !loadErr && pageRows.length === 0 && <tr><td colSpan={visibleCols.length + 1} className="p-10 text-center text-slate-400"><Users className="w-8 h-8 mx-auto mb-2" />Sin clientes.</td></tr>}
+            {!loading && !loadErr && pageRows.map((c) => {
               const cs = creditStatus(c);
               return (
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cli-row-${c.codigo}`}>
@@ -410,7 +421,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                         <div className="flex items-center justify-center gap-2">
                           <span className={`w-2.5 h-2.5 rounded-full ${cs.dot}`} title={cs.label} data-testid={`cli-credito-dot-${c.codigo}`} />
                           <Switch checked={!!c.credito_autorizado} disabled={!can("credito.autorizar")}
-                            onCheckedChange={(v) => toggleCredito(c, v)} data-testid={`cli-credito-switch-${c.codigo}`} />
+                            onCheckedChange={(v) => toggleCredito(c, v)} aria-label={c.credito_autorizado ? "Quitar crédito" : "Autorizar crédito"} title={c.credito_autorizado ? "Quitar crédito" : "Autorizar crédito"} data-testid={`cli-credito-switch-${c.codigo}`} />
                         </div>
                       </td>
                     );
@@ -425,7 +436,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                               <SelectItem value="inactivo">Inactivo</SelectItem>
                             </SelectContent>
                           </Select>
-                        ) : <Badge className={estadoBadge[c.estado]}>{c.estado}</Badge>}
+                        ) : <Badge className={estadoBadge[c.estado]}>{etiquetaEstado(c.estado)}</Badge>}
                       </td>
                     );
                     const v = colVal(c, col.key);
@@ -441,7 +452,7 @@ useEffect(() => { load(); /* eslint-disable-next-line */ }, [filtro]);
                     );
                   })}
                   <td className="p-3 text-right">
-                    {can("cliente.editar") && <Button size="icon" variant="ghost" onClick={() => openEdit(c)} data-testid={`edit-cli-${c.codigo}`}><Pencil className="w-4 h-4" /></Button>}
+                    {can("cliente.editar") && <Button size="icon" variant="ghost" onClick={() => openEdit(c)} title="Editar cliente" aria-label="Editar cliente" data-testid={`edit-cli-${c.codigo}`}><Pencil className="w-4 h-4" /></Button>}
                   </td>
                 </tr>
               );

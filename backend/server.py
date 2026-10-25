@@ -41,7 +41,7 @@ from deps import (
     user_has_permission, next_counter, log_audit, revoke_user_sessions, MODULES,
     ROLE_PERMISSIONS, ACCESS_TOKEN_TTL_SECONDS, REFRESH_TOKEN_TTL_SECONDS,
     ver_todas_ventas, DEFAULT_MODULES_NON_PRIVILEGED,
-    es_rol_privilegiado, ahora_local, hoy_local, filtro_dias_local, fecha_local, inicio_dia_utc,
+    es_rol_privilegiado, ahora_local, hoy_local, filtro_dias_local, fecha_local, inicio_dia_utc, hora_local,
 )
 import pgstore.pos as _pgpos
 import pgstore.cxc as _pgcxc
@@ -2401,10 +2401,10 @@ async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = 
 async def mi_reporte_hoy(user: dict = Depends(get_current_user)):
     """Reporte rápido PROPIO del día: tickets, total vendido y desglose por
     forma de pago. Nunca incluye utilidad/margen (§3.2)."""
-    hoy = now_utc().date().isoformat()
+    hoy = hoy_local()   # día de la sucursal, no UTC
     ventas = await db.sales.find(
-        {"usuario_id": user["id"], "estado": "confirmada", "fecha": {"$regex": "^" + hoy}},
-        {"_id": 0, "folio": 1, "hora": 1, "total": 1, "pagos": 1, "condicion": 1}
+        {"usuario_id": user["id"], "estado": "confirmada", "$and": [filtro_dias_local("fecha", hoy, hoy)]},
+        {"_id": 0, "folio": 1, "fecha": 1, "total": 1, "pagos": 1, "condicion": 1}
     ).sort("fecha", -1).to_list(2000)
     metodos = {}
     total = 0.0
@@ -2423,7 +2423,8 @@ async def mi_reporte_hoy(user: dict = Depends(get_current_user)):
         if not metas_txt:
             metas_txt = ["credito" if s.get("condicion") == "credito" else "contado"]
             metodos[metas_txt[0]] = round(metodos.get(metas_txt[0], 0) + t, 2)
-        tickets.append({"folio": s.get("folio"), "hora": s.get("hora"),
+        tickets.append({"folio": s.get("folio"), "fecha": s.get("fecha"),
+                        "hora": hora_local(s.get("fecha")),
                         "total": t, "metodo": " + ".join(metas_txt)})
     return {"fecha": hoy, "num_ventas": len(ventas), "total": total,
             "por_metodo": metodos, "tickets": tickets}
@@ -2701,7 +2702,7 @@ async def caja_ventas_xlsx(caja_id: str, ambito: str = "turno",
 
     filtros = (f"Caja: {caja.get('caja_nombre') or 'Caja'} · Cajero: {caja.get('usuario_nombre') or '—'} · "
                f"Apertura: {(caja.get('fecha_apertura') or '')[:16].replace('T', ' ')} · Ámbito: {'día' if ambito == 'dia' else 'turno'}")
-    data = exports.excel_bytes(rows, headers, sheet_name="Ventas",
+    data = await asyncio.to_thread(exports.excel_bytes, rows, headers, sheet_name="Ventas",
                                title=f"{titulo} - GRUPO RYSA")
     stamp = (caja.get("fecha_apertura") or iso_now())[:10]
     return StreamingResponse(io.BytesIO(data),
@@ -2733,7 +2734,7 @@ async def caja_reporte_xlsx(caja_id: str, user: dict = Depends(require_permissio
         for met, monto in sorted(d["metodos"].items()):
             rows.append({"Concepto": f"  {met}", "Entrada": round(monto, 2)})
     filtros = f"Caja: {caja.get('caja_nombre') or 'Caja'} · Cajero: {caja.get('usuario_nombre') or '—'} · Apertura: {(caja.get('fecha_apertura') or '')[:16].replace('T',' ')}"
-    data = exports.excel_bytes(rows, headers, sheet_name="Corte de caja",
+    data = await asyncio.to_thread(exports.excel_bytes, rows, headers, sheet_name="Corte de caja",
                                title="REPORTE DE CORTE DE CAJA - GRUPO RYSA")
     stamp = (caja.get("fecha_apertura") or iso_now())[:10]
     return StreamingResponse(io.BytesIO(data),
@@ -2762,7 +2763,7 @@ async def caja_reporte_pdf(caja_id: str, user: dict = Depends(require_permission
                     f"Contado: {mx(cierre.get('efectivo_contado'))} · Diferencia: {mx(cierre.get('diferencia'))}")
     if d["metodos"]:
         filtros += " · Métodos: " + ", ".join(f"{k} {mx(v)}" for k, v in sorted(d["metodos"].items()))
-    data = exports.pdf_bytes("REPORTE DE CORTE DE CAJA", headers, rows,
+    data = await asyncio.to_thread(exports.pdf_bytes, "REPORTE DE CORTE DE CAJA", headers, rows,
                              settings=d["settings"], user_name=d["user_name"],
                              filtros=filtros, col_weights=[1, 1.4, 3.2, 1.6, 1.4, 1.4, 1.6])
     stamp = (caja.get("fecha_apertura") or iso_now())[:10]
@@ -5122,7 +5123,7 @@ async def cxp_export_excel(desde: Optional[str] = None, hasta: Optional[str] = N
                            user: dict = Depends(require_permission("exportar"))):
     res = await compras_cxp(desde=desde, hasta=hasta, user=user)
     rows = _cxp_export_rows(res.get("facturas", []))
-    data = exports.excel_bytes(rows, CXP_EXPORT_HEADERS,
+    data = await asyncio.to_thread(exports.excel_bytes, rows, CXP_EXPORT_HEADERS,
                                sheet_name="Cuentas por pagar", title="CUENTAS POR PAGAR - GRUPO RYSA")
     return StreamingResponse(io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -5136,7 +5137,7 @@ async def cxp_export_pdf(desde: Optional[str] = None, hasta: Optional[str] = Non
     rows = _cxp_export_rows(res.get("facturas", []))
     sett = await db.settings.find_one({"_id": "app"}) or {}
     filt = _cxp_filtros_dict(desde, hasta)
-    data = exports.pdf_bytes("REPORTE DE CUENTAS POR PAGAR", CXP_EXPORT_HEADERS,
+    data = await asyncio.to_thread(exports.pdf_bytes, "REPORTE DE CUENTAS POR PAGAR", CXP_EXPORT_HEADERS,
                              [[r[h] for h in CXP_EXPORT_HEADERS] for r in rows],
                              settings=sett, user_name=user.get("name"), filtros=filt)
     return StreamingResponse(io.BytesIO(data), media_type="application/pdf",
@@ -5696,7 +5697,7 @@ async def finanzas_export(fmt: str = "excel", desde: Optional[str] = None, hasta
             ["Vencido CxC", round(r["vencido_cxc"], 2)],
             ["Cuentas por pagar", round(r["cuentas_por_pagar"], 2)],
         ]
-        data = exports.pdf_bytes("REPORTE FINANCIERO", headers,
+        data = await asyncio.to_thread(exports.pdf_bytes, "REPORTE FINANCIERO", headers,
                                  [list(x) for x in rows], settings=await db.settings.find_one({"_id": "app"}) or {},
                                  user_name=user.get("name"), filtros=filtros,
                                  col_weights=[3, 2], wrap_cols=[0])
@@ -5716,7 +5717,7 @@ async def finanzas_export(fmt: str = "excel", desde: Optional[str] = None, hasta
             {"Métrica": "Vencido CxC", "Valor": round(r["vencido_cxc"], 2)},
             {"Métrica": "Cuentas por pagar", "Valor": round(r["cuentas_por_pagar"], 2)},
         ]
-        data = exports.excel_bytes(rows, headers, sheet_name="Finanzas", title="REPORTE FINANCIERO - GRUPO RYSA")
+        data = await asyncio.to_thread(exports.excel_bytes, rows, headers, sheet_name="Finanzas", title="REPORTE FINANCIERO - GRUPO RYSA")
         media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         nombre = f"finanzas_{r['desde']}_{r['hasta']}.xlsx"
     return StreamingResponse(io.BytesIO(data), media_type=media,
@@ -5892,7 +5893,7 @@ async def export_products(estado: Optional[str] = None, q: Optional[str] = None,
                           user: dict = Depends(require_permission("exportar"))):
     docs = await _all_products(estado, q, categoria, sku, linea, unidad_medida, proveedor,
                                min_costo, max_costo, min_precio, max_precio, filtro)
-    data = exports.excel_bytes(_product_export_rows(docs), PRODUCT_EXPORT_HEADERS,
+    data = await asyncio.to_thread(exports.excel_bytes, _product_export_rows(docs), PRODUCT_EXPORT_HEADERS,
                                sheet_name="Productos", title="CATÁLOGO DE PRODUCTOS - GRUPO RYSA")
     return StreamingResponse(io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -5913,7 +5914,7 @@ async def export_products_pdf(estado: Optional[str] = None, q: Optional[str] = N
     sett = await db.settings.find_one({"_id": "app"}) or {}
     filt = await _product_filtros_dict(estado, q, categoria, sku, linea, unidad_medida,
                                        proveedor, min_costo, max_costo, min_precio, max_precio, filtro)
-    data = exports.pdf_bytes("REPORTE DE PRODUCTOS", PRODUCT_EXPORT_HEADERS,
+    data = await asyncio.to_thread(exports.pdf_bytes, "REPORTE DE PRODUCTOS", PRODUCT_EXPORT_HEADERS,
                              [ [r[h] for h in PRODUCT_EXPORT_HEADERS] for r in rows ],
                              settings=sett, user_name=user.get("name"), filtros=filt,
                              col_weights=[1, 1.2, 1.2, 1.4, 3.2, 4.5, 1.4, 1.3, 1.4, 1.3, 1.3, 1.2, 1.2, 1.2, 2.6, 2.4, 1],
@@ -6161,7 +6162,7 @@ async def export_clients(q: Optional[str] = None, estado: Optional[str] = None, 
     clients = await _all_clients(q=q, estado=estado, tipo=tipo, filtro=filtro, ciudad=ciudad,
                                  vendedor=vendedor, rfc=rfc, telefono=telefono,
                                  fecha_desde=fecha_desde, fecha_hasta=fecha_hasta)
-    data = exports.excel_bytes(_client_export_rows(clients), CLIENT_EXPORT_HEADERS,
+    data = await asyncio.to_thread(exports.excel_bytes, _client_export_rows(clients), CLIENT_EXPORT_HEADERS,
                                sheet_name="Clientes", title="CARTERA DE CLIENTES - GRUPO RYSA")
     return StreamingResponse(io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -6182,7 +6183,7 @@ async def export_clients_pdf(q: Optional[str] = None, estado: Optional[str] = No
     sett = await db.settings.find_one({"_id": "app"}) or {}
     filt = await _client_filtros_dict(q, estado, tipo, filtro, ciudad, vendedor, rfc,
                                       telefono, fecha_desde, fecha_hasta)
-    data = exports.pdf_bytes("REPORTE DE CLIENTES", CLIENT_EXPORT_HEADERS,
+    data = await asyncio.to_thread(exports.pdf_bytes, "REPORTE DE CLIENTES", CLIENT_EXPORT_HEADERS,
                              [ [r[h] for h in CLIENT_EXPORT_HEADERS] for r in rows ],
                              settings=sett, user_name=user.get("name"), filtros=filt,
                              col_weights=[1, 1.2, 3, 3, 1.6, 1.6, 2.4, 4, 1.8, 1.6, 2, 2, 1.8, 1.3, 1.5, 1.2, 1.8],
@@ -7235,6 +7236,15 @@ async def timbres(user: dict = Depends(get_current_user)):
     cfg = await get_pac_config()
     if not pac_configurado(cfg):
         return {"configurado": False, "disponibles": None, "plan": None}
+    # El menú lo pide en cada pantalla: se reutiliza la consulta al PAC por
+    # 10 minutos en lugar de llamar al proveedor cada vez.
+    cached = cfg.get("timbres_cache") or {}
+    try:
+        reciente = (now_utc() - datetime.fromisoformat(cached.get("actualizado"))).total_seconds() < 600
+    except Exception:
+        reciente = False
+    if reciente and not cached.get("error"):
+        return cached
     try:
         data = await pac_provider.listar_timbres(cfg)
         disp = int(data.get("disponibles") or 0)
@@ -8170,8 +8180,28 @@ async def reporte_centro(desde: Optional[str] = None, hasta: Optional[str] = Non
 # =========================================================================
 # STARTUP
 # =========================================================================
+async def _retencion_gps_periodica():
+    """Borra cada día las ubicaciones GPS de vendedores con más de
+    GPS_RETENCION_DIAS (90 por defecto): la app envía una cada 15 s y la tabla
+    crecía sin límite (unas 240 filas por hora por vendedor)."""
+    dias = int(os.environ.get("GPS_RETENCION_DIAS", "90") or 90)
+    while True:
+        try:
+            limite = (now_utc() - timedelta(days=dias)).isoformat()
+            borradas = await _sql_rows(
+                "WITH b AS (DELETE FROM seller_locations WHERE doc->>'fecha' < :l RETURNING 1) SELECT count(*) FROM b",
+                {"l": limite})
+            n = int(borradas[0][0]) if borradas else 0
+            if n:
+                logger.info("Retención GPS: %s ubicaciones de más de %s días borradas", n, dias)
+        except Exception as e:  # la tabla se crea con la primera ubicación
+            logger.debug("Retención GPS omitida: %s", str(e)[:120])
+        await asyncio.sleep(24 * 3600)
+
+
 @app.on_event("startup")
 async def startup():
+    asyncio.create_task(_retencion_gps_periodica())
     try:
         storage.init_storage()
         logger.info("Almacenamiento local inicializado en: %s", storage.UPLOAD_DIR)

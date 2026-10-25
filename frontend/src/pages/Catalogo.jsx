@@ -101,7 +101,7 @@ export default function Catalogo() {
           {portada.map((c) => (
             <button key={c.slug} onClick={() => elegir(c.slug)} data-testid={`catalogo-cat-${c.slug}`}
               className="group relative flex h-44 flex-col justify-end overflow-hidden rounded-lg bg-slate-800 p-4 text-left text-white">
-              <img src={c.imagen} alt="" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+              <img src={c.imagen} alt="" loading="lazy" className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
               <span className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
               <span className="relative font-display text-xl font-bold leading-tight">{c.nombre}</span>
               <span className="relative text-sm text-white/80">{conteoCat[c.slug]} artículos</span>
@@ -129,7 +129,7 @@ export default function Catalogo() {
               {marcas.map((m) => (
                 <button key={m.slug} onClick={() => setMarca(m.slug === marca ? "" : m.slug)} title={m.nombre}
                   className={`flex h-14 shrink-0 items-center gap-2 rounded-lg border bg-white px-3 ${marca === m.slug ? "border-brand-600 ring-2 ring-brand-600/30" : "border-slate-200 hover:border-slate-400"}`}>
-                  {m.logo ? <img src={m.logo} alt={m.nombre} className="h-8 max-w-[92px] object-contain" /> : <span className="text-sm font-semibold text-slate-700">{m.nombre}</span>}
+                  {m.logo ? <img src={m.logo} alt={m.nombre} loading="lazy" className="h-8 max-w-[92px] object-contain" /> : <span className="text-sm font-semibold text-slate-700">{m.nombre}</span>}
                   <span className="text-xs text-slate-400">{m.n}</span>
                 </button>
               ))}
@@ -158,7 +158,7 @@ export default function Catalogo() {
                         ex <= 0 ? "bg-red-600 text-white border-red-600" : ex < 5 ? "bg-amber-500 text-white border-amber-500" : "bg-white/90 text-slate-700 border-slate-200"}`}>
                         {ex <= 0 ? "Agotado" : `Exist: ${p.existencia}`}
                       </span>
-                      {m?.logo && <img src={m.logo} alt={m.nombre} className="absolute bottom-2 left-2 h-6 max-w-[70px] object-contain rounded bg-white/90 px-1" />}
+                      {m?.logo && <img src={m.logo} alt={m.nombre} loading="lazy" className="absolute bottom-2 left-2 h-6 max-w-[70px] object-contain rounded bg-white/90 px-1" />}
                     </div>
                     <div className="p-3 flex-1 flex flex-col">
                       <div className="text-xs text-slate-400">{p.codigo}</div>

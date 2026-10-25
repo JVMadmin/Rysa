@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, money } from "@/lib/api";
+import { fmtFecha } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, BarChart, Bar } from "recharts";
 import {
@@ -79,7 +80,7 @@ export default function Dashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+            <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">Tablero</h1>
             {loadingSucursal && <Loader2 className="w-4 h-4 animate-spin text-terracota" />}
           </div>
           <p className="text-slate-500 text-sm">
@@ -317,7 +318,7 @@ export default function Dashboard() {
                 <tr key={v.folio} className="border-b border-slate-100 hover:bg-slate-50/70">
                   <td className="py-3 pr-4 font-semibold text-terracota">{v.folio}</td>
                   <td className="py-3 pr-4 text-slate-700">{v.cliente}</td>
-                  <td className="py-3 pr-4 text-slate-500">{v.fecha?.slice(0, 10)}</td>
+                  <td className="py-3 pr-4 text-slate-500">{fmtFecha(v.fecha)}</td>
                   <td className="py-3 pr-4">
                     {v.estado === "cancelada" ? (
                       <span className="status-pill"><span className="dot dot-danger" />Cancelada</span>

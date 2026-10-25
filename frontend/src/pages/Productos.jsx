@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useLocation, Link } from "react-router-dom";
 import { api, formatApiError, money, fotoProducto } from "@/lib/api";
+import { fmtFechaHora } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +14,8 @@ import { Textarea } from "@/components/ui/textarea";
 import ProductForm from "@/components/ProductForm";
 import PresentacionesModal from "@/components/PresentacionesModal";
 import { TableScroller } from "@/components/TableScroller";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { etiquetaEstado } from "@/lib/etiquetas";
 import { toast } from "sonner";
 import { LISTAS_PCT_DEFAULT, REDONDEO_DEFAULT, precioLista } from "@/lib/precios";
 import { Plus, Search, Upload, Pencil, History, Loader2, Boxes, FileDown, FileSpreadsheet, FileText, ArrowDownUp, ArrowUp, ArrowDown, SlidersHorizontal, Tags } from "lucide-react";
@@ -31,7 +34,7 @@ const MOV_TIPOS = [
   { v: "devolucion", label: "Devolución", cls: "bg-teal-100 text-teal-700" },
 ];
 const movBadge = (t) => (MOV_TIPOS.find((x) => x.v === t)?.cls) || "bg-slate-100 text-slate-600";
-const fmtFecha = (f) => (f || "").slice(0, 16).replace("T", " ");
+const fmtFecha = (f) => fmtFechaHora(f);
 
 export default function Productos() {
   // Precio 1 con IVA calculado igual que en el POS (lista + redondeo de Configuración).
@@ -44,9 +47,11 @@ export default function Productos() {
   }, []);
   const precio1 = (p) => precioLista(p, 1, cfgPrecios.pct, cfgPrecios.modo);
   const { can } = useAuth();
+  const confirmar = useConfirm();
   const location = useLocation();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState("");
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("all");
   const [filtro, setFiltro] = useState("all");
@@ -66,6 +71,9 @@ export default function Productos() {
   const [presProd, setPresProd] = useState(null);
   const [movProd, setMovProd] = useState(null);
   const [movs, setMovs] = useState([]);
+  const [movsLoading, setMovsLoading] = useState(false);
+  const [movsErr, setMovsErr] = useState("");
+  const movsReq = useRef(0);
   const [movForm, setMovForm] = useState({ tipo: "entrada", cantidad: "", costo: "", documento: "", motivo: "", observaciones: "" });
   const [savingMov, setSavingMov] = useState(false);
   const [gOpen, setGOpen] = useState(false);
@@ -121,11 +129,17 @@ export default function Productos() {
   const hasFilters = () => Object.keys(makeParams()).length > 0;
 
   const load = async () => {
-    setLoading(true);
+    setLoading(true); setLoadErr("");
     const params = { skip: page * pageSize, limit: pageSize, ...makeParams() };
-    const res = await api.get("/products", { params });
-    setRows(res.data);
-    setTotal(Number(res.headers["x-total-count"] ?? res.data.length));
+    try {
+      const res = await api.get("/products", { params });
+      setRows(res.data);
+      setTotal(Number(res.headers["x-total-count"] ?? res.data.length));
+    } catch (e) {
+      setLoadErr(e.response?.data?.detail ? formatApiError(e.response.data.detail) : "No se pudieron cargar los productos. Verifica tu conexión.");
+      setLoading(false);
+      return;
+    }
     setLoading(false);
     loadStockResumen();
   };
@@ -151,8 +165,17 @@ export default function Productos() {
   const openMovs = async (p) => {
     setMovProd(p);
     setMovForm({ tipo: "entrada", cantidad: "", costo: p.costo ? String(p.costo) : "", documento: "", motivo: "", observaciones: "" });
-    const { data } = await api.get(`/products/${p.id}/movimientos`);
-    setMovs(data);
+    // Limpia el kardex anterior y descarta respuestas de un producto previo.
+    const req = ++movsReq.current;
+    setMovs([]); setMovsErr(""); setMovsLoading(true);
+    try {
+      const { data } = await api.get(`/products/${p.id}/movimientos`);
+      if (req === movsReq.current) setMovs(data);
+    } catch (e) {
+      if (req === movsReq.current) setMovsErr(e.response?.data?.detail ? formatApiError(e.response.data.detail) : "No se pudieron cargar los movimientos.");
+    } finally {
+      if (req === movsReq.current) setMovsLoading(false);
+    }
   };
 
   const submitMov = async () => {
@@ -196,9 +219,14 @@ export default function Productos() {
   const openGlobal = () => { setGOpen(true); loadGlobal(); };
 
   const changeEstado = async (p, e) => {
-    await api.patch(`/products/${p.id}/estado`, null, { params: { estado: e } });
-    toast.success("Estado actualizado");
-    load();
+    if (e === p.estado) return;
+    if (e === "baja" && !(await confirmar({ titulo: `¿Dar de baja ${p.codigo}?`, mensaje: `${p.descripcion}\nDejará de mostrarse para la venta. Puedes volver a activarlo después.`, accion: "Dar de baja", peligro: true }))) return;
+    if (e === "suspendido" && !(await confirmar({ titulo: `¿Suspender ${p.codigo}?`, mensaje: `${p.descripcion}\nNo se podrá vender mientras esté suspendido.`, accion: "Suspender", peligro: true }))) return;
+    try {
+      await api.patch(`/products/${p.id}/estado`, null, { params: { estado: e } });
+      toast.success("Estado actualizado");
+      load();
+    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 
   const download = async (url, filename) => {
@@ -392,12 +420,13 @@ export default function Productos() {
           </thead>
           <tbody className="text-base">
             {loading && <tr><td colSpan={13} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
-            {!loading && sorted.length === 0 && <tr><td colSpan={13} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
-            {!loading && sorted.map((p) => {
+            {!loading && loadErr && <tr><td colSpan={13} className="p-10 text-center"><p className="text-sm text-red-600 mb-3">{loadErr}</p><Button variant="outline" onClick={load} data-testid="prod-reintentar">Reintentar</Button></td></tr>}
+            {!loading && !loadErr && sorted.length === 0 && <tr><td colSpan={13} className="p-10 text-center text-slate-400"><Boxes className="w-8 h-8 mx-auto mb-2" />Sin productos. Crea el primero.</td></tr>}
+            {!loading && !loadErr && sorted.map((p) => {
               const [color, label] = dot(p);
               return (
                 <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`prod-row-${p.codigo}`}>
-                  <td className="px-3 py-3"><div className="flex items-center gap-2"><span className={`w-3 h-3 rounded-full ${color}`} title={label} /><Badge className={`${estadoBadge[p.estado]}`}>{p.estado}</Badge></div></td>
+                  <td className="px-3 py-3"><div className="flex items-center gap-2"><span className={`w-3 h-3 rounded-full ${color}`} title={label} /><Badge className={`${estadoBadge[p.estado]}`}>{etiquetaEstado(p.estado)}</Badge></div></td>
                   <td className="px-3 py-3 font-medium text-brand-600">{p.codigo}</td>
                   <td className="px-3 py-3 min-w-[16rem] max-w-md font-medium text-slate-900"><span className="line-clamp-2">{p.descripcion}</span></td>
                   <td className="px-3 py-3 text-slate-500">{p.linea}</td>
@@ -426,7 +455,7 @@ export default function Productos() {
                   <td className="px-3 py-3 text-right text-slate-500">{p.stock_minimo}</td>
                   <td className="px-3 py-3">
                     {fotoProducto(p.imagen_url) ? (
-                      <img src={fotoProducto(p.imagen_url)} alt=""
+                      <img src={fotoProducto(p.imagen_url)} alt="" loading="lazy"
                         className="w-12 h-12 object-contain rounded border border-slate-100 bg-white"
                         data-testid={`prod-img-${p.codigo}`} />
                     ) : (
@@ -441,17 +470,18 @@ export default function Productos() {
                         size="icon"
                         variant="ghost"
                         onClick={() => setPresProd(p)}
-                        title="Presentaciones y Empaques (Cajas, Paquetes)"
+                        title="Presentaciones y empaques (cajas, paquetes)"
+                        aria-label="Presentaciones y empaques"
                         data-testid={`pres-${p.codigo}`}
                         className="text-slate-600 hover:text-brand-600 hover:bg-orange-50"
                       >
                         <Boxes className="w-4 h-4" />
                       </Button>
-                      <Button size="icon" variant="ghost" onClick={() => openMovs(p)} title="Movimientos" data-testid={`mov-${p.codigo}`}><History className="w-4 h-4" /></Button>
-                      {can("producto.editar") && <Button size="icon" variant="ghost" onClick={() => { setEditing(p); setFormOpen(true); }} data-testid={`edit-${p.codigo}`}><Pencil className="w-4 h-4" /></Button>}
+                      <Button size="icon" variant="ghost" onClick={() => openMovs(p)} title="Ver movimientos" aria-label="Ver movimientos" data-testid={`mov-${p.codigo}`}><History className="w-4 h-4" /></Button>
+                      {can("producto.editar") && <Button size="icon" variant="ghost" onClick={() => { setEditing(p); setFormOpen(true); }} title="Editar producto" aria-label="Editar producto" data-testid={`edit-${p.codigo}`}><Pencil className="w-4 h-4" /></Button>}
                       {can("producto.baja") && (
                         <Select value={p.estado} onValueChange={(e) => changeEstado(p, e)}>
-                          <SelectTrigger className="h-8 w-8 p-0 justify-center border-0"><span className="text-xs">···</span></SelectTrigger>
+                          <SelectTrigger className="h-8 w-8 p-0 justify-center border-0" title="Cambiar estado del producto" aria-label="Cambiar estado del producto"><span className="text-xs">···</span></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="activo">Activar</SelectItem>
                             <SelectItem value="suspendido">Suspender</SelectItem>
@@ -541,7 +571,7 @@ export default function Productos() {
                 {movs.map((m) => (
                   <tr key={m.id} className="border-t border-slate-100">
                     <td className="p-2 text-slate-500">{fmtFecha(m.fecha)}</td>
-                    <td className="p-2"><Badge className={movBadge(m.tipo)}>{m.tipo}</Badge></td>
+                    <td className="p-2"><Badge className={movBadge(m.tipo)}>{etiquetaEstado(m.tipo)}</Badge></td>
                     <td className="p-2">{m.documento}</td>
                     <td className="p-2 text-slate-500 truncate max-w-[140px]" title={m.motivo || m.observaciones}>{m.motivo || m.observaciones}</td>
                     <td className="p-2 text-right text-green-600">{m.entrada || ""}</td>
@@ -549,7 +579,9 @@ export default function Productos() {
                     <td className="p-2 text-right font-semibold">{m.existencia_resultante}</td>
                   </tr>
                 ))}
-                {movs.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">Sin movimientos.</td></tr>}
+                {movsLoading && <tr><td colSpan={7} className="p-6 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto text-brand-600" /></td></tr>}
+                {!movsLoading && movsErr && <tr><td colSpan={7} className="p-6 text-center"><p className="text-sm text-red-600 mb-2">{movsErr}</p><Button variant="outline" size="sm" onClick={() => movProd && openMovs(movProd)}>Reintentar</Button></td></tr>}
+                {!movsLoading && !movsErr && movs.length === 0 && <tr><td colSpan={7} className="p-6 text-center text-slate-400">Sin movimientos.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -584,7 +616,7 @@ export default function Productos() {
               <Label className="text-xs text-slate-500">Hasta</Label>
               <Input type="date" value={gf.hasta} onChange={(e) => setGf((f) => ({ ...f, hasta: e.target.value }))} className="h-9 w-40" data-testid="gmov-hasta" />
             </div>
-            <Button variant="outline" onClick={loadGlobal} className="h-9" data-testid="gmov-buscar"><Search className="w-4 h-4" /></Button>
+            <Button variant="outline" onClick={loadGlobal} className="h-9" title="Buscar" aria-label="Buscar" data-testid="gmov-buscar"><Search className="w-4 h-4" /></Button>
           </div>
           <div className="max-h-[26rem] overflow-y-auto border border-slate-200 rounded-md">
             <table className="w-full text-sm">
@@ -600,7 +632,7 @@ export default function Productos() {
                     <td className="p-2 text-slate-500 whitespace-nowrap">{fmtFecha(m.fecha)}</td>
                     <td className="p-2 font-medium text-brand-600">{m.codigo}</td>
                     <td className="p-2 max-w-[200px] truncate" title={m.descripcion}>{m.descripcion}</td>
-                    <td className="p-2"><Badge className={movBadge(m.tipo)}>{m.tipo}</Badge></td>
+                    <td className="p-2"><Badge className={movBadge(m.tipo)}>{etiquetaEstado(m.tipo)}</Badge></td>
                     <td className="p-2">{m.documento}</td>
                     <td className="p-2 text-slate-500 max-w-[160px] truncate" title={m.motivo || m.observaciones}>{m.motivo || m.observaciones}</td>
                     <td className="p-2 text-slate-500">{m.usuario_nombre}</td>
@@ -620,7 +652,7 @@ export default function Productos() {
       {/* Import preview */}
       <Dialog open={importOpen} onOpenChange={(o) => !progress && setImportOpen(o)}>
         <DialogContent className="max-w-3xl" data-testid="import-preview">
-          <DialogHeader><DialogTitle className="font-display">Vista previa de importación (85 columnas)</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display">Vista previa de importación (todas las columnas)</DialogTitle></DialogHeader>
           {preview && (
             <>
               <div className="grid grid-cols-4 gap-2 text-center">

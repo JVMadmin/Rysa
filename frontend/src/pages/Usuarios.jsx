@@ -9,8 +9,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { etiquetaRol } from "@/lib/etiquetas";
 import { toast } from "sonner";
-import { Plus, Loader2, UserCog, Pencil, KeyRound } from "lucide-react";
+import { Plus, Loader2, UserCog, Pencil, KeyRound, Eye, EyeOff } from "lucide-react";
 
 const FALLBACK_ROLES = [
   ["admin", "Administrador"],
@@ -49,8 +51,10 @@ export default function Usuarios({ embedded = false }) {
   const [editId, setEditId] = useState(null);
   const [f, setF] = useState({ name: "", email: "", password: "", role: "vendedor", modulos: [] });
   const [saving, setSaving] = useState(false);
+  const [verPass, setVerPass] = useState(false);
+  const confirmar = useConfirm();
 
-  const ROLES = catalog?.roles ? Object.keys(catalog.roles).map((k) => [k, k]) : FALLBACK_ROLES;
+  const ROLES = (catalog?.roles ? Object.keys(catalog.roles) : FALLBACK_ROLES.map(([k]) => k)).map((k) => [k, etiquetaRol(k)]);
   const MODULOS = catalog?.modulos ? Object.entries(catalog.modulos) : FALLBACK_MODULOS;
 
   const load = async () => {
@@ -64,8 +68,8 @@ export default function Usuarios({ embedded = false }) {
     load();
   }, []);
 
-  const openNew = () => { setF({ name: "", email: "", password: "", role: "vendedor", modulos: [] }); setEditId(null); setOpen(true); };
-  const openEdit = (u) => { setF({ name: u.name, email: u.email, password: "", role: u.role, modulos: u.modulos || [] }); setEditId(u.id); setOpen(true); };
+  const openNew = () => { setF({ name: "", email: "", password: "", role: "vendedor", modulos: [] }); setEditId(null); setVerPass(false); setOpen(true); };
+  const openEdit = (u) => { setF({ name: u.name, email: u.email, password: "", role: u.role, modulos: u.modulos || [] }); setEditId(u.id); setVerPass(false); setOpen(true); };
 
   const toggleModulo = (mod) =>
     setF((s) => ({ ...s, modulos: s.modulos.includes(mod) ? s.modulos.filter((m) => m !== mod) : [...s.modulos, mod] }));
@@ -94,6 +98,7 @@ export default function Usuarios({ embedded = false }) {
   };
 
   const toggleActive = async (u) => {
+    if (u.active !== false && !(await confirmar({ titulo: `¿Desactivar a ${u.name}?`, mensaje: "Ya no podrá iniciar sesión hasta que vuelvas a activarlo.", accion: "Desactivar", peligro: true }))) return;
     try { await api.put(`/users/${u.id}`, { active: !u.active }); load(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
@@ -123,7 +128,7 @@ export default function Usuarios({ embedded = false }) {
                 <td className="p-3 font-medium">{u.name}</td><td className="p-3 text-slate-500">{u.email}</td>
                 <td className="p-3">
                   <Badge variant={esAdminRole(u.role) ? "default" : "outline"} className="uppercase">
-                    {ROLES.find(([k]) => k === u.role)?.[1] || u.role}
+                    {etiquetaRol(u.role)}
                   </Badge>
                 </td>
                 <td className="p-3">
@@ -142,9 +147,9 @@ export default function Usuarios({ embedded = false }) {
                     )}
                   </div>
                 </td>
-                <td className="p-3"><Switch checked={u.active !== false} onCheckedChange={() => toggleActive(u)} /></td>
+                <td className="p-3"><Switch checked={u.active !== false} onCheckedChange={() => toggleActive(u)} aria-label={u.active !== false ? `Desactivar a ${u.name}` : `Activar a ${u.name}`} title={u.active !== false ? "Desactivar usuario" : "Activar usuario"} /></td>
                 <td className="p-3 text-right">
-                  <Button size="icon" variant="ghost" onClick={() => openEdit(u)} data-testid={`edit-user-${u.email}`}><Pencil className="w-4 h-4" /></Button>
+                  <Button size="icon" variant="ghost" onClick={() => openEdit(u)} title="Editar usuario" aria-label="Editar usuario" data-testid={`edit-user-${u.email}`}><Pencil className="w-4 h-4" /></Button>
                 </td>
               </tr>
             ))}
@@ -158,7 +163,13 @@ export default function Usuarios({ embedded = false }) {
           <div className="space-y-4">
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Nombre</Label><Input value={f.name} onChange={(e) => setF((s) => ({ ...s, name: e.target.value }))} className="mt-1" data-testid="user-name-input" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Correo</Label><Input type="email" value={f.email} onChange={(e) => setF((s) => ({ ...s, email: e.target.value }))} className="mt-1" data-testid="user-email-input" disabled={!!editId} /></div>
-            <div><Label className="text-xs uppercase tracking-wider text-slate-500">{editId ? "Contraseña (en blanco = no cambiar)" : "Contraseña"}</Label><Input type="text" value={f.password} onChange={(e) => setF((s) => ({ ...s, password: e.target.value }))} className="mt-1" data-testid="user-pass-input" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">{editId ? "Contraseña (en blanco = no cambiar)" : "Contraseña"}</Label><div className="relative mt-1">
+                <Input type={verPass ? "text" : "password"} autoComplete="new-password" value={f.password} onChange={(e) => setF((s) => ({ ...s, password: e.target.value }))} className="pr-10" data-testid="user-pass-input" />
+                <button type="button" onClick={() => setVerPass((v) => !v)} title={verPass ? "Ocultar contraseña" : "Mostrar contraseña"} aria-label={verPass ? "Ocultar contraseña" : "Mostrar contraseña"}
+                  className="absolute inset-y-0 right-0 flex w-10 items-center justify-center text-slate-400 hover:text-slate-700" data-testid="user-pass-ver">
+                  {verPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Rol</Label>
               <Select value={f.role} onValueChange={(v) => setF((s) => ({ ...s, role: v }))}>
                 <SelectTrigger className="mt-1" data-testid="user-role-select"><SelectValue /></SelectTrigger>

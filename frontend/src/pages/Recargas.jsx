@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { fmtHora, fmtFechaHora } from "@/lib/fechas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -245,7 +246,7 @@ export default function Recargas() {
                     <div key={r.id} className="py-2 flex items-center justify-between text-sm" data-testid={`recarga-row-${r.folio}`}>
                       <div>
                         <div className="font-medium">{r.compania} · {r.telefono}</div>
-                        <div className="text-xs text-slate-400">{r.folio} · {r.hora}</div>
+                        <div className="text-xs text-slate-400">{r.folio} · {fmtHora(r.fecha)}</div>
                       </div>
                       <span className="font-semibold text-brand-600">{money(r.total)}</span>
                     </div>
@@ -308,7 +309,7 @@ export default function Recargas() {
               </div>
               <div className="border-t border-dashed border-black my-1" />
               <div>FOLIO: {ticket.folio}</div>
-              <div>Fecha: {ticket.fecha?.slice(0, 16).replace("T", " ")}</div>
+              <div>Fecha: {fmtFechaHora(ticket.fecha)}</div>
               <div>Compañía: {ticket.compania}</div>
               <div>Teléfono: {ticket.telefono}</div>
               {ticket.referencia_tae && <div>Ref. TAE: {ticket.referencia_tae}</div>}

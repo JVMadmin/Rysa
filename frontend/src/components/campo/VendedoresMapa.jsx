@@ -4,6 +4,7 @@ import L from "leaflet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { money, fileUrl } from "@/lib/api";
+import { fmtFechaHora } from "@/lib/fechas";
 import {
   ESTADO_DOT, ESTADO_LABEL, iconVendedor,
 } from "@/lib/ubicaciones";
@@ -35,7 +36,7 @@ export function EncajarFlota({ pts, trigger }) {
   return null;
 }
 
-const fmtUbic = (f) => (f || "").slice(0, 16).replace("T", " ");
+const fmtUbic = (f) => fmtFechaHora(f);
 
 /** Marcadores de vendedores (solo reciben lista YA validada y normalizada). */
 export function CapaVendedores({ vendedores = [], seleccionado = "", onSelect }) {

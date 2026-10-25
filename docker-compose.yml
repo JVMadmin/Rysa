@@ -13,6 +13,21 @@ services:
     image: postgres:17
     container_name: rysa_postgres
     restart: unless-stopped
+    # Memoria acorde al VPS (3.9 GB compartidos con backend, WhatsApp y checador):
+    # antes 128 MB de caché y 4 MB por ordenamiento (la página de catálogo del
+    # POS se ordenaba en disco). pg_stat_statements registra consultas lentas.
+    command: [
+      "postgres",
+      "-c", "shared_buffers=512MB",
+      "-c", "effective_cache_size=1536MB",
+      "-c", "work_mem=8MB",
+      "-c", "maintenance_work_mem=128MB",
+      "-c", "random_page_cost=1.1",
+      "-c", "shared_preload_libraries=pg_stat_statements",
+      "-c", "pg_stat_statements.track=top",
+      "-c", "track_io_timing=on"
+    ]
+    shm_size: 256mb
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rysa}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rysa_dev_only_change_me}

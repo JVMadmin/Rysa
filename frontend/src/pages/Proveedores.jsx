@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { fmtFecha } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { etiquetaEstado } from "@/lib/etiquetas";
 import { toast } from "sonner";
-import { Loader2, Plus, Search, Users, Wallet, FileText, Clock, Eye, Pencil, Power, Phone, Mail } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Search, Users, Wallet, FileText, Clock, Eye, Pencil, Power, Phone, Mail } from "lucide-react";
 
 const blank = () => ({
   nombre: "", razon_social: "", rfc: "", telefono: "", email: "", direccion: "", cp: "",
@@ -20,6 +23,7 @@ const blank = () => ({
 
 export default function Proveedores() {
   const { can } = useAuth();
+  const confirmar = useConfirm();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -27,6 +31,10 @@ export default function Proveedores() {
   const [form, setForm] = useState(blank());
   const [saving, setSaving] = useState(false);
   const [ficha, setFicha] = useState(null);
+  const [fichaProv, setFichaProv] = useState(null);
+  const [fichaLoading, setFichaLoading] = useState(false);
+  const [fichaErr, setFichaErr] = useState("");
+  const fichaReq = useRef(0);
 
   const load = async () => {
     setLoading(true);
@@ -60,13 +68,26 @@ export default function Proveedores() {
     finally { setSaving(false); }
   };
   const toggleEstado = async (p) => {
+    const activo = p.activo !== false;
+    if (!(await confirmar(activo
+      ? { titulo: `¿Desactivar a ${p.nombre}?`, mensaje: "Dejará de aparecer al registrar compras. Puedes reactivarlo después.", accion: "Desactivar", peligro: true }
+      : { titulo: `¿Activar a ${p.nombre}?`, accion: "Activar" }))) return;
     try { await api.patch(`/proveedores/${p.id}/estado`, null, { params: { activo: !p.activo } }); load(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
   const verFicha = async (p) => {
-    const { data } = await api.get(`/proveedores/${p.id}/ficha`);
-    setFicha(data);
+    const req = ++fichaReq.current;
+    setFichaProv(p); setFicha(null); setFichaErr(""); setFichaLoading(true);
+    try {
+      const { data } = await api.get(`/proveedores/${p.id}/ficha`);
+      if (req === fichaReq.current) setFicha(data);
+    } catch (e) {
+      if (req === fichaReq.current) setFichaErr(e.response?.data?.detail ? formatApiError(e.response.data.detail) : "No se pudo cargar la ficha del proveedor. Verifica tu conexión.");
+    } finally {
+      if (req === fichaReq.current) setFichaLoading(false);
+    }
   };
+  const cerrarFicha = () => { fichaReq.current += 1; setFichaProv(null); setFicha(null); setFichaErr(""); setFichaLoading(false); };
 
   return (
     <div className="space-y-5" data-testid="proveedores-page">
@@ -81,7 +102,7 @@ export default function Proveedores() {
           <Input placeholder="Buscar por nombre, RFC, contacto..." value={q}
             onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} className="pl-9 h-10" />
         </div>
-        <Button variant="outline" onClick={load} className="h-10"><Search className="w-4 h-4" /></Button>
+        <Button variant="outline" onClick={load} className="h-10" title="Buscar" aria-label="Buscar"><Search className="w-4 h-4" /></Button>
         <Button className="h-10 bg-brand-600 hover:bg-brand-700" onClick={openNew} data-testid="nuevo-proveedor"><Plus className="w-4 h-4 mr-1" /> Nuevo proveedor</Button>
       </div>
 
@@ -108,8 +129,8 @@ export default function Proveedores() {
                 <td className="p-3">
                   <div className="flex gap-1 justify-end">
                     <Button size="sm" variant="outline" onClick={() => verFicha(p)} data-testid={`prov-ficha-${p.codigo}`}><Eye className="w-4 h-4 mr-1" /> Ver</Button>
-                    {can("proveedor.editar") && <Button size="sm" variant="outline" onClick={() => openEdit(p)}><Pencil className="w-4 h-4" /></Button>}
-                    {can("proveedor.editar") && <Button size="sm" variant="outline" onClick={() => toggleEstado(p)} className={p.activo !== false ? "text-amber-600" : "text-green-600"}><Power className="w-4 h-4" /></Button>}
+                    {can("proveedor.editar") && <Button size="sm" variant="outline" onClick={() => openEdit(p)} title="Editar proveedor" aria-label="Editar proveedor"><Pencil className="w-4 h-4" /></Button>}
+                    {can("proveedor.editar") && <Button size="sm" variant="outline" onClick={() => toggleEstado(p)} title={p.activo !== false ? "Desactivar proveedor" : "Activar proveedor"} aria-label={p.activo !== false ? "Desactivar proveedor" : "Activar proveedor"} className={p.activo !== false ? "text-amber-600" : "text-green-600"}><Power className="w-4 h-4" /></Button>}
                   </div>
                 </td>
               </tr>
@@ -119,9 +140,17 @@ export default function Proveedores() {
       </div>
 
       {/* Ficha */}
-      <Dialog open={!!ficha} onOpenChange={(o) => !o && setFicha(null)}>
+      <Dialog open={!!fichaProv} onOpenChange={(o) => !o && cerrarFicha()}>
         <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-display">{ficha?.proveedor?.nombre}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display">{ficha?.proveedor?.nombre || fichaProv?.nombre}</DialogTitle></DialogHeader>
+          {fichaLoading && <div className="flex justify-center py-12"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div>}
+          {!fichaLoading && fichaErr && (
+            <div className="py-8 text-center space-y-3" data-testid="prov-ficha-error">
+              <AlertTriangle className="w-8 h-8 mx-auto text-brand-600" />
+              <p className="text-sm text-slate-600">{fichaErr}</p>
+              <Button variant="outline" onClick={() => fichaProv && verFicha(fichaProv)}>Reintentar</Button>
+            </div>
+          )}
           {ficha && (
             <div className="space-y-5">
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-center">
@@ -142,12 +171,12 @@ export default function Proveedores() {
                       {ficha.compras.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-slate-400">Sin compras.</td></tr>}
                       {ficha.compras.map((c) => (
                         <tr key={c.id} className="border-t border-slate-100">
-                          <td className="p-2 text-slate-500">{(c.fecha_recepcion || "").slice(0, 10)}</td>
+                          <td className="p-2 text-slate-500">{fmtFecha(c.fecha_recepcion)}</td>
                           <td className="p-2 font-medium text-brand-600">{c.folio}</td>
                           <td className="p-2">{c.factura_numero || "—"}</td>
                           <td className="p-2 text-right">{money(c.total)}</td>
                           <td className={`p-2 text-right ${c.saldo_pendiente > 0 ? "text-red-600" : "text-slate-300"}`}>{money(c.saldo_pendiente)}</td>
-                          <td className="p-2 capitalize">{c.estado}</td>
+                          <td className="p-2">{etiquetaEstado(c.estado)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -171,7 +200,7 @@ export default function Proveedores() {
                           <td className="p-2" colSpan={3}>
                             {pg.historial.map((h, k) => (
                               <div key={k} className="text-slate-500 flex gap-2">
-                                <span>{(h.fecha || "").slice(0, 10)}</span><span>{h.factura}</span>
+                                <span>{fmtFecha(h.fecha)}</span><span>{h.factura}</span>
                                 <span>{h.cantidad} unid</span><span><b>{money(h.costo)}</b></span>
                               </div>
                             ))}
@@ -182,7 +211,7 @@ export default function Proveedores() {
                   </table>
                 </div>
               </div>
-              <DialogFooter><Button variant="outline" onClick={() => setFicha(null)}>Cerrar</Button></DialogFooter>
+              <DialogFooter><Button variant="outline" onClick={cerrarFicha}>Cerrar</Button></DialogFooter>
             </div>
           )}
         </DialogContent>
@@ -197,14 +226,14 @@ export default function Proveedores() {
             <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Razón social</Label><Input value={form.razon_social} onChange={(e) => setForm((s) => ({ ...s, razon_social: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">RFC</Label><Input value={form.rfc} onChange={(e) => setForm((s) => ({ ...s, rfc: e.target.value }))} className="mt-1 font-mono" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Teléfono</Label><Input value={form.telefono} onChange={(e) => setForm((s) => ({ ...s, telefono: e.target.value }))} className="mt-1" /></div>
-            <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Email</Label><Input value={form.email} onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))} className="mt-1" /></div>
+            <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Correo</Label><Input value={form.email} onChange={(e) => setForm((s) => ({ ...s, email: e.target.value }))} className="mt-1" /></div>
             <div className="col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">Dirección</Label><Input value={form.direccion} onChange={(e) => setForm((s) => ({ ...s, direccion: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">CP</Label><Input value={form.cp} onChange={(e) => setForm((s) => ({ ...s, cp: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Ciudad</Label><Input value={form.ciudad} onChange={(e) => setForm((s) => ({ ...s, ciudad: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Estado</Label><Input value={form.estado} onChange={(e) => setForm((s) => ({ ...s, estado: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Contacto</Label><Input value={form.contacto} onChange={(e) => setForm((s) => ({ ...s, contacto: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Tel. contacto</Label><Input value={form.telefono_contacto} onChange={(e) => setForm((s) => ({ ...s, telefono_contacto: e.target.value }))} className="mt-1" /></div>
-            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Email contacto</Label><Input value={form.email_contacto} onChange={(e) => setForm((s) => ({ ...s, email_contacto: e.target.value }))} className="mt-1" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Correo de contacto</Label><Input value={form.email_contacto} onChange={(e) => setForm((s) => ({ ...s, email_contacto: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Condiciones de pago</Label><Input value={form.condiciones_pago} onChange={(e) => setForm((s) => ({ ...s, condiciones_pago: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Días de crédito</Label><Input type="number" value={form.dias_credito} onChange={(e) => setForm((s) => ({ ...s, dias_credito: e.target.value }))} className="mt-1" /></div>
             <div><Label className="text-xs uppercase tracking-wider text-slate-500">Límite de crédito</Label><Input type="number" value={form.limite_credito} onChange={(e) => setForm((s) => ({ ...s, limite_credito: e.target.value }))} className="mt-1" /></div>

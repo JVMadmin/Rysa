@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { fmtFechaHora } from "@/lib/fechas";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ScrollText } from "lucide-react";
 
@@ -35,7 +36,7 @@ export default function Auditoria() {
             {!loading && rows.length === 0 && <tr><td colSpan={5} className="p-10 text-center text-slate-400"><ScrollText className="w-8 h-8 mx-auto mb-2" />Sin registros.</td></tr>}
             {!loading && rows.map((a) => (
               <tr key={a.id} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="p-3 text-slate-500 whitespace-nowrap">{a.fecha?.slice(0, 16).replace("T", " ")}</td>
+                <td className="p-3 text-slate-500 whitespace-nowrap">{fmtFechaHora(a.fecha)}</td>
                 <td className="p-3">{a.usuario_nombre}</td>
                 <td className="p-3"><Badge variant="outline">{a.accion}</Badge></td>
                 <td className="p-3">{a.entidad}</td>

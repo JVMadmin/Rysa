@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { ImageUpload } from "@/components/ImageUpload";
 import { fileUrl, API } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { Building2, MapPin, DollarSign, Store, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap, HardDrive, Printer as PrinterIcon, Search, RefreshCw, CheckCircle2, XCircle, Landmark, Star, Pencil, Power, AlertTriangle } from "lucide-react";
 
 const LOGOS_OFICIALES = [
@@ -42,6 +43,7 @@ export default function Configuracion() {
   const [params, setParams] = useSearchParams();
   const pestana = PESTANAS.includes(params.get("tab")) ? params.get("tab") : "empresa";
   const { can } = useAuth();
+  const confirmar = useConfirm();
   const [s, setS] = useState(null);
   const [sErr, setSErr] = useState("");
   const [saving, setSaving] = useState(false);
@@ -110,7 +112,11 @@ export default function Configuracion() {
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setCtaSaving(false); }
   };
-  const toggleCuenta = async (c) => { try { await api.patch(`/cuentas-bancarias/${c.id}/pagar`); loadCuentas(); } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); } };
+  const toggleCuenta = async (c) => {
+    if (!(await confirmar(c.activa
+      ? { titulo: `¿Desactivar la cuenta ${c.banco}?`, mensaje: "Dejará de mostrarse para recibir pagos y en las cotizaciones.", accion: "Desactivar", peligro: true }
+      : { titulo: `¿Activar la cuenta ${c.banco}?`, mensaje: "Volverá a mostrarse para recibir pagos y en las cotizaciones.", accion: "Activar" }))) return;
+    try { await api.patch(`/cuentas-bancarias/${c.id}/pagar`); loadCuentas(); } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); } };
   const editarCuenta = (c) => { setCtaForm({ ...ctaBlank(), ...c }); setCtaEditId(c.id); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
   // Detección honesta de impresoras: API Web de impresión del navegador (si está
@@ -273,7 +279,7 @@ export default function Configuracion() {
   };
   const importarDatos = async () => {
     if (!importFile) return toast.error("Selecciona un ZIP de respaldo");
-    if (!window.confirm("Restaurar datos desde respaldo. Esta acción es seria y solo la debe hacer un administrador. ¿Continuar?")) return;
+    if (!(await confirmar({ titulo: "¿Restaurar datos desde respaldo?", mensaje: "Esta acción es seria y solo la debe hacer un administrador.", accion: "Restaurar", peligro: true }))) return;
     setImporting(true);
     try {
       const fd = new FormData();
@@ -289,7 +295,7 @@ export default function Configuracion() {
     <div className="max-w-lg mx-auto mt-20 text-center space-y-3" data-testid="cfg-error">
       <AlertTriangle className="w-12 h-12 mx-auto text-brand-600" />
       <h1 className="font-display text-xl font-black tracking-tight text-slate-800">No se pudo cargar la Configuración</h1>
-      <p className="text-sm text-slate-500">No se pudo conectar con el servidor para leer los ajustes (endpoint /settings). Verifica que el servidor esté activo.</p>
+      <p className="text-sm text-slate-500">No se pudieron cargar los ajustes. Verifica que el servidor esté activo.</p>
       {sErr && <p className="text-xs text-red-600">{sErr}</p>}
     </div>
   );
@@ -377,7 +383,7 @@ export default function Configuracion() {
                       <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
                     </div>
                     {s.listas_precios_nombres.length > 1 && (
-                      <button type="button" onClick={() => delLista(i)} className="text-slate-400 hover:text-red-600" data-testid={`cfg-lista-del-${i}`}><Trash2 className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => delLista(i)} title="Eliminar lista de precio" aria-label="Eliminar lista de precio" className="text-slate-400 hover:text-red-600" data-testid={`cfg-lista-del-${i}`}><Trash2 className="w-4 h-4" /></button>
                     )}
                   </div>
                 ))}
@@ -422,7 +428,7 @@ export default function Configuracion() {
                 {(s.unidades_medida || []).map((u, i) => (
                   <span key={`${u}-${i}`} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 text-sm">
                     {u}
-                    <button type="button" onClick={() => delUnidad(i)} className="text-slate-400 hover:text-red-600" data-testid={`cfg-unidad-del-${i}`}>
+                    <button type="button" onClick={() => delUnidad(i)} title="Eliminar unidad" aria-label="Eliminar unidad" className="text-slate-400 hover:text-red-600" data-testid={`cfg-unidad-del-${i}`}>
                       ×
                     </button>
                   </span>
@@ -460,7 +466,7 @@ export default function Configuracion() {
                 <div><Label className="text-xs uppercase tracking-wider text-slate-500">Ciudad</Label><Input value={su.ciudad} onChange={(e) => setSuc(i, "ciudad", e.target.value)} className="mt-1" /></div>
                 <div><Label className="text-xs uppercase tracking-wider text-slate-500">Estado</Label><Input value={su.estado} onChange={(e) => setSuc(i, "estado", e.target.value)} className="mt-1" /></div>
                 <div><Label className="text-xs uppercase tracking-wider text-slate-500">C.P.</Label><Input value={su.cp} onChange={(e) => setSuc(i, "cp", e.target.value)} className="mt-1" /></div>
-                <button onClick={() => delSuc(i)} className="absolute top-2 right-2 text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                <button onClick={() => delSuc(i)} title="Eliminar sucursal" aria-label="Eliminar sucursal" className="absolute top-2 right-2 text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
               </div>
             ))}
             <Button variant="outline" onClick={addSuc} data-testid="add-sucursal"><Plus className="w-4 h-4 mr-1" /> Agregar sucursal</Button>
@@ -552,15 +558,15 @@ export default function Configuracion() {
                     <div key={i} className="border border-slate-200 rounded-lg p-2 flex flex-col gap-2">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[11px] font-semibold text-brand-600 w-28">{TYPE_LABELS[blk.tipo] || blk.tipo}</span>
-                        <button type="button" onClick={() => moveEl(i, -1)} className="text-slate-400 hover:text-slate-700 disabled:opacity-30" disabled={i === 0} data-testid={`cfg-elt-up-${i}`}>↑</button>
-                        <button type="button" onClick={() => moveEl(i, 1)} className="text-slate-400 hover:text-slate-700 disabled:opacity-30" disabled={i === elt.length - 1} data-testid={`cfg-elt-down-${i}`}>↓</button>
+                        <button type="button" onClick={() => moveEl(i, -1)} title="Subir renglón" aria-label="Subir renglón" className="text-slate-400 hover:text-slate-700 disabled:opacity-30" disabled={i === 0} data-testid={`cfg-elt-up-${i}`}>↑</button>
+                        <button type="button" onClick={() => moveEl(i, 1)} title="Bajar renglón" aria-label="Bajar renglón" className="text-slate-400 hover:text-slate-700 disabled:opacity-30" disabled={i === elt.length - 1} data-testid={`cfg-elt-down-${i}`}>↓</button>
                         <div className="ml-auto flex items-center gap-2">
                           <select value={blk.align || "left"} onChange={(e) => setEl(i, "align", e.target.value)} className="text-[11px] border rounded px-1 py-0.5" data-testid={`cfg-elt-align-${i}`}>
                             <option value="left">Izq</option><option value="center">Centro</option><option value="right">Der</option>
                           </select>
                           <label className="text-[11px] flex items-center gap-1"><input type="checkbox" checked={!!blk.bold} onChange={(e) => setEl(i, "bold", e.target.checked)} data-testid={`cfg-elt-bold-${i}`} />Neg</label>
                           <input type="checkbox" checked={blk.visible !== false} onChange={(e) => setEl(i, "visible", e.target.checked)} title="Visible" data-testid={`cfg-elt-vis-${i}`} />
-                          <button type="button" onClick={() => delEl(i)} className="text-red-500 hover:text-red-700" data-testid={`cfg-elt-del-${i}`}><Trash2 className="w-3.5 h-3.5" /></button>
+                          <button type="button" onClick={() => delEl(i)} title="Eliminar renglón" aria-label="Eliminar renglón" className="text-red-500 hover:text-red-700" data-testid={`cfg-elt-del-${i}`}><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </div>
                       {["campo", "texto", "pie", "pie2", "encabezado", "qr"].includes(blk.tipo) && (
@@ -691,7 +697,7 @@ export default function Configuracion() {
                         <Button variant="outline" size="sm" onClick={() => probarPrinter(p)} disabled={pruebaState[p.id] === "probando"} data-testid={`cfg-printer-test-${i}`}>
                           {pruebaState[p.id] === "probando" ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <PrinterIcon className="w-3.5 h-3.5 mr-1" />} Imprimir prueba
                         </Button>
-                        <button onClick={() => delPrinter(i)} className="text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => delPrinter(i)} title="Eliminar impresora" aria-label="Eliminar impresora" className="text-slate-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                       </div>
                       <div className="text-right text-sm">
                         {pruebaState[p.id] === "ok" ? <span className="text-green-600 flex items-center justify-end gap-1"><CheckCircle2 className="w-4 h-4" /> Enviada</span>
@@ -836,8 +842,8 @@ export default function Configuracion() {
                     <div className="text-sm text-slate-500 font-mono">Cuenta: {c.numero_cuenta}</div>
                     {c.alias && <div className="text-xs text-slate-400">{c.alias}</div>}
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => editarCuenta(c)}><Pencil className="w-4 h-4" /></Button>
-                  <Button size="sm" variant="outline" onClick={() => toggleCuenta(c)} className={c.activa ? "text-amber-600" : "text-green-600"}><Power className="w-4 h-4" /></Button>
+                  <Button size="sm" variant="outline" onClick={() => editarCuenta(c)} title="Editar cuenta" aria-label="Editar cuenta"><Pencil className="w-4 h-4" /></Button>
+                  <Button size="sm" variant="outline" onClick={() => toggleCuenta(c)} title={c.activa ? "Desactivar cuenta" : "Activar cuenta"} aria-label={c.activa ? "Desactivar cuenta" : "Activar cuenta"} className={c.activa ? "text-amber-600" : "text-green-600"}><Power className="w-4 h-4" /></Button>
                 </div>
               ))}
             </div>

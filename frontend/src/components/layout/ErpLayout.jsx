@@ -5,6 +5,8 @@ import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import AutorizacionesRemotas from "@/components/AutorizacionesRemotas";
+import { ConfirmProvider } from "@/components/ConfirmProvider";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
@@ -22,7 +24,7 @@ import {
 // Categorías vive dentro de Inventario (botón en la cabecera de Productos).
 const NAV = [
   // PRINCIPAL
-  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, section: "PRINCIPAL" },
+  { to: "/app/dashboard", label: "Tablero", icon: LayoutDashboard, section: "PRINCIPAL" },
 
   // OPERACIÓN Y VENTAS
   { to: "/app/pos", label: "Punto de venta", icon: ShoppingCart, perm: "venta.crear", section: "OPERACIÓN Y VENTAS" },
@@ -50,8 +52,8 @@ const NAV = [
   //   · Mi Actividad de Campo: solo vendedores de campo (visita.*), oculta si
   //     el usuario ya ve Supervisión (los admins usan el toggle interno
   //     "Actuar como vendedor" dentro del propio módulo).
-  { to: "/app/supervision-comercial", label: "Supervisión Comercial", icon: Radar, perm: "supervision.ver", section: "FUERZA DE VENTAS" },
-  { to: "/app/mi-actividad", label: "Mi Actividad de Campo", icon: RouteIcon, perm: "visita.ver", ocultoConPerm: "supervision.ver", section: "FUERZA DE VENTAS" },
+  { to: "/app/supervision-comercial", label: "Supervisión comercial", icon: Radar, perm: "supervision.ver", section: "FUERZA DE VENTAS" },
+  { to: "/app/mi-actividad", label: "Mi actividad de campo", icon: RouteIcon, perm: "visita.ver", ocultoConPerm: "supervision.ver", section: "FUERZA DE VENTAS" },
   
   // ADMINISTRACIÓN
   { to: "/app/caja", label: "Caja", icon: Wallet, perm: "caja.ver", section: "ADMINISTRACIÓN" },
@@ -87,7 +89,20 @@ export default function ErpLayout() {
   const enPOS = pathname.startsWith("/app/pos");
   const [posExpandido, setPosExpandido] = useState(false);
   useEffect(() => { if (!enPOS) setPosExpandido(false); }, [enPOS]);
-  const contraido = enPOS ? !posExpandido : collapsed;
+  // Celular y tableta vertical: el menú se abre con un botón y cubre la
+  // pantalla; en escritorio es fijo (completo o contraído a iconos).
+  const [esEscritorio, setEsEscritorio] = useState(() => window.matchMedia?.("(min-width: 1024px)").matches ?? true);
+  const [menuMovil, setMenuMovil] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia?.("(min-width: 1024px)");
+    if (!mq) return undefined;
+    const fn = (e) => setEsEscritorio(e.matches);
+    mq.addEventListener?.("change", fn);
+    return () => mq.removeEventListener?.("change", fn);
+  }, []);
+  useEffect(() => { setMenuMovil(false); }, [pathname]);
+  const contraido = esEscritorio && (enPOS ? !posExpandido : collapsed);
+  const anchoMenu = esEscritorio ? (contraido ? "72px" : "240px") : "0px";
 
   // Guardar preferencia de colapso en localStorage
   const handleToggleCollapsed = () => {
@@ -226,12 +241,16 @@ export default function ErpLayout() {
 
   return (
     <TooltipProvider delayDuration={120} skipDelayDuration={300}>
-    <div className="min-h-[var(--erp-vh)] flex bg-canvas" style={{ "--sidebar-w": contraido ? "72px" : "240px" }}>
+    <ConfirmProvider>
+    <div className="min-h-[var(--erp-vh)] flex bg-canvas" style={{ "--sidebar-w": anchoMenu }}>
+      {!esEscritorio && menuMovil && (
+        <div className="fixed inset-0 z-40 bg-carbon-950/50 backdrop-blur-[1px] animate-in fade-in-0" onClick={() => setMenuMovil(false)} aria-hidden="true" />
+      )}
       {/* Barra lateral en carbón: marca arriba, secciones en acordeón,
           indicador rojo en el módulo activo. */}
       <aside
         data-testid="sidebar"
-        className={`${contraido ? "w-[72px]" : "w-60"} grafito grano shrink-0 text-slate-300 flex flex-col sticky top-0 h-[var(--erp-vh)] z-30 transition-[width] duration-200 ease-out-rysa`}
+        className={`${esEscritorio ? (contraido ? "w-[72px]" : "w-60") : "w-64"} grafito grano shrink-0 text-slate-300 flex flex-col ${esEscritorio ? "sticky z-30" : `fixed left-0 z-50 shadow-raised ${menuMovil ? "translate-x-0" : "-translate-x-full"}`} top-0 h-[var(--erp-vh)] transition-[width,transform] duration-200 ease-out-rysa`}
       >
         {/* Logotipo oficial para fondo oscuro (el mismo del sitio); colapsado,
             solo la "R" del isotipo. */}
@@ -320,13 +339,13 @@ export default function ErpLayout() {
         </nav>
 
         <button
-          onClick={handleToggleCollapsed}
+          onClick={esEscritorio ? handleToggleCollapsed : () => setMenuMovil(false)}
           className={`flex items-center gap-2 h-12 border-t border-white/[0.06] text-slate-400 hover:text-white transition-colors ${contraido ? "justify-center" : "px-5"}`}
           data-testid="toggle-sidebar"
-          title={contraido ? "Expandir menú" : "Contraer menú"}
-          aria-label={contraido ? "Expandir menú" : "Contraer menú"}
+          title={!esEscritorio ? "Cerrar menú" : contraido ? "Expandir menú" : "Contraer menú"}
+          aria-label={!esEscritorio ? "Cerrar menú" : contraido ? "Expandir menú" : "Contraer menú"}
         >
-          {contraido ? <Menu className="w-5 h-5" /> : <><ChevronLeft className="w-4 h-4" /><span className="text-sm">Contraer</span></>}
+          {contraido ? <Menu className="w-5 h-5" /> : <><ChevronLeft className="w-4 h-4" /><span className="text-sm">{esEscritorio ? "Contraer" : "Cerrar menú"}</span></>}
         </button>
       </aside>
 
@@ -334,6 +353,12 @@ export default function ErpLayout() {
         {/* Barra superior: módulo actual, búsqueda global, estado y perfil */}
         <header className="sticky top-0 z-20 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 flex items-center justify-between gap-3 sm:gap-6 px-4 sm:px-6">
           <div className="flex items-center gap-2.5 shrink-0 min-w-0">
+            {!esEscritorio && (
+              <button type="button" onClick={() => setMenuMovil(true)} className="-ml-1 flex h-9 w-9 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100"
+                aria-label="Abrir menú" title="Abrir menú" data-testid="abrir-menu-movil">
+                <Menu className="h-5 w-5" />
+              </button>
+            )}
             {current ? (
               <>
                 <span className="flex h-8 w-8 items-center justify-center rounded-md bg-brand-50 text-brand-600"><current.icon className="w-[18px] h-[18px]" strokeWidth={2} /></span>
@@ -413,7 +438,7 @@ export default function ErpLayout() {
 
         {/* Command palette: búsqueda global */}
         <CommandDialog open={searchOpen} onOpenChange={setSearchOpen}>
-          <CommandInput placeholder="Buscar módulo, sección o acción·" />
+          <CommandInput placeholder="Buscar módulo…" />
           <CommandList>
             <CommandEmpty>Sin resultados.</CommandEmpty>
             <CommandGroup heading="Ir a">
@@ -428,11 +453,15 @@ export default function ErpLayout() {
         </CommandDialog>
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-x-hidden">
-          <Outlet />
+          {/* Un error en una pantalla ya no tumba toda la app: el menú sigue disponible. */}
+          <ErrorBoundary key={pathname} compacto>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
       <AutorizacionesRemotas />
     </div>
+    </ConfirmProvider>
     </TooltipProvider>
   );
 }

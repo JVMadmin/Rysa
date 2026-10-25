@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { fmtFecha, fmtHora, fmtFechaHora } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { useBranding } from "@/hooks/useBranding";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "sonner";
 import { Loader2, Search, HandCoins, Receipt, Wallet, AlertTriangle, Users, CheckCircle2, Clock, MessageCircle, FileText, ArrowUp, ArrowDown, ArrowUpDown, Download, Printer, Share2, Camera, Check, X } from "lucide-react";
 
@@ -27,9 +29,11 @@ const Card = ({ label, value, icon: Ic, iconCls = "text-slate-500", valueCls = "
 
 export default function CuentasPorCobrar() {
   const { can } = useAuth();
+  const confirmar = useConfirm();
   const { logo, empresa_nombre } = useBranding();
   const [data, setData] = useState({ totales: {}, clientes: [] });
   const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState("");
   const [q, setQ] = useState("");
   const [soloVencidos, setSoloVencidos] = useState(false);
   const [estado, setEstado] = useState("todos");
@@ -72,8 +76,9 @@ export default function CuentasPorCobrar() {
   };
 
   const rechazarSolicitud = async (solId) => {
-    const motivo = window.prompt("Motivo del rechazo de la evidencia:");
-    if (!motivo) return;
+    const r = await confirmar({ titulo: "Rechazar evidencia de abono", etiquetaMotivo: "Motivo del rechazo de la evidencia", pedirMotivo: true, motivoObligatorio: true, accion: "Rechazar", peligro: true });
+    if (!r) return;
+    const motivo = r.motivo;
     setSolProcessing(true);
     try {
       await api.post(`/solicitudes-abono/${solId}/rechazar`, { motivo });
@@ -149,14 +154,18 @@ export default function CuentasPorCobrar() {
   const [filtroDetalleSaldo, setFiltroDetalleSaldo] = useState(true); // En detalle modal: solo saldo > 0 por defecto
 
   const load = async () => {
-    setLoading(true);
+    setLoading(true); setLoadErr("");
     const params = { modo: modoCartera };
     if (q) params.q = q;
     if (soloVencidos) params.solo_vencidos = true;
     if (estado && estado !== "todos") params.estado = estado;
     if (facturada && facturada !== "todas") params.facturada = facturada;
-    const { data } = await api.get("/cxc", { params });
-    setData(data); setLoading(false);
+    try {
+      const { data } = await api.get("/cxc", { params });
+      setData(data);
+    } catch (e) {
+      setLoadErr(e.response?.data?.detail ? formatApiError(e.response.data.detail) : "No se pudo cargar la cartera. Verifica tu conexión.");
+    } finally { setLoading(false); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [modoCartera, soloVencidos, estado, facturada]);
   // Resumen del histórico Legacy (agregado, sin datos técnicos)
@@ -271,10 +280,13 @@ export default function CuentasPorCobrar() {
         return v && v.saldo > 0 && v.dias_vencido <= 0;
       }).length;
       if (sinVencer > 0) {
-        const d = window.prompt(
-          `${sinVencer} documento(s) SIN VENCER seleccionado(s). El interés moratorio necesita días para prorratear; los sin vencer se omitirán si no indicas días.\n\nDías a cobrar (Enter para omitir los sin vencer, Cancelar para salir):`);
-        if (d === null) return;
-        diasOverride = Number(d) || null;
+        const r = await confirmar({
+          titulo: `${sinVencer} documento(s) sin vencer seleccionado(s)`,
+          mensaje: "El interés moratorio necesita días para prorratear. Si dejas los días en blanco, los documentos sin vencer se omitirán.",
+          pedirMotivo: true, etiquetaMotivo: "Días a cobrar", placeholderMotivo: "Ej. 30", accion: "Aplicar interés",
+        });
+        if (!r) return;
+        diasOverride = Number(r.motivo) || null;
       }
     }
     setInteresBusy(true);
@@ -291,8 +303,9 @@ export default function CuentasPorCobrar() {
     finally { setInteresBusy(false); }
   };
   const cancelarCargo = async (cargo) => {
-    const motivo = window.prompt(`Motivo de cancelación del cargo ${cargo.folio} (${money(cargo.total)}):`);
-    if (!motivo) return;
+    const r = await confirmar({ titulo: `Cancelar el cargo ${cargo.folio} (${money(cargo.total)})`, etiquetaMotivo: "Motivo de cancelación", pedirMotivo: true, motivoObligatorio: true, accion: "Cancelar cargo", cancelar: "Volver", peligro: true });
+    if (!r) return;
+    const motivo = r.motivo;
     setInteresBusy(true);
     try {
       const { data } = await api.post(`/cxc/cargos/${cargo.id}/cancelar`, { motivo });
@@ -414,7 +427,7 @@ export default function CuentasPorCobrar() {
             ))}
           </SelectContent>
         </Select>
-        <Button variant="outline" onClick={load} data-testid="cxc-refrescar"><Search className="w-4 h-4" /></Button>
+        <Button variant="outline" onClick={load} title="Buscar" aria-label="Buscar" data-testid="cxc-refrescar"><Search className="w-4 h-4" /></Button>
         {solicitudesAbono.length > 0 && (
           <Button
             onClick={() => setSolAbonoDlg(true)}
@@ -445,8 +458,9 @@ export default function CuentasPorCobrar() {
           </tr></thead>
           <tbody>
             {loading && <tr><td colSpan={12} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
-            {!loading && data.clientes.length === 0 && <tr><td colSpan={12} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin cuentas por cobrar. ¡Todo al día!</td></tr>}
-            {!loading && sorted.map((c) => (
+            {!loading && loadErr && <tr><td colSpan={12} className="p-10 text-center"><AlertTriangle className="w-8 h-8 mx-auto mb-2 text-brand-600" /><p className="text-sm text-slate-600 mb-3">{loadErr}</p><Button variant="outline" onClick={load} data-testid="cxc-reintentar">Reintentar</Button></td></tr>}
+            {!loading && !loadErr && data.clientes.length === 0 && <tr><td colSpan={12} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin cuentas por cobrar. ¡Todo al día!</td></tr>}
+            {!loading && !loadErr && sorted.map((c) => (
               <tr key={c.cliente_id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`cxc-row-${c.codigo}`}>
                 <td className="p-3"><div className="font-medium text-brand-600">{c.codigo}</div><div className="text-slate-700 max-w-[200px] truncate" title={c.nombre}>{c.nombre}</div></td>
                 <td className="p-3 text-slate-500 text-xs">{c.telefono || c.celular || "—"}</td>
@@ -585,7 +599,7 @@ export default function CuentasPorCobrar() {
                             {v.source === "LEGACY" && <Badge className="ml-1 bg-brand-600 text-white">LEGACY</Badge>}
                             {v.condicion === "contado" && <span className="ml-1 text-[10px] text-slate-400">contado</span>}
                           </td>
-                          <td className="p-2 text-slate-500">{(v.fecha || "").slice(0, 10)}</td>
+                          <td className="p-2 text-slate-500">{fmtFecha(v.fecha)}</td>
                           <td className="p-2 text-right">{money(v.total)}</td>
                           <td className={`p-2 text-right font-semibold ${v.saldo > 0 ? "text-red-600" : "text-green-600"}`}>{money(v.saldo)}</td>
                           <td className="p-2 text-right text-amber-700">{v.interes_acumulado > 0 ? money(v.interes_acumulado) : "—"}</td>
@@ -617,7 +631,7 @@ export default function CuentasPorCobrar() {
                       {detalle.abonos.map((a) => (
                         <tr key={a.id} className="border-t border-slate-100">
                           <td className="p-2 font-medium">{a.folio}</td>
-                          <td className="p-2 text-slate-500">{(a.fecha || "").slice(0, 10)}</td>
+                          <td className="p-2 text-slate-500">{fmtFecha(a.fecha)}</td>
                           <td className="p-2 text-right font-semibold text-green-700">{money(a.monto)}</td>
                           <td className="p-2 capitalize">{a.metodo}</td>
                           <td className="p-2 text-slate-500">{a.referencia || "—"}</td>
@@ -649,7 +663,7 @@ export default function CuentasPorCobrar() {
                         {(detalle.cargos || []).map((cg) => (
                           <tr key={cg.id} className={`border-t border-slate-100 ${cg.estado === "cancelado" ? "opacity-50" : ""}`}>
                             <td className="p-2 font-medium">{cg.folio}</td>
-                            <td className="p-2 text-slate-500">{(cg.fecha || "").slice(0, 10)}</td>
+                            <td className="p-2 text-slate-500">{fmtFecha(cg.fecha)}</td>
                             <td className="p-2 text-right">{cg.tasa_pct}%</td>
                             <td className="p-2 text-right font-semibold text-amber-700">{money(cg.total)}</td>
                             <td className="p-2 text-center">{(cg.detalle || []).length}</td>
@@ -784,7 +798,7 @@ export default function CuentasPorCobrar() {
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-display font-black text-brand-600">{comp.abono.folio}</div>
-                    <div className="text-[11px] text-slate-500">{(comp.abono.fecha || new Date().toISOString()).slice(0, 10)} {(comp.abono.fecha || "").slice(11, 16)}</div>
+                    <div className="text-[11px] text-slate-500">{fmtFecha(comp.abono.fecha || new Date())} {fmtHora(comp.abono.fecha)}</div>
                   </div>
                 </div>
                 <div className="p-4 space-y-3">
@@ -838,7 +852,7 @@ export default function CuentasPorCobrar() {
                 <div key={sol.id} className="border border-slate-200 rounded-xl p-4 bg-white shadow-sm space-y-3">
                   <div className="flex items-start justify-between">
                     <div>
-                      <div className="text-xs font-mono text-slate-400">{sol.folio} • {(sol.created_at || "").slice(0, 16).replace("T", " ")}</div>
+                      <div className="text-xs font-mono text-slate-400">{sol.folio} • {fmtFechaHora(sol.created_at)}</div>
                       <div className="font-bold text-slate-800 text-base">{sol.cliente_nombre}</div>
                       <div className="text-xs text-slate-500">Asesor de campo: <b className="text-slate-700">{sol.vendedor_nombre}</b></div>
                     </div>
@@ -887,7 +901,6 @@ export default function CuentasPorCobrar() {
                       size="sm"
                       disabled={solProcessing}
                       onClick={() => aprobarSolicitud(sol.id)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white"
                     >
                       <Check className="w-4 h-4 mr-1" /> Aprobar y Aplicar Saldo
                     </Button>

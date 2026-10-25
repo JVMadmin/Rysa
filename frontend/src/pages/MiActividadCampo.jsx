@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { fmtFecha, fmtFechaHora, fechaLocalISO, hoyLocal } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -178,7 +179,7 @@ export default function MiActividadCampo({ embedded = false }) {
     return separarVendedores([{ id: user?.id, name: `${user?.name} (tú)`, estado: "activo", ultima_ubicacion: ub }]);
   }, [gpsPos, mapp, user]);
 
-  const visitasHoy = visits.filter((v) => (v.fecha || "").slice(0, 10) === new Date().toISOString().slice(0, 10));
+  const visitasHoy = visits.filter((v) => fechaLocalISO(v.fecha) === hoyLocal());
   const realizadas = visits.filter((v) => v.estado === "realizada");
   const programadas = visits.filter((v) => v.estado === "programada" || v.estado === "en_camino");
 
@@ -194,14 +195,14 @@ export default function MiActividadCampo({ embedded = false }) {
   const [capturando, setCapturando] = useState(null);
   const [capQ, setCapQ] = useState("");
   const [selCliCard, setSelCliCard] = useState(null);
-  const hoyISO = new Date().toISOString().slice(0, 10);
+  const hoyISO = hoyLocal();
 
   const cliEnriquecidos = useMemo(() => cartera.map((c) => {
     const pos = (c.latitud != null && c.longitud != null)
       ? [Number(c.latitud), Number(c.longitud)] : null;
     const extra = (mapp?.clientes || []).find((x) => x.id === c.id) || {};
     const visitadoHoy = visits.some((vi) => vi.cliente_id === c.id
-      && vi.estado === "realizada" && String(vi.fecha || "").slice(0, 10) === hoyISO);
+      && vi.estado === "realizada" && fechaLocalISO(vi.fecha) === hoyISO);
     return { ...c, pos,
       ultima_visita: c.ultima_visita || extra.ultima_visita || "", visitadoHoy };
   }), [cartera, mapp, visits, hoyISO]);
@@ -307,7 +308,7 @@ export default function MiActividadCampo({ embedded = false }) {
     setForm({
       cliente_id: presetCliente ? presetCliente.id : "",
       cliente_nombre: presetCliente ? presetCliente.nombre : "",
-      fecha_programada: new Date().toISOString().slice(0, 10), hora: new Date().toTimeString().slice(0, 5),
+      fecha_programada: hoyLocal(), hora: new Date().toTimeString().slice(0, 5),
       tipo_visita: "visita", estado: "programada", comentarios: "",
     });
     setClienteQuery(presetCliente ? `${presetCliente.codigo || ""} ${presetCliente.nombre}`.trim() : "");
@@ -319,7 +320,7 @@ export default function MiActividadCampo({ embedded = false }) {
     setEditing(v);
     setForm({
       cliente_id: v.cliente_id, cliente_nombre: v.cliente_nombre || "",
-      fecha_programada: (v.fecha_programada || "").slice(0, 10) || new Date().toISOString().slice(0, 10),
+      fecha_programada: (v.fecha_programada || "").slice(0, 10) || hoyLocal(),
       hora: (v.hora || "").slice(0, 5) || "",
       tipo_visita: v.tipo_visita || "visita", estado: v.estado || "programada",
       comentarios: v.comentarios || "",
@@ -365,7 +366,7 @@ export default function MiActividadCampo({ embedded = false }) {
   const v = dash?.visitas || {};
   const ventasHoy = dash?.ventas_dia || {};
   const ventasMes = dash?.ventas_mes || {};
-  const df = (f) => (f || "").slice(0, 16).replace("T", " ");
+  const df = (f) => fmtFechaHora(f);
   const conUbicacion = cliConPos.length;
 
   const carteraFiltrada = useMemo(() => {
@@ -387,7 +388,7 @@ export default function MiActividadCampo({ embedded = false }) {
                   className={gpsOn ? "bg-brand-600 hover:bg-brand-700" : ""}
                   data-testid="ma-gps">
             {gpsBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Crosshair className="w-4 h-4 mr-1" />}
-            {gpsOn ? "GPS ON" : "Activar GPS"}
+            {gpsOn ? "GPS activo" : "Activar GPS"}
           </Button>
         </div>
       )}
@@ -398,7 +399,7 @@ export default function MiActividadCampo({ embedded = false }) {
                   className={gpsOn ? "bg-brand-600 hover:bg-brand-700" : ""}
                   data-testid="ma-gps">
             {gpsBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Crosshair className="w-4 h-4 mr-1" />}
-            {gpsOn ? "GPS ON" : "Activar GPS"}
+            {gpsOn ? "GPS activo" : "Activar GPS"}
           </Button>
         </div>
       )}
@@ -474,14 +475,14 @@ export default function MiActividadCampo({ embedded = false }) {
                     {visits.map((vi) => (
                       <tr key={vi.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`ma-visita-${vi.id}`}>
                         <td className="p-3"><Badge className={ESTADOS[vi.estado]?.[0]}>{ESTADOS_LABEL[vi.estado] || vi.estado}</Badge></td>
-                        <td className="p-3 text-slate-500">{vi.fecha_programada?.slice(0, 10)} {vi.hora}</td>
+                        <td className="p-3 text-slate-500">{fmtFecha(vi.fecha_programada)} {vi.hora}</td>
                         <td className="p-3 font-medium">{vi.cliente_nombre}</td>
                         <td className="p-3"><Badge variant="outline">{TIPOS_LABEL[vi.tipo_visita] || vi.tipo_visita}</Badge></td>
                         <td className="p-3 text-slate-500 max-w-[200px] truncate" title={vi.comentarios || ""}>{vi.comentarios || "—"}</td>
                         <td className="p-3 text-right">
                           <div className="flex justify-end gap-1">
                             {puedeEditar && (
-                              <Button size="icon" variant="ghost" onClick={() => openEdit(vi)} title="Ver / editar"><Eye className="w-4 h-4" /></Button>
+                              <Button size="icon" variant="ghost" onClick={() => openEdit(vi)} title="Ver o editar visita" aria-label="Ver o editar visita"><Eye className="w-4 h-4" /></Button>
                             )}
                             {vi.estado !== "realizada" && vi.estado !== "cancelada" && (
                               <Button size="sm" variant="outline" onClick={async () => {
@@ -490,7 +491,7 @@ export default function MiActividadCampo({ embedded = false }) {
                               }}><CheckCircle2 className="w-4 h-4 mr-1" /> Realizada</Button>
                             )}
                             {vi.estado === "programada" && (
-                              <Button size="sm" variant="ghost" className="text-red-500" title="Cancelar" onClick={async () => {
+                              <Button size="sm" variant="ghost" className="text-red-500" title="Cancelar visita" aria-label="Cancelar visita" onClick={async () => {
                                 try { await api.put(`/visits/${vi.id}`, { estado: "cancelada" }); loadVisitas(); loadTodo(); }
                                 catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
                               }}><XCircle className="w-4 h-4" /></Button>
@@ -647,7 +648,7 @@ export default function MiActividadCampo({ embedded = false }) {
                   </div>
                   {(selCliCard.ultima_visita || selCliCard.proxima_visita) && (
                     <div className="text-[11px] text-slate-400">
-                      Últ. visita: {selCliCard.ultima_visita ? String(selCliCard.ultima_visita).slice(0, 10) : "—"} · Próxima: {selCliCard.proxima_visita ? String(selCliCard.proxima_visita).slice(0, 10) : "—"}
+                      Últ. visita: {selCliCard.ultima_visita ? fmtFecha(selCliCard.ultima_visita) : "—"} · Próxima: {selCliCard.proxima_visita ? fmtFecha(selCliCard.proxima_visita) : "—"}
                     </div>
                   )}
                 </div>
@@ -687,7 +688,7 @@ export default function MiActividadCampo({ embedded = false }) {
                           <Badge className={ESTADOS[vi.estado]?.[0]}>{vi.estado}</Badge>
                         </div>
                         <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
-                          <CalendarDays className="w-3 h-3" /> {vi.fecha_programada?.slice(0, 10)} {vi.hora && `· ${vi.hora}`}
+                          <CalendarDays className="w-3 h-3" /> {fmtFecha(vi.fecha_programada)} {vi.hora && `· ${vi.hora}`}
                         </div>
                       </div>
                     ))}
@@ -753,7 +754,7 @@ export default function MiActividadCampo({ embedded = false }) {
                         <td className="p-2 text-slate-500 text-xs flex items-center gap-1">{c.telefono ? <><Phone className="w-3 h-3" />{c.telefono}</> : "—"}</td>
                         <td className={`p-2 text-right font-semibold ${Number(c.saldo || 0) > 0 ? "text-amber-600" : "text-green-700"}`}>{money(c.saldo)}</td>
                         <td className="p-2 text-right text-slate-500">—</td>
-                        <td className="p-2 text-slate-500 text-xs">{c.proxima_visita ? String(c.proxima_visita).slice(0, 10) : "—"}</td>
+                        <td className="p-2 text-slate-500 text-xs">{c.proxima_visita ? fmtFecha(c.proxima_visita) : "—"}</td>
                         <td className="p-2">
                           {(c.latitud != null && c.longitud != null)
                             ? <Badge className="bg-green-100 text-green-700"><LocateFixed className="w-3 h-3 mr-1" /> Sí</Badge>

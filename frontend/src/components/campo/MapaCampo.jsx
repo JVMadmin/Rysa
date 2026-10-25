@@ -7,6 +7,7 @@ import {
   iconCliente, iconVendedor, ESTADO_LABEL, coordValida, boundsDe,
 } from "@/lib/ubicaciones";
 import { money, fileUrl } from "@/lib/api";
+import { fmtFecha, fmtHora, fmtFechaHora } from "@/lib/fechas";
 
 /* ------------------------- helpers internos de vuelo ------------------------ */
 function Volar({ pos, zoom = 15, trigger }) {
@@ -134,7 +135,7 @@ export default function MapaCampo({
 
                 const isStart = i === 0;
                 const isEnd = i === rutaGps.length - 1;
-                const timeStr = (p.fecha || "").slice(11, 19) || "--:--";
+                const timeStr = fmtHora(p.fecha) || "--:--";
 
                 return (
                   <CircleMarker
@@ -191,7 +192,7 @@ export default function MapaCampo({
                   <b>{v.name}</b> · {ESTADO_LABEL[v.estado] || v.estado}<br />
                   Ventas hoy: {money(v.ventas_hoy?.monto)} · Cobros: {money(v.cobros_hoy)}<br />
                   CxC vencido: {money(v.cxc?.vencido)}<br />
-                  <span className="text-slate-400">Últ. GPS: {(v.ultima_ubicacion?.fecha || "").slice(0, 16).replace("T", " ")}</span>
+                  <span className="text-slate-400">Últ. GPS: {fmtFechaHora(v.ultima_ubicacion?.fecha)}</span>
                 </div>
               </Popup>
             </Marker>
@@ -213,7 +214,7 @@ export default function MapaCampo({
                   {Number(c.vencido || 0) > 0
                     ? <span className="text-red-600">Vencido: {money(c.vencido)}</span>
                     : Number(c.saldo || 0) > 0 ? `Saldo: ${money(c.saldo)}` : <span className="text-green-600">Sin saldo</span>}<br />
-                  {c.ultima_visita ? `Últ. visita: ${String(c.ultima_visita).slice(0, 10)}` : "Sin visitas"}
+                  {c.ultima_visita ? `Últ. visita: ${fmtFecha(c.ultima_visita)}` : "Sin visitas"}
                 </div>
               </Popup>
             </Marker>

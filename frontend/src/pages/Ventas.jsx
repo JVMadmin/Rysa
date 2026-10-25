@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { etiquetaEstado } from "@/lib/etiquetas";
 import { toast } from "sonner";
 import { Eye, XCircle, Copy, Printer, Plus, Loader2, Receipt, FileText, Search, BarChart3, Send, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 
@@ -71,7 +72,7 @@ export default function Ventas() {
     setBusy("multi");
     try {
       const { data } = await api.post("/facturacion/multi", { sale_ids: sel });
-      toast.success(`CFDI emitido por ${data.ventas} ventas · ${data.uuid || "(sandbox)"}`);
+      toast.success(`CFDI emitido por ${data.ventas} ventas · ${data.uuid || "(pruebas)"}`);
       setSel([]); load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setBusy(""); }
@@ -297,7 +298,7 @@ export default function Ventas() {
         await api.put(`/sales/${facturarSale.id}/cliente`, { cliente_id: factCliente, cliente_nombre: c?.nombre || "" });
       }
       const { data } = await api.post(`/facturacion/sale/${facturarSale.id}`, factBilling);
-      toast.success(`CFDI emitido · ${data.uuid || "(sandbox)"}`);
+      toast.success(`CFDI emitido · ${data.uuid || "(pruebas)"}`);
       setFacturarSale(null); load();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setBusy(""); }
@@ -339,11 +340,11 @@ export default function Ventas() {
           </Select>
           <Select value={estado} onValueChange={setEstado}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="all">Todos estados</SelectItem><SelectItem value="confirmada">Confirmadas</SelectItem><SelectItem value="cancelada">Canceladas</SelectItem><SelectItem value="cotizacion">Cotizaciones</SelectItem></SelectContent>
+            <SelectContent><SelectItem value="all">Todos los estados</SelectItem><SelectItem value="confirmada">Confirmadas</SelectItem><SelectItem value="cancelada">Canceladas</SelectItem><SelectItem value="cotizacion">Cotizaciones</SelectItem></SelectContent>
           </Select>
           <Select value={origen} onValueChange={setOrigen}>
             <SelectTrigger className="w-36" data-testid="filtro-origen"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="all">Todos origen</SelectItem><SelectItem value="rysa">RYSA</SelectItem><SelectItem value="legacy">LEGACY</SelectItem></SelectContent>
+            <SelectContent><SelectItem value="all">Todos los orígenes</SelectItem><SelectItem value="rysa">RYSA</SelectItem><SelectItem value="legacy">LEGACY</SelectItem></SelectContent>
           </Select>
           <div className="relative flex-1 min-w-[180px]">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -381,7 +382,7 @@ export default function Ventas() {
                 <td className="px-3 py-3">
                   {s._abono
                     ? <Badge className="bg-blue-100 text-blue-700">Abono a cuenta</Badge>
-                    : <Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : s.estado === "cotizacion" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>{s.estado}</Badge>}
+                    : <Badge className={s.estado === "cancelada" ? "bg-red-100 text-red-700" : s.estado === "cotizacion" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>{etiquetaEstado(s.estado)}</Badge>}
                   {legacy && <Badge className="ml-1 bg-brand-600 text-white">LEGACY</Badge>}
                 </td>
                 <td className="px-3 py-3 font-medium text-brand-600">{s.folio}</td>
@@ -389,18 +390,18 @@ export default function Ventas() {
                 <td className="px-3 py-3 min-w-[12rem]">{s.cliente_nombre}</td>
                 <td className="px-3 py-3 text-slate-500" data-testid={`venta-vendedor-${s.folio}`}>{s.vendedor_nombre || s.usuario_nombre}</td>
                 <td className="px-3 py-3 text-right text-[17px] font-bold tabular-nums">{money(s.total)}</td>
-                <td className="px-3 py-3"><Badge variant="outline">{s.condicion}</Badge></td>
+                <td className="px-3 py-3"><Badge variant="outline">{etiquetaEstado(s.condicion)}</Badge></td>
                 <td className="px-3 py-3 text-center">{s.facturado ? <Badge className="bg-emerald-100 text-emerald-700">Facturada</Badge> : <span className="text-slate-300 text-xs">—</span>}</td>
                 <td className="px-3 py-3">
                   <div className="flex gap-1 justify-end">
-                    <Button size="icon" variant="ghost" onClick={() => setDetalle(s)} data-testid={`ver-${s.folio}`}><Eye className="w-4 h-4" /></Button>
+                    <Button size="icon" variant="ghost" onClick={() => setDetalle(s)} title="Ver venta" aria-label="Ver venta" data-testid={`ver-${s.folio}`}><Eye className="w-4 h-4" /></Button>
                     {!s._abono && !legacy && <>
-                      <Button size="icon" variant="ghost" title="Reimprimir PDF (ticket)" onClick={() => reimprimir(s)} data-testid={`reimprimir-${s.folio}`}><Printer className="w-4 h-4" /></Button>
-                      <Button size="icon" variant="ghost" title="Reenviar por WhatsApp" onClick={() => reenviar(s)} disabled={busy === `wa-${s.id}`} data-testid={`reenviar-${s.folio}`}>{busy === `wa-${s.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}</Button>
+                      <Button size="icon" variant="ghost" title="Reimprimir PDF (ticket)" aria-label="Reimprimir PDF (ticket)" onClick={() => reimprimir(s)} data-testid={`reimprimir-${s.folio}`}><Printer className="w-4 h-4" /></Button>
+                      <Button size="icon" variant="ghost" title="Reenviar por WhatsApp" aria-label="Reenviar por WhatsApp" onClick={() => reenviar(s)} disabled={busy === `wa-${s.id}`} data-testid={`reenviar-${s.folio}`}>{busy === `wa-${s.id}` ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}</Button>
                       {s.estado === "confirmada" && !s.facturado && s.tipo_venta !== "cotizacion" &&
                         <Button size="sm" variant="outline" onClick={() => abrirFacturar(s)} title="Facturar" data-testid={`facturar-venta-${s.folio}`}><FileText className="w-4 h-4 mr-1" /> Facturar</Button>}
                       <Button size="sm" variant="outline" onClick={() => setRemitirSale(s)} title="Remitir" data-testid={`remitir-${s.folio}`}><Copy className="w-4 h-4 mr-1" /> Remitir</Button>
-                      {s.estado === "confirmada" && can("venta.cancelar") && <Button size="icon" variant="ghost" onClick={() => setCancelSale(s)} className="text-red-500" data-testid={`cancelar-${s.folio}`}><XCircle className="w-4 h-4" /></Button>}
+                      {s.estado === "confirmada" && can("venta.cancelar") && <Button size="icon" variant="ghost" onClick={() => setCancelSale(s)} title="Cancelar venta" aria-label="Cancelar venta" className="text-red-500" data-testid={`cancelar-${s.folio}`}><XCircle className="w-4 h-4" /></Button>}
                     </>}
                   </div>
                 </td>

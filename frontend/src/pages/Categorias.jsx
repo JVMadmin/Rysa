@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "sonner";
 import { Loader2, Tags, Pencil, PackageSearch, ImageIcon, Plus, Trash2, Download, Upload, FileDown, CheckCircle2, AlertTriangle, Search } from "lucide-react";
 import { ImageUpload } from "@/components/ImageUpload";
@@ -19,8 +20,10 @@ const BLANK = { nombre: "", clave: "", descripcion: "", ficha_tecnica: "", image
 export default function Categorias() {
   const { can } = useAuth();
   const nav = useNavigate();
+  const confirmar = useConfirm();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
   const [q, setQ] = useState("");
   const [edit, setEdit] = useState(null);
   const [isNew, setIsNew] = useState(false);
@@ -36,7 +39,12 @@ export default function Categorias() {
   const canImport = can("importar");
   const canExport = can("exportar");
 
-  const load = async () => { setLoading(true); const { data } = await api.get("/categories"); setRows(data); setLoading(false); };
+  const load = async () => {
+    setLoading(true); setErr("");
+    try { const { data } = await api.get("/categories"); setRows(data); }
+    catch (e) { setErr(e.response?.data?.detail ? formatApiError(e.response.data.detail) : "No se pudieron cargar las categorías. Verifica tu conexión."); }
+    finally { setLoading(false); }
+  };
   useEffect(() => { load(); }, []);
 
   const openNew = () => { setF({ ...BLANK }); setIsNew(true); setEdit("__new__"); };
@@ -52,7 +60,7 @@ export default function Categorias() {
   };
 
   const remove = async (c) => {
-    if (!window.confirm(`¿Eliminar la categoría "${c.nombre}"? Los productos que la usan no se borran, pero pierden el registro de esta categoría.`)) return;
+    if (!(await confirmar({ titulo: `¿Eliminar la categoría "${c.nombre}"?`, mensaje: "Los productos que la usan no se borran, pero pierden el registro de esta categoría.", accion: "Eliminar", peligro: true }))) return;
     try {
       await api.delete(`/categories/${encodeURIComponent(c.nombre)}`);
       toast.success("Categoría eliminada"); load();
@@ -122,7 +130,13 @@ export default function Categorias() {
       </div>
       <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={onFile} data-testid="cat-import-file" />
 
-      {loading ? <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div> : (
+      {loading ? <div className="flex justify-center py-20"><Loader2 className="w-7 h-7 animate-spin text-brand-600" /></div> : err ? (
+        <div className="card-soft p-8 text-center space-y-3" data-testid="cat-error">
+          <AlertTriangle className="w-8 h-8 mx-auto text-brand-600" />
+          <p className="text-sm text-slate-600">{err}</p>
+          <Button variant="outline" onClick={load}>Reintentar</Button>
+        </div>
+      ) : (
         <>
         <div className="card-soft p-3">
           <div className="relative max-w-md">
@@ -144,7 +158,7 @@ export default function Categorias() {
               <div key={c.nombre} className="group card-soft overflow-hidden hover:shadow-md transition-all" data-testid={`cat-card-${c.nombre}`}>
                 <div className="h-32 bg-slate-100 relative overflow-hidden">
                   {c.imagen_url
-                    ? <img src={fileUrl(c.imagen_url)} alt={c.nombre} className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                    ? <img src={fileUrl(c.imagen_url)} alt={c.nombre} loading="lazy" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                     : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-brand-600/10 to-brand-600/10"><ImageIcon className="w-8 h-8 text-slate-300" /></div>}
                   <Badge className="absolute top-2 right-2 bg-brand-600 text-white">{c.count}</Badge>
                 </div>
@@ -157,8 +171,8 @@ export default function Categorias() {
                       <PackageSearch className="w-4 h-4 mr-1" /> Ver ({c.count})
                     </Button>
                     {editable && <>
-                      <Button size="sm" className="bg-brand-600 hover:bg-brand-700" onClick={() => openEdit(c)} data-testid={`cat-edit-${c.nombre}`}><Pencil className="w-4 h-4" /></Button>
-                      <Button size="sm" variant="outline" className="text-red-600 hover:bg-red-50" onClick={() => remove(c)} data-testid={`cat-del-${c.nombre}`}><Trash2 className="w-4 h-4" /></Button>
+                      <Button size="sm" className="bg-brand-600 hover:bg-brand-700" onClick={() => openEdit(c)} title="Editar categoría" aria-label="Editar categoría" data-testid={`cat-edit-${c.nombre}`}><Pencil className="w-4 h-4" /></Button>
+                      <Button size="sm" variant="outline" className="text-red-600 hover:bg-red-50" onClick={() => remove(c)} title="Eliminar categoría" aria-label="Eliminar categoría" data-testid={`cat-del-${c.nombre}`}><Trash2 className="w-4 h-4" /></Button>
                     </>}
                   </div>
                 </div>

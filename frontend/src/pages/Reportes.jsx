@@ -17,7 +17,8 @@ const INV_COLS = [
   { key: "unidades_vendidas", label: "Unid. vend.", right: true, num: true },
   { key: "rotacion", label: "Rotación", right: true, num: true },
 ];
-import { api, money } from "@/lib/api";
+import { api, money, formatApiError } from "@/lib/api";
+import { hoyLocal } from "@/lib/fechas";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +55,7 @@ const METODOS_NOMBRE = {
 };
 
 export default function Reportes() {
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyLocal();
   const mes = hoy.slice(0, 8) + "01";
   const [tab, setTab] = useState("ventas");
   const [desde, setDesde] = useState(mes);
@@ -77,6 +78,7 @@ export default function Reportes() {
   const [secciones, setSecciones] = useState(new Set(SECCIONES.map(([k]) => k)));
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadErr, setLoadErr] = useState("");
   // Inventario
   const [invQ, setInvQ] = useState("");
   const [invEstado, setInvEstado] = useState("activo");
@@ -104,17 +106,24 @@ export default function Reportes() {
   }, []);
 
   const load = async () => {
-    setLoading(true);
-    const { data } = await api.get("/reports/ventas", { params: {
-      desde, hasta, group,
-      vendedor_id: vendedor || undefined,
-      categoria: categoria || undefined,
-      tipo: tipo || undefined,
-      q: q || undefined,
-      cliente_id: cliente || undefined,
-      sucursal_id: sucursal || undefined,
-      condicion: condicion || undefined,
-    } });
+    setLoading(true); setLoadErr("");
+    let data;
+    try {
+      ({ data } = await api.get("/reports/ventas", { params: {
+        desde, hasta, group,
+        vendedor_id: vendedor || undefined,
+        categoria: categoria || undefined,
+        tipo: tipo || undefined,
+        q: q || undefined,
+        cliente_id: cliente || undefined,
+        sucursal_id: sucursal || undefined,
+        condicion: condicion || undefined,
+      } }));
+    } catch (e) {
+      setLoadErr(e.response?.data?.detail ? formatApiError(e.response.data.detail) : "No se pudo cargar el reporte. Verifica tu conexión.");
+      setLoading(false);
+      return;
+    }
     setData(data); setLoading(false);
     // Clasificaciones distintas del periodo (filtro "tipo").
     setTipos([...new Set((data.productos || []).map((p) => p.clasificacion).filter(Boolean))].sort());
@@ -276,7 +285,12 @@ export default function Reportes() {
             </div>
           </div>
 
-          {loading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-brand-600" /></div> : (
+          {loading ? <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-brand-600" /></div> : (loadErr || !data) ? (
+            <div className="card-soft p-8 text-center space-y-3" data-testid="rep-error">
+              <p className="text-sm text-red-600">{loadErr || "No se pudo cargar el reporte."}</p>
+              <Button variant="outline" onClick={load}>Reintentar</Button>
+            </div>
+          ) : (
             <>
               {secciones.has("totales") && (
               <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
@@ -425,6 +439,7 @@ export default function Reportes() {
                     ))}
                   </tbody>
                 </table>
+                {prods.length > 200 && <p className="p-3 text-xs text-slate-500 border-t border-slate-100" data-testid="rep-prod-truncado">Mostrando 200 de {prods.length.toLocaleString("es-MX")}. Exporta para ver todo.</p>}
               </div>
               )}
             </>
@@ -500,6 +515,7 @@ export default function Reportes() {
                       ))}
                     </tbody>
                   </table>
+                  {invSorted.length > 400 && <p className="p-3 text-xs text-slate-500 border-t border-slate-100" data-testid="inv-truncado">Mostrando 400 de {invSorted.length.toLocaleString("es-MX")}. Exporta para ver todo.</p>}
                 </div>
               </>
             )
@@ -533,7 +549,7 @@ export default function Reportes() {
                   <Card label="Utilidad" value={money(c.utilidad || 0)} icon={TrendingUp} cls="text-emerald-700" testid="cen-utilidad" />
                   <Card label="Hoy" value={money(c.hoy || 0)} icon={CalendarDays} cls="text-slate-700" testid="cen-hoy" />
                   <Card label="Ayer" value={money(c.ayer || 0)} icon={CalendarDays} cls="text-slate-500" testid="cen-ayer" />
-                  <Card label="Delta hoy/ayer" value={money(c.delta_hoy_ayer || 0)} icon={ArrowUpDown} cls={(c.delta_hoy_ayer || 0) >= 0 ? "text-emerald-700" : "text-red-600"} testid="cen-delta" />
+                  <Card label="Diferencia hoy/ayer" value={money(c.delta_hoy_ayer || 0)} icon={ArrowUpDown} cls={(c.delta_hoy_ayer || 0) >= 0 ? "text-emerald-700" : "text-red-600"} testid="cen-delta" />
                   <div className="card-soft p-4 flex flex-col justify-center">
                     <div className="text-xs uppercase tracking-wider text-slate-400">Hora / día pico</div>
                     <div className="flex flex-wrap gap-1.5 mt-1.5">

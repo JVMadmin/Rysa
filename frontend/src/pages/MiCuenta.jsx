@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import CodigoAutorizacionInput from "@/components/CodigoAutorizacionInput";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { etiquetaRol } from "@/lib/etiquetas";
 import { toast } from "sonner";
 import { KeyRound, Loader2, UserRound, Eye, EyeOff, Info } from "lucide-react";
 
@@ -23,6 +25,7 @@ export default function MiCuenta() {
   const [password, setPassword] = useState("");
   const [ver, setVer] = useState(false);
   const [saving, setSaving] = useState(false);
+  const confirmar = useConfirm();
 
   const cargar = () => api.get("/mi-cuenta/codigo-autorizacion")
     .then((r) => setEstado(r.data))
@@ -44,7 +47,7 @@ export default function MiCuenta() {
   };
 
   const quitar = async () => {
-    if (!window.confirm("¿Quitar tu código? Ya no podrás autorizar movimientos hasta que definas uno nuevo.")) return;
+    if (!(await confirmar({ titulo: "¿Quitar tu código?", mensaje: "Ya no podrás autorizar movimientos hasta que definas uno nuevo.", accion: "Quitar código", peligro: true }))) return;
     try {
       await api.delete("/mi-cuenta/codigo-autorizacion");
       toast.success("Código de autorización eliminado");
@@ -64,7 +67,7 @@ export default function MiCuenta() {
         <dl className="grid grid-cols-[7rem_1fr] gap-y-1.5 text-sm">
           <dt className="text-slate-500">Nombre</dt><dd className="font-medium text-slate-900">{user?.name}</dd>
           <dt className="text-slate-500">Correo</dt><dd className="text-slate-700">{user?.email}</dd>
-          <dt className="text-slate-500">Rol</dt><dd className="text-slate-700 capitalize">{(user?.role || "").replace(/_/g, " ")}</dd>
+          <dt className="text-slate-500">Rol</dt><dd className="text-slate-700">{etiquetaRol(user?.role)}</dd>
         </dl>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { fmtFecha, hoyLocal } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ConfirmProvider";
+import { etiquetaEstado } from "@/lib/etiquetas";
 import { toast } from "sonner";
-import { Loader2, Plus, Search, ShoppingBag, ReceiptText, Wallet, Clock, FileCheck, Trash2, Eye, Ban, CheckCircle2, Boxes, ScanLine, UploadCloud, X, UserPlus, PackagePlus, Camera, ClipboardList, PackageCheck, Repeat, PieChart, BarChart3, Send, CircleDollarSign, ArrowRight } from "lucide-react";
+import { AlertTriangle, Loader2, Plus, Search, ShoppingBag, ReceiptText, Wallet, Clock, FileCheck, Trash2, Eye, Ban, CheckCircle2, Boxes, ScanLine, UploadCloud, X, UserPlus, PackagePlus, Camera, ClipboardList, PackageCheck, Repeat, PieChart, BarChart3, Send, CircleDollarSign, ArrowRight } from "lucide-react";
 
 const METODOS_PAGO = [
   ["efectivo", "Efectivo"], ["transferencia", "Transferencia"], ["tarjeta", "Tarjeta"],
@@ -101,6 +104,7 @@ const ESTADO = { confirmada: ["Confirmada", "bg-green-100 text-green-700"], canc
 
 export default function Compras() {
   const { can } = useAuth();
+  const confirmar = useConfirm();
   const [docs, setDocs] = useState([]);
   const [resumen, setResumen] = useState({});
   const [loading, setLoading] = useState(true);
@@ -115,8 +119,8 @@ export default function Compras() {
   // Alta
   const [open, setOpen] = useState(false);
   const blank = () => ({
-    tipo: "compra", proveedor_id: "", factura_numero: "", fecha_recepcion: new Date().toISOString().slice(0, 10),
-    fecha_factura: new Date().toISOString().slice(0, 10), fecha_vencimiento: "", concepto: "", categoria: "",
+    tipo: "compra", proveedor_id: "", factura_numero: "", fecha_recepcion: hoyLocal(),
+    fecha_factura: hoyLocal(), fecha_vencimiento: "", concepto: "", categoria: "",
     subtotal: "0", descuento: "0", iva: "0", otros_impuestos: "0", total: "0", iva_tasa: "8",
     metodo_pago: "efectivo", forma_pago: "contado", cuenta_bancaria_id: "", observaciones: "",
     items: [], documentos: [],
@@ -159,7 +163,7 @@ export default function Compras() {
   const [ordLoading, setOrdLoading] = useState(false);
   const [ordOpen, setOrdOpen] = useState(false);
   const [ordSaving, setOrdSaving] = useState(false);
-  const ordBlank = () => ({ proveedor_id: "", fecha_orden: new Date().toISOString().slice(0, 10), fecha_estimada: "", notas: "", items: [] });
+  const ordBlank = () => ({ proveedor_id: "", fecha_orden: hoyLocal(), fecha_estimada: "", notas: "", items: [] });
   const [ordForm, setOrdForm] = useState(ordBlank());
   const [ordItemSearch, setOrdItemSearch] = useState("");
 
@@ -185,7 +189,7 @@ export default function Compras() {
   const [presupuestos, setPresupuestos] = useState([]);
   const [presOpen, setPresOpen] = useState(false);
   const [presSaving, setPresSaving] = useState(false);
-  const presBlank = () => ({ categoria: "", periodo: new Date().toISOString().slice(0, 7), monto: "", notas: "" });
+  const presBlank = () => ({ categoria: "", periodo: hoyLocal().slice(0, 7), monto: "", notas: "" });
   const [presForm, setPresForm] = useState(presBlank());
 
   // Centros de costo
@@ -300,8 +304,9 @@ export default function Compras() {
   };
 
   const cancelar = async (c) => {
-    const mot = window.prompt("Motivo de cancelación:", "Cancelación manual");
-    if (mot === null) return;
+    const r = await confirmar({ titulo: `¿Cancelar la compra ${c.folio}?`, etiquetaMotivo: "Motivo de cancelación", pedirMotivo: true, motivoInicial: "Cancelación manual", accion: "Cancelar compra", cancelar: "Volver", peligro: true });
+    if (!r) return;
+    const mot = r.motivo;
     setLoading(true);
     try { await api.post(`/compras/${c.id}/cancelar`, null, { params: { motivo: mot } }); toast.success("Compra cancelada"); load(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); setLoading(false); }
@@ -483,8 +488,8 @@ export default function Compras() {
   };
 
   const cambiarOrdenEstado = async (orden, estado) => {
-    if (estado === "cancelada" && !window.confirm(`Cancelar la orden ${orden.folio}?`)) return;
-    try { await api.post(`/compras/ordenes/${orden.id}/estado`, { estado }); toast.success(`Orden ${orden.folio}: ${estado}`); loadOrdenes(); }
+    if (estado === "cancelada" && !(await confirmar({ titulo: `¿Cancelar la orden ${orden.folio}?`, accion: "Cancelar orden", cancelar: "Volver", peligro: true }))) return;
+    try { await api.post(`/compras/ordenes/${orden.id}/estado`, { estado }); toast.success(`Orden ${orden.folio}: ${etiquetaEstado(estado)}`); loadOrdenes(); }
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
@@ -508,7 +513,7 @@ export default function Compras() {
     setRcpSaving(true);
     try {
       await api.post("/compras/recepciones", {
-        orden_id: rcpOrden.id, fecha: new Date().toISOString().slice(0, 10),
+        orden_id: rcpOrden.id, fecha: hoyLocal(),
         factura_numero: rcpFactura, metodo_pago: rcpMetodo,
         forma_pago: rcpMetodo === "credito" ? "credito" : "contado",
         fecha_vencimiento: rcpVencimiento || null,
@@ -639,7 +644,7 @@ export default function Compras() {
           <Label className="text-[10px] uppercase text-slate-400">Buscar</Label>
           <Input value={f.q} onChange={(e) => setF((s) => ({ ...s, q: e.target.value }))} onKeyDown={(e) => e.key === "Enter" && buscar()} placeholder="Folio, factura, concepto, proveedor..." className="h-9" />
         </div>
-        <Button variant="outline" onClick={buscar} className="h-9"><Search className="w-4 h-4" /></Button>
+        <Button variant="outline" onClick={buscar} className="h-9" title="Buscar" aria-label="Buscar"><Search className="w-4 h-4" /></Button>
         <Button variant="ghost" onClick={limpiar} className="h-9 text-xs"><span className="underline">Limpiar filtros</span></Button>
         <Button className="h-9 bg-brand-600 hover:bg-brand-700" onClick={() => { const t = tab === "gastos" ? "gasto" : "compra"; setForm({ ...blank(), tipo: t }); setItemSearch(""); setFacturaFile(null); setOcrInfo(null); setOcrError(""); setOcrProveedor(null); setOpen(true); }} data-testid="nueva-compra">
           <Plus className="w-4 h-4 mr-1" /> {tab === "gastos" ? "Nuevo gasto" : "Nueva compra / gasto"}
@@ -656,7 +661,7 @@ export default function Compras() {
           </tr></thead>
           <tbody>
             {loading && <tr><td colSpan={14} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
-            {!loading && error && <tr><td colSpan={14} className="p-10 text-center"><div className="inline-flex items-center gap-2 text-red-600"><CheckCircle2 className="w-8 h-8 text-red-500" /><div className="text-left"><b>Cargando compras…</b><div className="text-sm text-red-500">No se pudo conectar con el módulo de Compras. Verifica que el servidor esté activo y desplegado con el módulo de Compras (endpoint /compras).</div></div></div></td></tr>}
+            {!loading && error && <tr><td colSpan={14} className="p-10 text-center"><div className="inline-flex items-center gap-3 text-red-600"><AlertTriangle className="w-8 h-8 text-red-500" /><div className="text-left"><b>No se pudieron cargar las compras</b><div className="text-sm text-red-500">Verifica que el servidor esté activo e intenta de nuevo.</div></div><Button variant="outline" size="sm" onClick={load}>Reintentar</Button></div></td></tr>}
             {!loading && !error && docs.length === 0 && <tr><td colSpan={14} className="p-10 text-center text-slate-400"><CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-green-500" />Sin movimientos.</td></tr>}
             {!loading && docs.map((c) => {
               const [tl, tc] = TIPO[c.tipo] || ["—", ""];
@@ -664,7 +669,7 @@ export default function Compras() {
               const afecta = c.items?.some((i) => i.afecta_inventario);
               return (
                 <tr key={c.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`compra-row-${c.folio}`}>
-                  <td className="p-3 text-slate-500">{(c.fecha_recepcion || "").slice(0, 10)}</td>
+                  <td className="p-3 text-slate-500">{fmtFecha(c.fecha_recepcion)}</td>
                   <td className="p-3"><Badge className={`${tc}`}>{tl}</Badge></td>
                   <td className="p-3 font-medium text-brand-600">{c.folio}</td>
                   <td className="p-3 text-slate-500">{c.factura_numero || "—"}{c.documentos?.length ? ` (${c.documentos.length})` : ""}</td>
@@ -680,8 +685,8 @@ export default function Compras() {
                   <td className="p-3">
                     <div className="flex gap-1 justify-end">
                       {afecta && <Badge className="bg-blue-50 text-blue-600"><Boxes className="w-3 h-3 mr-1" />Inv</Badge>}
-                      <Button size="sm" variant="outline" onClick={() => setDet(c)}><Eye className="w-4 h-4" /></Button>
-                      {c.estado === "confirmada" && can("compra.cancelar") && <Button size="sm" variant="outline" className="text-red-600" onClick={() => cancelar(c)}><Ban className="w-4 h-4" /></Button>}
+                      <Button size="sm" variant="outline" onClick={() => setDet(c)} title="Ver compra" aria-label="Ver compra"><Eye className="w-4 h-4" /></Button>
+                      {c.estado === "confirmada" && can("compra.cancelar") && <Button size="sm" variant="outline" className="text-red-600" onClick={() => cancelar(c)} title="Cancelar compra" aria-label="Cancelar compra"><Ban className="w-4 h-4" /></Button>}
                     </div>
                   </td>
                 </tr>
@@ -720,8 +725,8 @@ export default function Compras() {
                     <tr key={o.id} className="border-t border-slate-100 hover:bg-slate-50">
                       <td className="p-3 font-medium text-brand-600">{o.folio}</td>
                       <td className="p-3">{o.proveedor_nombre || "—"}</td>
-                      <td className="p-3 text-slate-500">{(o.fecha_orden || "").slice(0, 10)}</td>
-                      <td className="p-3"><Badge className={{ borrador: "bg-slate-100 text-slate-600", enviada: "bg-blue-100 text-blue-700", parcialmente_recibida: "bg-amber-100 text-amber-700", recibida: "bg-green-100 text-green-700", cancelada: "bg-red-100 text-red-700" }[o.estado] || "bg-slate-100 text-slate-600"}>{o.estado?.replace("_", " ")}</Badge></td>
+                      <td className="p-3 text-slate-500">{fmtFecha(o.fecha_orden)}</td>
+                      <td className="p-3"><Badge className={{ borrador: "bg-slate-100 text-slate-600", enviada: "bg-blue-100 text-blue-700", parcialmente_recibida: "bg-amber-100 text-amber-700", recibida: "bg-green-100 text-green-700", cancelada: "bg-red-100 text-red-700" }[o.estado] || "bg-slate-100 text-slate-600"}>{etiquetaEstado(o.estado)}</Badge></td>
                       <td className="p-3 text-right font-semibold">{money(o.total)}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
@@ -734,7 +739,7 @@ export default function Compras() {
                           <Button size="sm" variant="outline" onClick={() => abrirRecepcion(o)} data-testid={`recibir-orden-${o.folio}`}><PackageCheck className="w-3.5 h-3.5 mr-1" /> Recibir</Button>
                         )}
                         {o.estado === "borrador" && <Button size="sm" variant="outline" className="ml-1" onClick={() => cambiarOrdenEstado(o, "enviada")}><Send className="w-3.5 h-3.5 mr-1" /> Enviar</Button>}
-                        {["borrador", "enviada", "parcialmente_recibida"].includes(o.estado) && <Button size="sm" variant="ghost" className="text-red-600 ml-1" onClick={() => cambiarOrdenEstado(o, "cancelada")}><Ban className="w-3.5 h-3.5" /></Button>}
+                        {["borrador", "enviada", "parcialmente_recibida"].includes(o.estado) && <Button size="sm" variant="ghost" className="text-red-600 ml-1" onClick={() => cambiarOrdenEstado(o, "cancelada")} title="Cancelar orden" aria-label="Cancelar orden"><Ban className="w-3.5 h-3.5" /></Button>}
                       </td>
                     </tr>
                   );
@@ -763,7 +768,7 @@ export default function Compras() {
                     <td className="p-3 font-medium text-brand-600">{rc.folio}</td>
                     <td className="p-3">{rc.orden_folio || "—"}</td>
                     <td className="p-3">{rc.proveedor_nombre || "—"}</td>
-                    <td className="p-3 text-slate-500">{(rc.fecha || "").slice(0, 10)}</td>
+                    <td className="p-3 text-slate-500">{fmtFecha(rc.fecha)}</td>
                     <td className="p-3 text-slate-500">{rc.factura_numero || "—"}</td>
                     <td className="p-3 text-right font-semibold">{money(rc.total)}</td>
                     <td className="p-3 text-right">{rc.items?.length || 0}</td>
@@ -857,8 +862,8 @@ export default function Compras() {
                 <div><Label className="text-xs text-slate-400">Factura</Label><div>{det.factura_numero || "—"}</div></div>
                 <div><Label className="text-xs text-slate-400">Concepto</Label><div>{det.concepto || "—"}</div></div>
                 <div><Label className="text-xs text-slate-400">Categoría</Label><div>{det.categoria || "—"}</div></div>
-                <div><Label className="text-xs text-slate-400">Recepción</Label><div>{(det.fecha_recepcion || "").slice(0, 10)}</div></div>
-                <div><Label className="text-xs text-slate-400">Vencimiento</Label><div>{(det.fecha_vencimiento || "").slice(0, 10) || "—"}</div></div>
+                <div><Label className="text-xs text-slate-400">Recepción</Label><div>{fmtFecha(det.fecha_recepcion)}</div></div>
+                <div><Label className="text-xs text-slate-400">Vencimiento</Label><div>{fmtFecha(det.fecha_vencimiento) || "—"}</div></div>
                 <div><Label className="text-xs text-slate-400">Método</Label><div className="capitalize">{det.metodo_pago}</div></div>
                 <div><Label className="text-xs text-slate-400">Usuario</Label><div>{det.usuario_nombre}</div></div>
               </div>
@@ -924,7 +929,7 @@ export default function Compras() {
                   <span key={k} className="inline-flex items-center gap-2 bg-white border rounded-md px-2 py-1 text-xs">
                     <FileCheck className="w-3.5 h-3.5 text-green-600" />
                     <span className="font-mono text-[11px] max-w-[220px] truncate">{d.url ? d.url.split("/").pop() : d.name}</span>
-                    <button type="button" onClick={() => quitarDocumento(d.url)}><X className="w-3.5 h-3.5 text-slate-400 hover:text-red-600" /></button>
+                    <button type="button" onClick={() => quitarDocumento(d.url)} title="Quitar documento" aria-label="Quitar documento"><X className="w-3.5 h-3.5 text-slate-400 hover:text-red-600" /></button>
                   </span>
                 ))}
               </div>
@@ -1063,7 +1068,7 @@ export default function Compras() {
                           </button>
                         </td>
                         <td className="p-2 text-right font-semibold">{money(Number(i.cantidad) * Number(i.costo) - Number(i.descuento || 0))}</td>
-                        <td className="p-2"><button onClick={() => delItem(k)}><Trash2 className="w-4 h-4 text-slate-400 hover:text-red-600" /></button></td>
+                        <td className="p-2"><button onClick={() => delItem(k)} title="Eliminar renglón" aria-label="Eliminar renglón"><Trash2 className="w-4 h-4 text-slate-400 hover:text-red-600" /></button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -1106,7 +1111,7 @@ export default function Compras() {
               <div><Label className="text-xs uppercase tracking-wider text-slate-500">RFC</Label><Input value={provForm.rfc} onChange={(e) => setProvForm((s) => ({ ...s, rfc: e.target.value }))} className="mt-1" placeholder="RFC" /></div>
               <div><Label className="text-xs uppercase tracking-wider text-slate-500">Teléfono</Label><Input value={provForm.telefono} onChange={(e) => setProvForm((s) => ({ ...s, telefono: e.target.value }))} className="mt-1" placeholder="Teléfono" /></div>
             </div>
-            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Email</Label><Input value={provForm.email} onChange={(e) => setProvForm((s) => ({ ...s, email: e.target.value }))} className="mt-1" placeholder="Email" /></div>
+            <div><Label className="text-xs uppercase tracking-wider text-slate-500">Correo</Label><Input value={provForm.email} onChange={(e) => setProvForm((s) => ({ ...s, email: e.target.value }))} className="mt-1" placeholder="Correo electrónico" /></div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setProvOpen(false)}>Cancelar</Button>
               <Button onClick={guardarProveedor} disabled={provSaving} className="bg-brand-600 hover:bg-brand-700" data-testid="guardar-proveedor">
@@ -1176,7 +1181,7 @@ export default function Compras() {
                   {prodForm.codigos_barras.map((b, i) => (
                     <span key={`${b}-${i}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-xs font-mono">
                       {b}
-                      <button type="button" onClick={() => setProdForm((s) => ({ ...s, codigos_barras: s.codigos_barras.filter((_, idx) => idx !== i) }))} className="text-slate-400 hover:text-red-600">×</button>
+                      <button type="button" onClick={() => setProdForm((s) => ({ ...s, codigos_barras: s.codigos_barras.filter((_, idx) => idx !== i) }))} title="Quitar código de barras" aria-label="Quitar código de barras" className="text-slate-400 hover:text-red-600">×</button>
                     </span>
                   ))}
                 </div>
@@ -1256,7 +1261,7 @@ export default function Compras() {
                       <td className="p-2 max-w-[180px] truncate">{i.descripcion}</td>
                       <td className="p-2"><Input type="number" value={i.solicitado} onChange={(e) => upOrdItem(k, "solicitado", e.target.value)} className="h-6 w-20 text-right p-1" /></td>
                       <td className="p-2"><Input type="number" value={i.costo} onChange={(e) => upOrdItem(k, "costo", e.target.value)} className="h-6 w-20 text-right p-1" /></td>
-                      <td className="p-2"><button type="button" onClick={() => delOrdItem(k)}><Trash2 className="w-4 h-4 text-slate-400 hover:text-red-600" /></button></td>
+                      <td className="p-2"><button type="button" onClick={() => delOrdItem(k)} title="Eliminar renglón" aria-label="Eliminar renglón"><Trash2 className="w-4 h-4 text-slate-400 hover:text-red-600" /></button></td>
                     </tr>
                   ))}</tbody>
                 </table>

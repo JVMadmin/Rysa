@@ -1,6 +1,7 @@
 import { X, Phone, MapPin, Store, CalendarDays, Camera } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { money, fileUrl } from "@/lib/api";
+import { fmtFecha } from "@/lib/fechas";
 
 /**
  * Ficha técnica rápida de un cliente (se abre al ubicarlo desde el listado
@@ -52,11 +53,11 @@ export default function FichaCliente({ c, onCerrar }) {
         </div>
         <div className="rounded-lg bg-slate-50 p-2">
           <div className="text-[10px] uppercase text-slate-400">Últ. visita</div>
-          <div className="text-sm font-semibold flex items-center gap-1"><CalendarDays className="w-3 h-3 text-slate-400" />{c.ultima_visita ? String(c.ultima_visita).slice(0, 10) : "—"}</div>
+          <div className="text-sm font-semibold flex items-center gap-1"><CalendarDays className="w-3 h-3 text-slate-400" />{c.ultima_visita ? fmtFecha(c.ultima_visita) : "—"}</div>
         </div>
         <div className="rounded-lg bg-slate-50 p-2">
           <div className="text-[10px] uppercase text-slate-400">Próx. visita</div>
-          <div className="text-sm font-semibold">{c.proxima_visita ? String(c.proxima_visita).slice(0, 10) : "—"}</div>
+          <div className="text-sm font-semibold">{c.proxima_visita ? fmtFecha(c.proxima_visita) : "—"}</div>
         </div>
       </div>
 

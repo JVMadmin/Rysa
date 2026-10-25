@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, formatApiError, money } from "@/lib/api";
+import { fmtFecha } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2, Stamp, FileText, Download, Ban, Send, Settings2, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-react";
 
@@ -24,6 +26,8 @@ export default function Facturacion() {
   const [facturables, setFacturables] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
+  // Cancelación de CFDI: motivo SAT y UUID de reemplazo (motivo 01).
+  const [cancelDlg, setCancelDlg] = useState(null);
 
   const loadTimbres = () => api.get("/facturacion/timbres").then((r) => setTimbres(r.data)).catch(() => {});
   const loadAll = async () => {
@@ -51,17 +55,18 @@ export default function Facturacion() {
     setBusy(sale.id);
     try {
       const { data } = await api.post(`/facturacion/sale/${sale.id}`);
-      toast.success(`CFDI emitido · UUID ${data.uuid || "(sandbox)"}`);
+      toast.success(`CFDI emitido · UUID ${data.uuid || "(pruebas)"}`);
       loadTimbres(); loadAll();
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
     finally { setBusy(""); }
   };
 
-  const cancelar = async (f) => {
-    const motivo = window.prompt("Motivo de cancelación (01/02/03/04):", "02");
-    if (!motivo) return;
-    let uuidRep = null;
-    if (motivo === "01") uuidRep = window.prompt("UUID de reemplazo:", "") || null;
+  const cancelar = (f) => setCancelDlg({ f, motivo: "02", uuid: "" });
+  const confirmarCancelacion = async () => {
+    if (!cancelDlg) return;
+    const { f, motivo } = cancelDlg;
+    const uuidRep = motivo === "01" ? (cancelDlg.uuid.trim() || null) : null;
+    setCancelDlg(null);
     setBusy(f.id);
     try {
       const params = new URLSearchParams({ motivo }); if (uuidRep) params.set("uuid_reemplazo", uuidRep);
@@ -90,7 +95,7 @@ export default function Facturacion() {
               <div><div className="text-xs text-slate-400">Timbres disponibles</div>
                 <div className={`font-display font-bold text-lg ${timbres.alerta ? "text-red-700" : "text-emerald-700"}`}>{timbres.disponibles ?? "—"}</div></div>
               {timbres.plan && <span className="text-xs text-slate-400 ml-2">{timbres.plan}</span>}
-              <Button size="icon" variant="ghost" onClick={loadTimbres} data-testid="timbres-refresh"><RefreshCw className="w-4 h-4" /></Button>
+              <Button size="icon" variant="ghost" onClick={loadTimbres} title="Actualizar timbres" aria-label="Actualizar timbres" data-testid="timbres-refresh"><RefreshCw className="w-4 h-4" /></Button>
             </div>
           ) : (
             <Badge variant="outline" className="text-amber-600 border-amber-300" data-testid="pac-no-config"><AlertTriangle className="w-3.5 h-3.5 mr-1" /> PAC sin configurar</Badge>
@@ -125,13 +130,13 @@ export default function Facturacion() {
                     <td className="p-3 text-slate-500">{f.rfc}</td>
                     <td className="p-3 text-right font-semibold">{money(f.total)}</td>
                     <td className="p-3 text-center">{f.status === "cancelado" ? <Badge className="bg-red-100 text-red-700">Cancelado</Badge> : <Badge className="bg-green-100 text-green-700">Vigente</Badge>}</td>
-                    <td className="p-3 text-slate-500">{(f.fecha || "").slice(0, 10)}</td>
+                    <td className="p-3 text-slate-500">{fmtFecha(f.fecha)}</td>
                     <td className="p-3">
                       <div className="flex gap-1 justify-end">
-                        <Button size="icon" variant="ghost" onClick={() => descargar(f, "pdf")} title="PDF" data-testid={`cfdi-pdf-${f.folio_venta}`}><Download className="w-4 h-4" /></Button>
-                        <Button size="icon" variant="ghost" onClick={() => descargar(f, "xml")} title="XML" data-testid={`cfdi-xml-${f.folio_venta}`}><FileText className="w-4 h-4" /></Button>
-                        <Button size="icon" variant="ghost" onClick={() => whatsapp(f)} title="WhatsApp" data-testid={`cfdi-wa-${f.folio_venta}`}><Send className="w-4 h-4 text-emerald-600" /></Button>
-                        {f.status !== "cancelado" && can("venta.cancelar") && <Button size="icon" variant="ghost" onClick={() => cancelar(f)} title="Cancelar" data-testid={`cfdi-cancel-${f.folio_venta}`}><Ban className="w-4 h-4 text-red-500" /></Button>}
+                        <Button size="icon" variant="ghost" onClick={() => descargar(f, "pdf")} title="Descargar PDF" aria-label="Descargar PDF" data-testid={`cfdi-pdf-${f.folio_venta}`}><Download className="w-4 h-4" /></Button>
+                        <Button size="icon" variant="ghost" onClick={() => descargar(f, "xml")} title="Descargar XML" aria-label="Descargar XML" data-testid={`cfdi-xml-${f.folio_venta}`}><FileText className="w-4 h-4" /></Button>
+                        <Button size="icon" variant="ghost" onClick={() => whatsapp(f)} title="Enviar por WhatsApp" aria-label="Enviar por WhatsApp" data-testid={`cfdi-wa-${f.folio_venta}`}><Send className="w-4 h-4 text-emerald-600" /></Button>
+                        {f.status !== "cancelado" && can("venta.cancelar") && <Button size="icon" variant="ghost" onClick={() => cancelar(f)} title="Cancelar factura" aria-label="Cancelar factura" data-testid={`cfdi-cancel-${f.folio_venta}`}><Ban className="w-4 h-4 text-red-500" /></Button>}
                       </div>
                     </td>
                   </tr>
@@ -154,7 +159,7 @@ export default function Facturacion() {
                 {!loading && facturables.map((s) => (
                   <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`facturable-${s.folio}`}>
                     <td className="p-3 font-medium text-brand-600">{s.folio}</td>
-                    <td className="p-3 text-slate-500">{(s.fecha || "").slice(0, 10)}</td>
+                    <td className="p-3 text-slate-500">{fmtFecha(s.fecha)}</td>
                     <td className="p-3">{s.cliente_nombre || "Público General"}</td>
                     <td className="p-3 text-right font-semibold">{money(s.total)}</td>
                     <td className="p-3 text-right">
@@ -183,7 +188,7 @@ export default function Facturacion() {
                   <div><Label className="text-xs uppercase tracking-wider text-slate-500">Entorno</Label>
                     <Select value={cfg.environment || "sandbox"} onValueChange={(v) => setCfg({ ...cfg, environment: v })}>
                       <SelectTrigger className="mt-1" data-testid="cfg-env"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="sandbox">Sandbox (pruebas)</SelectItem><SelectItem value="produccion">Producción</SelectItem></SelectContent>
+                      <SelectContent><SelectItem value="sandbox">Pruebas</SelectItem><SelectItem value="produccion">Producción</SelectItem></SelectContent>
                     </Select></div>
                   <div className="md:col-span-2"><Label className="text-xs uppercase tracking-wider text-slate-500">API Key de Facty {cfg.api_key_set && <span className="text-emerald-600">✓ guardada</span>}</Label>
                     <Input type="password" placeholder={cfg.api_key_set ? "•••••• (sin cambios)" : "fk_..."} value={cfg.api_key || ""} onChange={(e) => setCfg({ ...cfg, api_key: e.target.value })} className="mt-1" data-testid="cfg-apikey" /></div>
@@ -222,6 +227,35 @@ export default function Facturacion() {
           </TabsContent>
         )}
       </Tabs>
+
+      {/* Cancelación de CFDI con motivo SAT */}
+      <Dialog open={!!cancelDlg} onOpenChange={(o) => !o && setCancelDlg(null)}>
+        <DialogContent className="max-w-md" data-testid="cfdi-cancel-dialog">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2"><Ban className="w-5 h-5 text-red-600" /> Cancelar factura {cancelDlg?.f?.serie}{cancelDlg?.f?.folio}</DialogTitle>
+            <DialogDescription>Elige el motivo de cancelación ante el SAT.</DialogDescription>
+          </DialogHeader>
+          {cancelDlg && (
+            <div className="space-y-3">
+              <div><Label className="text-xs uppercase tracking-wider text-slate-500">Motivo SAT</Label>
+                <Select value={cancelDlg.motivo} onValueChange={(v) => setCancelDlg((d) => ({ ...d, motivo: v }))}>
+                  <SelectTrigger className="mt-1" data-testid="cfdi-cancel-motivo"><SelectValue /></SelectTrigger>
+                  <SelectContent>{MOTIVOS.map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}</SelectContent>
+                </Select></div>
+              {cancelDlg.motivo === "01" && (
+                <div><Label htmlFor="cfdi-uuid-rep" className="text-xs uppercase tracking-wider text-slate-500">UUID de la factura que la sustituye</Label>
+                  <Input id="cfdi-uuid-rep" value={cancelDlg.uuid} onChange={(e) => setCancelDlg((d) => ({ ...d, uuid: e.target.value }))} className="mt-1 font-mono text-xs" placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" data-testid="cfdi-cancel-uuid" /></div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelDlg(null)}>Volver</Button>
+            <Button variant="destructive" onClick={confirmarCancelacion} disabled={cancelDlg?.motivo === "01" && !cancelDlg?.uuid.trim()} data-testid="cfdi-cancel-confirmar">
+              <Ban className="w-4 h-4 mr-1" /> Cancelar factura
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

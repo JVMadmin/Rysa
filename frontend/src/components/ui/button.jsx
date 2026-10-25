@@ -9,10 +9,15 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
+        // Principal = rojo de marca (estándar del ERP). Antes el principal
+        // por defecto era grafito y 78 botones forzaban el rojo a mano.
         default:
-          "bg-carbon-900 text-white shadow-sm hover:bg-carbon-800",
+          "bg-brand-600 text-white shadow-sm hover:bg-brand-700",
         terracota:
           "bg-brand-600 text-white shadow-sm hover:bg-brand-700",
+        // Grafito, para acciones oscuras sobre fondos claros que no son la principal.
+        dark:
+          "bg-carbon-900 text-white shadow-sm hover:bg-carbon-800",
         destructive:
           "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
         outline:

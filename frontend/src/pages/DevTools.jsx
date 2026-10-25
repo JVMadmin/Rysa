@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { fmtFechaHora } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import LegacyMigration from "./LegacyMigration";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useConfirm } from "@/components/ConfirmProvider";
 import { toast } from "sonner";
 import {
   Activity, AlertOctagon, AlertTriangle, Bug, CheckCircle2, Database,
@@ -375,7 +377,7 @@ function TabImagenesCatalogo() {
                 {resumen.ultimos_cambios.map((snap) => (
                   <tr key={snap.id} className="hover:bg-slate-50">
                     <td className="py-2.5 text-xs text-slate-500">
-                      {(snap.fecha || "").slice(0, 19).replace("T", " ")}
+                      {fmtFechaHora(snap.fecha)}
                     </td>
                     <td className="py-2.5 font-mono text-xs font-semibold text-slate-700">
                       {snap.id}
@@ -423,6 +425,7 @@ function TabImagenesCatalogo() {
 
 export default function DevTools() {
   const { can } = useAuth();
+  const confirmar = useConfirm();
   const puedeInfo = can("dev.info");
   const puedeMant = can("dev.mantenimiento");
   const [status, setStatus] = useState(null);
@@ -547,6 +550,7 @@ export default function DevTools() {
   };
 
   const limpiarLogs = async () => {
+    if (!(await confirmar({ titulo: "¿Limpiar la bitácora de peticiones?", mensaje: "Se borrarán los registros guardados. Esta acción no se puede deshacer.", accion: "Limpiar bitácora", peligro: true }))) return;
     try { await api.delete("/dev/logs"); setLogs(null); toast.success("Bitácora limpiada"); }
     catch { toast.error("No se pudo limpiar la bitácora"); }
   };
@@ -562,6 +566,7 @@ export default function DevTools() {
   };
 
   const purgarDemos = async () => {
+    if (!(await confirmar({ titulo: "¿Purgar los datos de prueba?", mensaje: "Se eliminarán las cuentas demo (@rysa.dev) con sus sesiones y tracks GPS, y los clientes DEMO-* con sus visitas. Los datos reales no se tocan.", accion: "Purgar datos de prueba", peligro: true }))) return;
     setBusyPurge(true);
     try {
       const { data } = await api.delete("/dev/datos-prueba");
@@ -572,6 +577,7 @@ export default function DevTools() {
   };
 
   const limpiarErroresMemoria = async () => {
+    if (!(await confirmar({ titulo: "¿Limpiar la bitácora de errores?", mensaje: "Se borrarán los errores registrados. Esta acción no se puede deshacer.", accion: "Limpiar bitácora", peligro: true }))) return;
     try { await api.delete("/dev/errores"); setErrores([]); toast.success("Bitácora limpiada"); }
     catch { toast.error("No se pudo limpiar la bitácora"); }
   };
@@ -758,7 +764,7 @@ export default function DevTools() {
                   {logsItems.map((l) => (
                     <div key={l.id} className="flex items-center gap-3 py-2 text-sm">
                       <Badge variant={l.estado >= 500 ? "destructive" : "outline"} className="w-14 justify-center">{l.estado}</Badge>
-                      <span className="text-slate-400 text-xs w-40 shrink-0">{(l.fecha || "").slice(0, 19).replace("T", " ")}</span>
+                      <span className="text-slate-400 text-xs w-40 shrink-0">{fmtFechaHora(l.fecha)}</span>
                       <span className="font-mono text-xs text-slate-700 truncate">{l.metodo} {l.ruta}</span>
                       <span className="ml-auto text-xs text-slate-400">{l.duracion_ms} ms{l.usuario ? ` · ${l.usuario}` : ""}</span>
                     </div>
@@ -796,7 +802,7 @@ export default function DevTools() {
                         <span className="inline-flex items-center gap-2">
                           <Badge variant="destructive">{e.tipo}</Badge>
                           {(e.categoria === "postgresql") && <Badge variant="outline" className="text-blue-700 border-blue-300">PostgreSQL</Badge>}
-                          <span className="text-slate-400 text-xs">{(e.fecha || "").replace("T", " ").slice(0, 19)}</span>
+                          <span className="text-slate-400 text-xs">{fmtFechaHora(e.fecha)}</span>
                           <span className="text-slate-700 truncate">{e.ruta}{e.usuario ? ` · ${e.usuario}` : ""}</span>
                         </span>
                       </summary>
@@ -1080,7 +1086,7 @@ export default function DevTools() {
                     <div key={a.id} className="py-2.5 text-sm">
                       <div className="flex flex-wrap items-center gap-2">
                         <Badge className="bg-slate-900">{a.accion}</Badge>
-                        <span className="text-xs text-slate-400 w-40">{(a.fecha || "").replace("T", " ").slice(0, 19)}</span>
+                        <span className="text-xs text-slate-400 w-40">{fmtFechaHora(a.fecha)}</span>
                         <span className="text-xs text-slate-600">{a.usuario_nombre || a.usuario_id || "—"}</span>
                       </div>
                       <pre className="text-[11px] text-slate-500 whitespace-pre-wrap mt-1 max-h-24 overflow-y-auto">{a.detalle}</pre>

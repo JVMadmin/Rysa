@@ -1582,31 +1582,63 @@ def _estado_de(ult_actividad: Optional[datetime], ult_ubicacion: Optional[dateti
     return "sin_actividad"
 
 
+_CACHE_METRICAS: dict = {}
+
+
 async def _metricas_vendedores(vendedores: list, fecha: Optional[str] = None) -> tuple:
-    """Calcula métricas consolidadas de ventas/cobranza/visitas por vendedor."""
+    """Métricas consolidadas de ventas/cobranza/visitas por vendedor.
+
+    Se guardan 10 s (el mapa en vivo las pide cada 10 s y la página de
+    Supervisión dispara 3 o 4 llamadas a la vez al abrir). "Hoy" es el día de
+    la sucursal. De las ubicaciones GPS solo se lee la última por vendedor."""
+    import time as _t
+    clave = (tuple(sorted(v["id"] for v in vendedores)), fecha or "")
+    hit = _CACHE_METRICAS.get(clave)
+    if hit and hit[0] > _t.monotonic():
+        return hit[1]
+    res = await _calcular_metricas_vendedores(vendedores, fecha)
+    _CACHE_METRICAS.clear() if len(_CACHE_METRICAS) > 50 else None
+    _CACHE_METRICAS[clave] = (_t.monotonic() + 10, res)
+    return res
+
+
+async def _calcular_metricas_vendedores(vendedores: list, fecha: Optional[str] = None) -> tuple:
     now = now_utc()
-    hoy = fecha or now.date().isoformat()
-    mes = now.strftime("%Y-%m")
+    local = ahora_local()
+    hoy = fecha or local.date().isoformat()
+    mes = hoy[:7]
     ids = [v["id"] for v in vendedores]
     ids_set = set(ids)
 
     ventas_hoy = await db.sales.find(
-        {"vendedor_id": {"$in": ids}, "estado": "confirmada", "fecha": {"$regex": "^" + hoy}},
+        {"vendedor_id": {"$in": ids}, "estado": "confirmada", "$and": [filtro_dias_local("fecha", hoy, hoy)]},
         {"_id": 0, "vendedor_id": 1, "total": 1}).to_list(200000)
     ventas_mes = await db.sales.find(
-        {"vendedor_id": {"$in": ids}, "estado": "confirmada", "fecha": {"$regex": "^" + mes}},
+        {"vendedor_id": {"$in": ids}, "estado": "confirmada", "$and": [filtro_dias_local("fecha", f"{mes}-01", hoy)]},
         {"_id": 0, "vendedor_id": 1, "total": 1}).to_list(200000)
     cred = await db.sales.find(
         {"vendedor_id": {"$in": ids}, "condicion": "credito", "estado": "confirmada",
          "saldo": {"$gt": 0}},
         {"_id": 0, "vendedor_id": 1, "cliente_id": 1, "fecha": 1, "saldo": 1}).to_list(200000)
     abonos_hoy = await db.abonos.find(
-        {"fecha": {"$regex": "^" + hoy}},
+        {"$and": [filtro_dias_local("fecha", hoy, hoy)]},
         {"_id": 0, "usuario_id": 1, "monto": 1}).to_list(100000)
     visitas = await db.visits.find(
-        {"vendedor_id": {"$in": ids}}, {"_id": 0}).to_list(100000)
-    ubicaciones = await db.seller_locations.find(
-        {"vendedor_id": {"$in": ids}}, {"_id": 0}).to_list(100000)
+        {"vendedor_id": {"$in": ids}}, {"_id": 0, "vendedor_id": 1, "estado": 1, "fecha": 1}).to_list(100000)
+    # Solo la última ubicación de cada vendedor (índice vendedor+fecha); antes
+    # se leía todo el historial GPS (crece ~240 filas por hora por vendedor).
+    ubicaciones = []
+    if ids:
+        from pgstore.database import get_engine
+        from sqlalchemy import text as _sql
+        try:
+          async with get_engine().connect() as conn:
+            ubicaciones = [dict(r[0]) for r in (await conn.execute(_sql(
+                "SELECT DISTINCT ON (doc->>'vendedor_id') doc FROM seller_locations "
+                "WHERE doc->>'vendedor_id' = ANY(:ids) ORDER BY doc->>'vendedor_id', doc->>'fecha' DESC"),
+                {"ids": ids})).fetchall()]
+        except Exception:  # la tabla se crea con la primera ubicación
+            ubicaciones = []
 
     def _sum(lst, key):
         return round(sum(float(d.get(key, 0) or 0) for d in lst), 2)
@@ -1642,7 +1674,7 @@ async def _metricas_vendedores(vendedores: list, fecha: Optional[str] = None) ->
             d["realizadas"] += 1
         if v.get("estado") == "programada":
             d["programadas"] += 1
-        if str(v.get("fecha", ""))[:10] == hoy:
+        if fecha_local(v.get("fecha")) == hoy:
             d["hoy"] += 1
     ult_ubic = {}
     for u in ubicaciones:

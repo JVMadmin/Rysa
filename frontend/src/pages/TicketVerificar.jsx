@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, money } from "@/lib/api";
+import { fmtFechaHora } from "@/lib/fechas";
 import { Loader2, ShieldCheck, ShieldX, CheckCircle2, Package } from "lucide-react";
 
 export default function TicketVerificar() {
@@ -39,7 +40,7 @@ export default function TicketVerificar() {
               <div className="text-xs text-slate-400 uppercase tracking-wider mt-1">{data.empresa} · {data.rfc}</div>
             </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-400">Fecha</div><div className="font-medium">{(data.fecha || "").slice(0, 16).replace("T", " ")}</div></div>
+              <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-400">Fecha</div><div className="font-medium">{fmtFechaHora(data.fecha)}</div></div>
               <div className="bg-slate-50 rounded-lg p-3"><div className="text-xs text-slate-400">Cliente</div><div className="font-medium truncate">{data.cliente}</div></div>
             </div>
             <div className="border border-slate-200 rounded-lg overflow-hidden">

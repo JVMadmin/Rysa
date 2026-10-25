@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { fmtHora, fmtFechaHora, hoyLocal } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { etiquetaEstado, etiquetaGenerica, etiquetaRol } from "@/lib/etiquetas";
 import { toast } from "sonner";
 import {
   Loader2, Users, Activity as ActivityIcon, Wallet, TrendingUp, CheckCircle2,
@@ -37,8 +39,23 @@ const ESTADO_BADGE = {
   sin_actividad: "bg-red-100 text-red-700",
   sin_datos: "bg-slate-200 text-slate-600",
 };
-const fmt = (f) => (f || "").slice(0, 16).replace("T", " ");
+const fmt = (f) => fmtFechaHora(f);
 const PAGE_CARTERA = 100;
+
+// Expediente del vendedor (users.expediente, dict libre). Se muestran estos
+// documentos siempre y, además, cualquier otra clave que traiga el registro.
+const EXPEDIENTE_DOCS = [
+  ["ine", "Identificación oficial (INE)"],
+  ["comprobante_domicilio", "Comprobante de domicilio"],
+  ["contrato", "Contrato laboral / convenio"],
+  ["dispositivo", "Dispositivo móvil RYSA"],
+];
+const valorExpediente = (v) => {
+  if (v === null || v === undefined || v === "" || v === false) return "";
+  if (v === true) return "Registrado";
+  if (typeof v === "object") return String(v.estado || v.status || v.descripcion || v.valor || v.version || (v.url ? "Archivo cargado" : ""));
+  return String(v);
+};
 
 /**
  * ===========================================================================
@@ -111,7 +128,7 @@ export default function SupervisionComercial() {
   const [rutaGps, setRutaGps] = useState([]);
 
   // Metas de Venta por Vendedor / Periodo
-  const [metasPeriodo, setMetasPeriodo] = useState(() => new Date().toISOString().slice(0, 7));
+  const [metasPeriodo, setMetasPeriodo] = useState(() => hoyLocal().slice(0, 7));
   const [metasData, setMetasData] = useState(null);
   const [loadingMetas, setLoadingMetas] = useState(false);
   const [modalMetaOpen, setModalMetaOpen] = useState(false);
@@ -524,7 +541,7 @@ export default function SupervisionComercial() {
                       {vendedores.map((v) => (
                         <tr key={v.id} className="border-t border-slate-100 hover:bg-slate-50" data-testid={`sc-cartera-${v.id}`}>
                           <td className="p-2 font-medium">{v.name}</td>
-                          <td className="p-2"><Badge className={ESTADO_BADGE[v.estado]}>{v.estado}</Badge></td>
+                          <td className="p-2"><Badge className={ESTADO_BADGE[v.estado]}>{etiquetaEstado(v.estado)}</Badge></td>
                           <td className="p-2 text-right tabular-nums">{v.clientes_asignados}</td>
                           <td className="p-2 text-right tabular-nums">{money(v.cartera_total)}</td>
                           <td className={`p-2 text-right tabular-nums ${v.cxc_vencida > 0 ? "text-red-600 font-semibold" : "text-slate-400"}`}>{money(v.cxc_vencida)}</td>
@@ -538,7 +555,7 @@ export default function SupervisionComercial() {
                                   <Pencil className="w-3.5 h-3.5 mr-1" /> Cartera
                                 </Button>
                               )}
-                              <Button size="icon" variant="ghost" onClick={() => openDetalle(v.id)}><ChevronRight className="w-4 h-4" /></Button>
+                              <Button size="icon" variant="ghost" onClick={() => openDetalle(v.id)} title="Ver detalle del vendedor" aria-label="Ver detalle del vendedor"><ChevronRight className="w-4 h-4" /></Button>
                             </div>
                           </td>
                         </tr>
@@ -603,17 +620,17 @@ export default function SupervisionComercial() {
                       <div className="flex items-center gap-3">
                         <div className="w-11 h-11 rounded-full bg-brand-600/10 flex items-center justify-center overflow-hidden shrink-0 border border-slate-200/60">
                           {v.foto_url ? (
-                            <img src={fileUrl(v.foto_url)} alt={v.name} className="w-full h-full object-cover" />
+                            <img src={fileUrl(v.foto_url)} alt={v.name} loading="lazy" className="w-full h-full object-cover" />
                           ) : (
                             <UserCog className="w-5 h-5 text-brand-600" />
                           )}
                         </div>
                         <div>
                           <div className="font-display font-bold truncate">{v.name || "—"}</div>
-                          <Badge variant="outline" className="capitalize">{v.role || "vendedor"}</Badge>
+                          <Badge variant="outline">{etiquetaRol(v.role || "vendedor")}</Badge>
                         </div>
                       </div>
-                      <Badge className={ESTADO_BADGE[v.estado] || ""}>{v.estado || "sin_datos"}</Badge>
+                      <Badge className={ESTADO_BADGE[v.estado] || ""}>{etiquetaEstado(v.estado || "sin_datos")}</Badge>
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-sm">
                       {[
@@ -828,7 +845,7 @@ export default function SupervisionComercial() {
                               <div className="flex items-center gap-2.5">
                                 <div className="w-8 h-8 rounded-full bg-brand-600/10 flex items-center justify-center overflow-hidden shrink-0">
                                   {v.foto_url ? (
-                                    <img src={fileUrl(v.foto_url)} alt={v.vendedor_nombre} className="w-full h-full object-cover" />
+                                    <img src={fileUrl(v.foto_url)} alt={v.vendedor_nombre} loading="lazy" className="w-full h-full object-cover" />
                                   ) : (
                                     <UserCog className="w-4 h-4 text-brand-600" />
                                   )}
@@ -927,9 +944,9 @@ export default function SupervisionComercial() {
                   <Button size="sm" variant={liveOn ? "default" : "outline"} onClick={() => setLiveOn((v) => !v)}
                           className={liveOn ? "bg-brand-600 hover:bg-brand-700" : ""}
                           data-testid="sc-live-toggle">
-                    {liveOn ? <><Radio className="w-4 h-4 mr-1 animate-pulse" /> En vivo ON</> : <><Radio className="w-4 h-4 mr-1" /> Activar en vivo</>}
+                    {liveOn ? <><Radio className="w-4 h-4 mr-1 animate-pulse" /> En vivo activo</> : <><Radio className="w-4 h-4 mr-1" /> Activar en vivo</>}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={loadMapa}><RefreshCw className="w-4 h-4" /></Button>
+                  <Button size="sm" variant="ghost" onClick={loadMapa} title="Actualizar mapa" aria-label="Actualizar mapa"><RefreshCw className="w-4 h-4" /></Button>
                 </div>
               </div>
 
@@ -1151,7 +1168,7 @@ export default function SupervisionComercial() {
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-full overflow-hidden bg-brand-600/10 flex items-center justify-center shrink-0 border border-slate-200">
                   {detalle?.vendedor?.foto_url ? (
-                    <img src={fileUrl(detalle.vendedor.foto_url)} alt="Foto" className="w-full h-full object-cover" />
+                    <img src={fileUrl(detalle.vendedor.foto_url)} alt="Foto" loading="lazy" className="w-full h-full object-cover" />
                   ) : (
                     <UserCog className="w-6 h-6 text-brand-600" />
                   )}
@@ -1161,7 +1178,7 @@ export default function SupervisionComercial() {
                   <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
                     <span>{detalle?.vendedor?.email}</span>
                     <span>·</span>
-                    <Badge variant="outline" className="text-[10px] uppercase font-medium">{detalle?.vendedor?.role}</Badge>
+                    <Badge variant="outline" className="text-[10px] uppercase font-medium">{etiquetaRol(detalle?.vendedor?.role)}</Badge>
                   </div>
                 </div>
               </div>
@@ -1199,7 +1216,7 @@ export default function SupervisionComercial() {
                       <div className="flex items-center gap-3">
                         <div className="w-16 h-16 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center border">
                           {detalle.vendedor.foto_url ? (
-                            <img src={fileUrl(detalle.vendedor.foto_url)} alt="Foto" className="w-full h-full object-cover" />
+                            <img src={fileUrl(detalle.vendedor.foto_url)} alt="Foto" loading="lazy" className="w-full h-full object-cover" />
                           ) : (
                             <Camera className="w-6 h-6 text-slate-400" />
                           )}
@@ -1288,24 +1305,35 @@ export default function SupervisionComercial() {
                         <h4 className="font-bold text-slate-800">Dossier / Expediente de Personal</h4>
                         <p className="text-xs text-slate-400">Documentación de alta y certificación para actividades de campo.</p>
                       </div>
-                      <Badge className="bg-emerald-100 text-emerald-800 border-emerald-200">Expediente Activo</Badge>
+                      {(() => {
+                        const exp = detalle?.vendedor?.expediente || {};
+                        const n = Object.values(exp).filter((v) => valorExpediente(v)).length;
+                        return n > 0
+                          ? <Badge variant="success">{n} {n === 1 ? "dato registrado" : "datos registrados"}</Badge>
+                          : <Badge variant="neutral">Sin registrar</Badge>;
+                      })()}
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                      {[
-                        ["Identificación Oficial (INE)", "Verificada", "bg-emerald-50 text-emerald-700 border-emerald-200"],
-                        ["Comprobante de Domicilio", "Actualizado", "bg-emerald-50 text-emerald-700 border-emerald-200"],
-                        ["Contrato Laboral / Convenio", "Firmado y Vigente", "bg-emerald-50 text-emerald-700 border-emerald-200"],
-                        ["Dispositivo Móvil RYSA", "App v1.2.2 enlazada", "bg-sky-50 text-sky-700 border-sky-200"],
-                      ].map(([doc, status, badgeCls], i) => (
-                        <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-slate-50 border border-slate-100">
-                          <div className="flex items-center gap-2">
-                            <FileText className="w-4 h-4 text-slate-400" />
-                            <span className="text-xs font-medium text-slate-700">{doc}</span>
-                          </div>
-                          <Badge variant="outline" className={`text-[10px] ${badgeCls}`}>{status}</Badge>
-                        </div>
-                      ))}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2" data-testid="sc-expediente">
+                      {(() => {
+                        const exp = detalle?.vendedor?.expediente || {};
+                        const conocidas = EXPEDIENTE_DOCS.map(([k]) => k);
+                        const extras = Object.keys(exp).filter((k) => !conocidas.includes(k)).map((k) => [k, etiquetaGenerica(k)]);
+                        return [...EXPEDIENTE_DOCS, ...extras].map(([clave, doc]) => {
+                          const valor = valorExpediente(exp[clave]);
+                          return (
+                            <div key={clave} className="flex items-center justify-between gap-2 p-3 rounded-lg bg-slate-50 border border-slate-100">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                                <span className="text-xs font-medium text-slate-700">{doc}</span>
+                              </div>
+                              {valor
+                                ? <Badge variant="success" className="text-[10px] max-w-[55%] truncate" title={valor}>{valor}</Badge>
+                                : <Badge variant="neutral" className="text-[10px]">Sin registrar</Badge>}
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1416,7 +1444,7 @@ export default function SupervisionComercial() {
                     <Badge className={v.estado === "realizada" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-700"}>
                       {v.estado}
                     </Badge>
-                    <div className="text-slate-400 font-mono mt-1">{(v.fecha || "").slice(11, 16)}</div>
+                    <div className="text-slate-400 font-mono mt-1">{fmtHora(v.fecha)}</div>
                   </div>
                 </div>
               ))}
@@ -1476,7 +1504,7 @@ export default function SupervisionComercial() {
                         <td className="p-2 font-medium">{v.cliente_nombre}</td>
                         <td className="p-2 capitalize">{v.condicion}</td>
                         <td className="p-2 text-right font-bold text-slate-900">{money(v.total)}</td>
-                        <td className="p-2 text-right text-slate-400 font-mono">{(v.fecha || "").slice(11, 16)}</td>
+                        <td className="p-2 text-right text-slate-400 font-mono">{fmtHora(v.fecha)}</td>
                         <td className="p-2 text-right">
                           <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => nav("/app/ventas")}>
                             Ver en Ventas →
@@ -1504,7 +1532,7 @@ export default function SupervisionComercial() {
                         <td className="p-2 font-medium">{p.cliente_nombre}</td>
                         <td className="p-2"><Badge variant="outline">{p.estado}</Badge></td>
                         <td className="p-2 text-right font-bold text-slate-900">{money(p.total)}</td>
-                        <td className="p-2 text-right text-slate-400 font-mono">{(p.created_at || "").slice(11, 16)}</td>
+                        <td className="p-2 text-right text-slate-400 font-mono">{fmtHora(p.created_at)}</td>
                         <td className="p-2 text-right">
                           <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => nav("/app/pedidos")}>
                             Ver en Pedidos →
