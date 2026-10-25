@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import AutorizacionesRemotas from "@/components/AutorizacionesRemotas";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
   UserCog, ScrollText, LogOut, Menu, ChevronLeft, Settings, HandCoins, FileText, Stamp, BarChart3, Smartphone, Wrench,
@@ -403,6 +404,7 @@ export default function ErpLayout() {
           <Outlet />
         </main>
       </div>
+      <AutorizacionesRemotas />
     </div>
   );
 }

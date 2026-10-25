@@ -170,6 +170,7 @@ export default function POS({ windowId, windowLabel }) {
   const [autzError, setAutzError] = useState("");
   const [autzBusy, setAutzBusy] = useState(false);
   const autzBusyRef = useRef(false);
+  const [remota, setRemota] = useState(null);   // solicitud remota de precio manual en espera
   const precioManualDirecto = can("venta.precio_manual");
   const [payOpen, setPayOpen] = useState(false);
   const [invOverride, setInvOverride] = useState(null); // {motivo} dialog de inventario insuficiente
@@ -754,7 +755,7 @@ export default function POS({ windowId, windowLabel }) {
   };
   const cerrarLinePrice = () => {
     setLinePrice(null); setLibreVal(""); setManualOpen(false);
-    setAutzPend(null); setAutzCodigo(""); setAutzError("");
+    setAutzPend(null); setAutzCodigo(""); setAutzError(""); setRemota(null);
   };
   // `manual`: { autorizacion_id, autorizado_por } cuando es precio manual.
   // Elegir un precio de la lista quita la marca de precio manual.
@@ -783,6 +784,7 @@ export default function POS({ windowId, windowLabel }) {
       const { data } = await api.post("/autorizaciones", {
         codigo, accion: "precio_manual", product_id: linePrice.product_id,
         precio: autzPend.neto, precio_anterior: Number(linePrice.precio) || null,
+        solicitud_id: remota?.estado === "pendiente" ? remota.id : null,
       });
       toast.success(`Precio manual autorizado por ${data.autorizador_nombre}`);
       setLinePrecio(linePrice, autzPend.vista, { autorizacion_id: data.id, autorizado_por: data.autorizador_nombre });
@@ -791,6 +793,52 @@ export default function POS({ windowId, windowLabel }) {
       setAutzCodigo("");
     } finally { autzBusyRef.current = false; setAutzBusy(false); }
   };
+  // Autorización a distancia: la caja queda en espera (diálogo bloqueado) hasta
+  // que alguien con permiso la aprueba o rechaza desde su pantalla, o teclea
+  // aquí su código.
+  const solicitarRemota = async () => {
+    if (!autzPend || !linePrice) return;
+    setAutzError("");
+    try {
+      const { data } = await api.post("/autorizaciones/solicitudes", {
+        accion: "precio_manual", product_id: linePrice.product_id,
+        precio: autzPend.neto, precio_anterior: Number(linePrice.precio) || null,
+        precio_vista: autzPend.vista,
+        precio_anterior_vista: +(Number(linePrice.precio || 0) * fDlg).toFixed(2),
+        con_iva: !!incluyeIva, cantidad: Number(linePrice.cantidad) || null,
+        cliente_nombre: clienteSel?.nombre || null, caja: windowLabel || null,
+      });
+      setRemota(data);
+    } catch (e) {
+      setAutzError(formatApiError(e.response?.data?.detail));
+    }
+  };
+  const cancelarRemota = async () => {
+    const id = remota?.id;
+    setRemota(null);
+    if (id) { try { await api.post(`/autorizaciones/solicitudes/${id}/cancelar`); } catch {} }
+  };
+  useEffect(() => {
+    if (remota?.estado !== "pendiente") return undefined;
+    const t = setInterval(async () => {
+      try {
+        const { data } = await api.get(`/autorizaciones/solicitudes/${remota.id}`);
+        if (data.estado === "pendiente") return;
+        setRemota(null);
+        if (data.estado === "aprobada") {
+          toast.success(`Precio manual autorizado por ${data.autorizador_nombre}`);
+          if (linePrice && autzPend) setLinePrecio(linePrice, autzPend.vista, { autorizacion_id: data.id, autorizado_por: data.autorizador_nombre });
+        } else if (data.estado === "rechazada") {
+          const msg = `${data.autorizador_nombre || "El autorizador"} rechazó el precio${data.motivo ? `: ${data.motivo}` : ""}`;
+          toast.error(msg); setAutzError(msg);
+        } else {
+          setAutzError(data.estado === "vencida" ? "La solicitud venció sin respuesta. Vuelve a pedirla o usa un código." : "La solicitud se canceló.");
+        }
+      } catch {}
+    }, 2000);
+    return () => clearInterval(t);
+  }, [remota, linePrice, autzPend]); // eslint-disable-line
+
   const updateQty = (id, d) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Math.max(0.001, +(i.cantidad + d).toFixed(3)) } : i)));
   const setQty = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, cantidad: Number(v) || 0 } : i)));
   const setLineDisc = (id, v) => setCart((c) => c.map((i) => (i.product_id === id ? { ...i, descuento: Number(v) || 0 } : i)));
@@ -1567,7 +1615,7 @@ export default function POS({ windowId, windowLabel }) {
       </Dialog>
 
       {/* Selector de precio por línea */}
-      <Dialog open={!!linePrice} onOpenChange={(o) => { if (!o) cerrarLinePrice(); }}>
+      <Dialog open={!!linePrice} onOpenChange={(o) => { if (!o && !remota) cerrarLinePrice(); }}>
         <DialogContent data-testid="line-price-dialog">
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Tag className="w-5 h-5" /> Precio · {linePrice?.descripcion}</DialogTitle></DialogHeader>
           {linePrice && autzPend && (
@@ -1588,8 +1636,21 @@ export default function POS({ windowId, windowLabel }) {
                   ? <p className="text-sm text-red-600" data-testid="autorizacion-error">{autzError}</p>
                   : <p className="text-xs text-slate-400">Administrador, dueño o usuario con permiso para autorizar.</p>}
               </div>
+              {remota ? (
+                <div className="rounded-lg border-2 border-brand-600 bg-brand-50 p-4 text-center" data-testid="autorizacion-remota-espera">
+                  <Loader2 className="mx-auto h-7 w-7 animate-spin text-brand-600" />
+                  <p className="mt-2 font-display text-lg font-black text-slate-900">Esperando autorización remota…</p>
+                  <p className="text-sm text-slate-600">Se avisó a quienes pueden autorizar. La venta queda detenida hasta que respondan o tecleen su código arriba.</p>
+                  <p className="mt-1 text-xs tabular-nums text-slate-500">Vence a las {new Date(remota.responder_antes).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" })}</p>
+                  <Button variant="outline" className="mt-3" onClick={cancelarRemota} data-testid="autorizacion-remota-cancelar">Cancelar solicitud</Button>
+                </div>
+              ) : (
+                <Button variant="outline" className="h-11 w-full border-dashed text-sm" onClick={solicitarRemota} data-testid="autorizacion-remota-solicitar">
+                  <SendIcon className="mr-1.5 h-4 w-4" /> Solicitar autorización remota
+                </Button>
+              )}
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => { setAutzPend(null); setAutzCodigo(""); setAutzError(""); }} data-testid="autorizacion-regresar">Regresar</Button>
+                <Button variant="outline" disabled={!!remota} onClick={() => { setAutzPend(null); setAutzCodigo(""); setAutzError(""); }} data-testid="autorizacion-regresar">Regresar</Button>
                 <Button onClick={() => autorizarPrecioManual(autzCodigo)} disabled={autzCodigo.length !== 6 || autzBusy}
                   className="bg-brand-600 hover:bg-brand-700" data-testid="autorizacion-confirmar">
                   {autzBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : "Autorizar"}

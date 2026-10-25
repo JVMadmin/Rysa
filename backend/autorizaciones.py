@@ -10,6 +10,11 @@ teclea su código. El servidor lo verifica y emite una autorización de un solo
 uso, ligada al solicitante, al producto y al precio; la venta la consume al
 registrarse y deja en la línea quién autorizó.
 
+También puede pedirla a distancia: la solicitud remota queda «pendiente» y a
+quien puede autorizar le aparece un aviso a pantalla completa con sonido
+(AutorizacionesRemotas.jsx); la aprueba o rechaza desde ahí, o se teclea su
+código en la caja. El POS espera bloqueado hasta la respuesta.
+
 El código se guarda con bcrypt en la colección `codigos_autorizacion`, nunca
 en el documento del usuario (ese documento se devuelve en muchas respuestas).
 """
@@ -37,6 +42,7 @@ PERM_PRECIO_MANUAL = "venta.precio_manual"
 ACCIONES = {"precio_manual": "Precio manual"}
 
 VIGENCIA_HORAS = 12        # una autorización sin usar vence en el turno
+SOLICITUD_MINUTOS = 10     # una solicitud remota sin respuesta vence
 MAX_FALLOS = 5             # códigos incorrectos seguidos antes del bloqueo
 BLOQUEO_MINUTOS = 10
 _BCRYPT_ROUNDS = 10        # se compara contra todos los códigos: costo moderado
@@ -183,6 +189,7 @@ class AutorizacionInput(BaseModel):
     product_id: str = Field(min_length=1, max_length=100)
     precio: float = Field(gt=0)              # neto, tal como lo enviará la venta
     precio_anterior: Optional[float] = Field(default=None, ge=0)
+    solicitud_id: Optional[str] = Field(default=None, max_length=64)   # solicitud remota que se resuelve con código
 
 
 @router.post("/autorizaciones")
@@ -202,6 +209,21 @@ async def autorizar(data: AutorizacionInput, user: dict = Depends(require_permis
                         f"{accion} · {prod.get('codigo')} · código incorrecto")
         raise HTTPException(403, "Código de autorización incorrecto")
     await _limpiar_fallos(clave)
+    # Si la caja esperaba una solicitud remota, el código la resuelve.
+    if data.solicitud_id:
+        sol = await db.autorizaciones.find_one({"id": data.solicitud_id}, {"_id": 0})
+        if (sol and sol.get("estado") == "pendiente" and sol.get("solicitante_id") == user["id"]
+                and sol.get("product_id") == data.product_id
+                and abs(float(sol.get("precio") or 0) - float(data.precio)) <= 0.005):
+            expira = (now_utc() + timedelta(hours=VIGENCIA_HORAS)).isoformat()
+            n = await db.autorizaciones.update_one({"id": sol["id"], "estado": "pendiente"}, {"$set": {
+                "estado": "aprobada", "via": "codigo", "respondida": iso_now(), "expira": expira,
+                "autorizador_id": autorizador["id"], "autorizador_nombre": autorizador.get("name")}})
+            if n:
+                await log_audit(autorizador, "AUTORIZACION_OTORGADA", "autorizacion", sol["id"],
+                                f"{accion} · {sol.get('codigo')} a {float(sol.get('precio') or 0):.2f} sin IVA · "
+                                f"solicitó {user.get('name')} · con código")
+                return {"id": sol["id"], "autorizador_nombre": autorizador.get("name"), "expira": expira}
     doc = {
         "id": uuid.uuid4().hex, "accion": data.accion,
         "solicitante_id": user["id"], "solicitante_nombre": user.get("name"),
@@ -219,6 +241,141 @@ async def autorizar(data: AutorizacionInput, user: dict = Depends(require_permis
                     f"{accion} · {doc['codigo']} a {doc['precio']:.2f} sin IVA{antes} · "
                     f"solicitó {user.get('name')}")
     return {"id": doc["id"], "autorizador_nombre": doc["autorizador_nombre"], "expira": doc["expira"]}
+
+
+# --- Solicitud remota ----------------------------------------------------------
+class SolicitudInput(BaseModel):
+    accion: str = "precio_manual"
+    product_id: str = Field(min_length=1, max_length=100)
+    precio: float = Field(gt=0)                                # neto
+    precio_anterior: Optional[float] = Field(default=None, ge=0)
+    precio_vista: Optional[float] = Field(default=None, ge=0)  # como lo ve la caja (con IVA si aplica)
+    precio_anterior_vista: Optional[float] = Field(default=None, ge=0)
+    con_iva: bool = False
+    cantidad: Optional[float] = Field(default=None, ge=0)
+    cliente_nombre: Optional[str] = Field(default=None, max_length=200)
+    caja: Optional[str] = Field(default=None, max_length=80)
+
+
+class RespuestaInput(BaseModel):
+    aprobar: bool
+    motivo: Optional[str] = Field(default=None, max_length=300)
+
+
+_CAMPOS_SOLICITUD = ("id", "accion", "estado", "via", "solicitante_id", "solicitante_nombre",
+                     "autorizador_id", "autorizador_nombre", "product_id", "codigo", "descripcion",
+                     "precio", "precio_anterior", "precio_vista", "precio_anterior_vista", "con_iva",
+                     "costo", "cantidad", "cliente_nombre", "caja", "fecha", "responder_antes",
+                     "respondida", "motivo", "expira")
+
+_YA_NO_PENDIENTE = {
+    "aprobada": "Ya la autorizó {quien}",
+    "rechazada": "Ya la rechazó {quien}",
+    "cancelada": "La caja canceló la solicitud",
+    "vencida": "La solicitud venció sin respuesta",
+}
+
+
+async def _vigente(sol: dict) -> dict:
+    """Marca como vencida la solicitud pendiente que nadie respondió a tiempo."""
+    if sol.get("estado") == "pendiente":
+        limite = _dt(sol.get("responder_antes"))
+        if limite and limite < now_utc():
+            if await db.autorizaciones.update_one({"id": sol["id"], "estado": "pendiente"},
+                                                  {"$set": {"estado": "vencida"}}):
+                sol["estado"] = "vencida"
+    return {k: sol.get(k) for k in _CAMPOS_SOLICITUD}
+
+
+async def _solicitud(sid: str) -> dict:
+    sol = await db.autorizaciones.find_one({"id": sid}, {"_id": 0})
+    if not sol or not sol.get("estado"):
+        raise HTTPException(404, "Solicitud no encontrada")
+    return sol
+
+
+@router.post("/autorizaciones/solicitudes")
+async def solicitar(data: SolicitudInput, user: dict = Depends(require_permission("venta.crear"))):
+    if data.accion not in ACCIONES:
+        raise HTTPException(400, "Movimiento no reconocido")
+    prod = await db.products.find_one({"id": data.product_id}, {"_id": 0})
+    if not prod:
+        raise HTTPException(404, "Producto no encontrado")
+    # Una caja espera una sola respuesta a la vez.
+    await db.autorizaciones.update_many({"solicitante_id": user["id"], "estado": "pendiente"},
+                                        {"$set": {"estado": "cancelada", "respondida": iso_now()}})
+    ahora = now_utc()
+    limite = (ahora + timedelta(minutes=SOLICITUD_MINUTOS)).isoformat()
+    doc = {
+        "id": uuid.uuid4().hex, "accion": data.accion, "estado": "pendiente", "via": "remota",
+        "solicitante_id": user["id"], "solicitante_nombre": user.get("name"),
+        "autorizador_id": None, "autorizador_nombre": None,
+        "product_id": data.product_id, "codigo": prod.get("codigo"),
+        "descripcion": prod.get("descripcion"), "costo": prod.get("costo"),
+        "precio": round(float(data.precio), 4), "precio_anterior": data.precio_anterior,
+        "precio_vista": data.precio_vista, "precio_anterior_vista": data.precio_anterior_vista,
+        "con_iva": data.con_iva, "cantidad": data.cantidad,
+        "cliente_nombre": data.cliente_nombre, "caja": data.caja,
+        "fecha": ahora.isoformat(), "responder_antes": limite, "expira": limite,
+        "usado": False, "venta_id": None,
+    }
+    await db.autorizaciones.insert_one(doc)
+    await log_audit(user, "AUTORIZACION_SOLICITADA", "autorizacion", doc["id"],
+                    f"{ACCIONES[data.accion]} · {doc['codigo']} a {doc['precio']:.2f} sin IVA · remota")
+    return await _vigente(doc)
+
+
+@router.get("/autorizaciones/pendientes")
+async def pendientes(user: dict = Depends(require_permission(PERM_OTORGAR))):
+    docs = await db.autorizaciones.find({"estado": "pendiente"}, {"_id": 0}).to_list(200)
+    out = [await _vigente(d) for d in docs]
+    out = [d for d in out if d["estado"] == "pendiente" and d["solicitante_id"] != user["id"]]
+    return sorted(out, key=lambda d: d.get("fecha") or "")
+
+
+@router.get("/autorizaciones/solicitudes/{sid}")
+async def ver_solicitud(sid: str, user: dict = Depends(get_current_user)):
+    sol = await _solicitud(sid)
+    if sol.get("solicitante_id") != user["id"] and not user_has_permission(user, PERM_OTORGAR):
+        raise HTTPException(403, "No puedes ver esta solicitud")
+    return await _vigente(sol)
+
+
+@router.post("/autorizaciones/solicitudes/{sid}/cancelar")
+async def cancelar_solicitud(sid: str, user: dict = Depends(get_current_user)):
+    sol = await _solicitud(sid)
+    if sol.get("solicitante_id") != user["id"]:
+        raise HTTPException(403, "Solo quien la pidió puede cancelarla")
+    await db.autorizaciones.update_one({"id": sid, "estado": "pendiente"},
+                                       {"$set": {"estado": "cancelada", "respondida": iso_now()}})
+    return await _vigente(await _solicitud(sid))
+
+
+@router.post("/autorizaciones/solicitudes/{sid}/responder")
+async def responder_solicitud(sid: str, data: RespuestaInput,
+                              user: dict = Depends(require_permission(PERM_OTORGAR))):
+    sol = await _vigente(await _solicitud(sid))
+    if sol["estado"] != "pendiente":
+        msg = _YA_NO_PENDIENTE.get(sol["estado"], "La solicitud ya no está pendiente")
+        raise HTTPException(409, msg.format(quien=sol.get("autorizador_nombre") or "otra persona"))
+    if sol.get("solicitante_id") == user["id"]:
+        raise HTTPException(403, "No puedes autorizar tu propia solicitud")
+    cambios = {"estado": "aprobada" if data.aprobar else "rechazada", "respondida": iso_now(),
+               "autorizador_id": user["id"], "autorizador_nombre": user.get("name"),
+               "motivo": (data.motivo or "").strip() or None}
+    if data.aprobar:
+        cambios["expira"] = (now_utc() + timedelta(hours=VIGENCIA_HORAS)).isoformat()
+    if not await db.autorizaciones.update_one({"id": sid, "estado": "pendiente"}, {"$set": cambios}):
+        raise HTTPException(409, "Otra persona ya respondió esta solicitud")
+    accion = ACCIONES.get(sol.get("accion"), "Movimiento")
+    detalle = (f"{accion} · {sol.get('codigo')} a {float(sol.get('precio') or 0):.2f} sin IVA · "
+               f"solicitó {sol.get('solicitante_nombre')} · remota")
+    if data.aprobar:
+        await log_audit(user, "AUTORIZACION_OTORGADA", "autorizacion", sid, detalle)
+    else:
+        await log_audit(user, "AUTORIZACION_RECHAZADA", "autorizacion", sid,
+                        detalle + (f" · motivo: {cambios['motivo']}" if cambios["motivo"] else ""))
+    return await _vigente(await _solicitud(sid))
 
 
 # --- Uso desde la venta ------------------------------------------------------
@@ -244,7 +401,8 @@ async def validar_precios_manuales(user: dict, items: list) -> list:
             raise HTTPException(403, f"El precio manual de {codigo} requiere autorización")
         a = await db.autorizaciones.find_one({"id": aid}, {"_id": 0})
         if (not a or a.get("accion") != "precio_manual" or a.get("solicitante_id") != user["id"]
-                or a.get("product_id") != it.get("product_id")):
+                or a.get("product_id") != it.get("product_id")
+                or a.get("estado", "aprobada") != "aprobada"):
             raise HTTPException(403, f"La autorización del precio manual de {codigo} no es válida")
         if a.get("usado") or aid in usadas:
             raise HTTPException(409, f"La autorización del precio manual de {codigo} ya se usó. Vuelve a autorizarlo con F6.")
