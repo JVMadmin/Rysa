@@ -40,7 +40,7 @@ def precios_legacy(rec: dict) -> dict:
     for i in range(1, 6):
         neto = round(_num(g(f"PRECIO{i}")), 6)
         if neto > 0:
-            util = round((neto / costo - 1) * 100, 2) if costo else 0.0
+            util = round((neto / costo - 1) * 100, 2) + 0.0 if costo else 0.0   # + 0.0: sin "-0.0"
             precios.append({"nombre": f"Precio {i}", "utilidad_pct": util,
                             "precio_sin_iva": neto, "precio_con_iva": round(neto * f, 2)})
         else:
