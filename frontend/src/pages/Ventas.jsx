@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
+import { fmtFecha, fmtHora, fmtFechaHora, fechaLocalISO } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -116,7 +117,7 @@ export default function Ventas() {
       if (estado === "all") {
         abonoRows = (Array.isArray(abonosRes.data) ? abonosRes.data : [])
           .filter((a) => a.estado !== "cancelado")
-          .filter((a) => (!d || (a.fecha || "").slice(0, 10) >= d) && (!h || (a.fecha || "").slice(0, 10) <= h))
+          .filter((a) => (!d || fechaLocalISO(a.fecha) >= d) && (!h || fechaLocalISO(a.fecha) <= h))
           .map((a) => ({
             id: "AB-" + a.id,
             folio: a.folio,
@@ -126,7 +127,7 @@ export default function Ventas() {
             cliente_nombre: a.cliente_nombre || "",
             usuario_nombre: a.usuario_nombre || "",
             fecha: a.fecha,
-            hora: (a.fecha || "").slice(11, 16),
+            hora: fmtHora(a.fecha),
             condicion: a.metodo || "",
             total: Number(a.monto || 0),
             estado: "abono",
@@ -384,7 +385,7 @@ export default function Ventas() {
                   {legacy && <Badge className="ml-1 bg-brand-600 text-white">LEGACY</Badge>}
                 </td>
                 <td className="px-3 py-3 font-medium text-brand-600">{s.folio}</td>
-                <td className="px-3 py-3 whitespace-nowrap text-slate-500">{s.fecha?.slice(0, 10)} {s.hora}</td>
+                <td className="px-3 py-3 whitespace-nowrap text-slate-500">{fmtFecha(s.fecha)} {fmtHora(s.fecha)}</td>
                 <td className="px-3 py-3 min-w-[12rem]">{s.cliente_nombre}</td>
                 <td className="px-3 py-3 text-slate-500" data-testid={`venta-vendedor-${s.folio}`}>{s.vendedor_nombre || s.usuario_nombre}</td>
                 <td className="px-3 py-3 text-right text-[17px] font-bold tabular-nums">{money(s.total)}</td>
@@ -425,7 +426,7 @@ export default function Ventas() {
             <>
               <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Badge className="bg-blue-100 text-blue-700">Abono a cuenta</Badge> {detalle.folio}</DialogTitle></DialogHeader>
               <div className="text-sm space-y-3" data-testid="abono-detalle">
-                <div className="text-slate-500">{detalle.fecha?.slice(0, 16).replace("T", " ")} · Cliente: <b className="text-slate-800">{detalle.cliente_nombre}</b>{detalle.usuario_nombre ? <> · Recibió: <b className="text-slate-800">{detalle.usuario_nombre}</b></> : null}</div>
+                <div className="text-slate-500">{fmtFechaHora(detalle.fecha)} · Cliente: <b className="text-slate-800">{detalle.cliente_nombre}</b>{detalle.usuario_nombre ? <> · Recibió: <b className="text-slate-800">{detalle.usuario_nombre}</b></> : null}</div>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Método</div><div className="font-semibold capitalize">{detalle.condicion || "—"}</div></div>
                   <div className="rounded-lg bg-slate-50 p-2"><div className="text-[10px] uppercase text-slate-400">Monto</div><div className="font-display font-black text-green-700">{money(detalle.total)}</div></div>
@@ -460,7 +461,7 @@ export default function Ventas() {
                   {detalle.legacy_cancelado ? " · Cancelado en el sistema Legacy" : ""} · Este documento es histórico y no puede modificarse, cancelarse ni reimprimirse como venta actual.
                 </div>
               )}
-              <div className="text-slate-500 mb-2">{detalle.fecha?.slice(0, 16).replace("T", " ")} · Cliente: {detalle.cliente_nombre} · Vendedor: {detalle.vendedor_nombre || detalle.usuario_nombre}</div>
+              <div className="text-slate-500 mb-2">{fmtFechaHora(detalle.fecha)} · Cliente: {detalle.cliente_nombre} · Vendedor: {detalle.vendedor_nombre || detalle.usuario_nombre}</div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 mb-3 text-sm text-slate-600">
                 <span>Condición: <b>{detalle.condicion === "credito" ? "Crédito" : "Contado"}</b></span>
                 {sucursales.find((x) => x.id === detalle.sucursal_id)?.nombre && <span>Sucursal: <b>{sucursales.find((x) => x.id === detalle.sucursal_id).nombre}</b></span>}

@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, useRef, useCallback, useContext } from "r
 import { useLocation, useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl, fotoProducto } from "@/lib/api";
 import { numeroALetras } from "@/lib/utils";
+import { fmtFecha, fmtFechaHora } from "@/lib/fechas";
 import { useAuth } from "@/context/AuthContext";
 import { useCart, CartContext } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
@@ -123,7 +124,13 @@ const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva 
   );
 };
 
-export default function POS({ windowId, windowLabel }) {
+export default function POS({ windowId, windowLabel, activo = true }) {
+  // Solo la ventana visible atiende atajos y consulta al servidor; las ocultas
+  // conservan su carrito sin generar tráfico. Tampoco con la pestaña oculta.
+  const activoRef = useRef(activo);
+  activoRef.current = activo;
+  const enPantalla = () => activoRef.current && document.visibilityState === "visible";
+  const cobroKeyRef = useRef(null);   // llave anti-duplicados del cobro en curso
   const location = useLocation();
   const nav = useNavigate();
   const { user, can } = useAuth();
@@ -158,7 +165,7 @@ export default function POS({ windowId, windowLabel }) {
   const loadCaja = useCallback(() => {
     api.get("/caja/actual").then((r) => setCajaAbierta(!!r.data?.caja)).catch(() => setCajaAbierta(false));
   }, []);
-  useEffect(() => { loadCaja(); const id = setInterval(loadCaja, 30000); return () => clearInterval(id); }, [loadCaja]);
+  useEffect(() => { loadCaja(); const id = setInterval(() => { if (enPantalla()) loadCaja(); }, 30000); return () => clearInterval(id); }, [loadCaja]); // eslint-disable-line
   const [linePrice, setLinePrice] = useState(null);
   const [selProd, setSelProd] = useState(null);
   const [libreVal, setLibreVal] = useState("");
@@ -438,6 +445,7 @@ export default function POS({ windowId, windowLabel }) {
   }, []);
   useEffect(() => {
     const t = setInterval(async () => {
+      if (!enPantalla()) return;
       await refreshFolio();
       if (qRef.current) {
         try {
@@ -476,23 +484,24 @@ export default function POS({ windowId, windowLabel }) {
 
   const loadSuspended = async () => { const { data } = await api.get("/sales-suspended"); setSuspended(data); };
 
-  // Carga todo el catálogo activo (páginas de 500) para buscar y filtrar en memoria.
+  // Carga todo el catálogo activo en una sola respuesta para buscar y filtrar
+  // en memoria. El servidor responde 304 (sin volver a enviar nada) si el
+  // catálogo no cambió desde la última carga; solo entonces se reindexa.
+  const indiceVersion = useRef("");
   const cargarIndice = useCallback(async () => {
     try {
-      const todos = [];
-      for (let skip = 0; ; skip += 500) {
-        const { data } = await api.get("/products", { params: { estado: "activo", skip, limit: 500 } });
-        todos.push(...(data || []));
-        if (!data || data.length < 500) break;
-      }
-      setIndice(indexar(todos));
+      const r = await api.get("/products/pos-index");
+      const version = r.headers?.etag || "";
+      if (version && version === indiceVersion.current) return;
+      indiceVersion.current = version;
+      setIndice(indexar(r.data || []));
     } catch {}
   }, []);
   useEffect(() => {
     cargarIndice();
-    const t = setInterval(cargarIndice, 180000);
+    const t = setInterval(() => { if (enPantalla()) cargarIndice(); }, 180000);
     return () => clearInterval(t);
-  }, [cargarIndice]);
+  }, [cargarIndice]); // eslint-disable-line
   // Al recargar el índice (existencias nuevas) se rehace la búsqueda en pantalla.
   useEffect(() => { if (indice && qRef.current) setResults(buscarEnIndice(qRef.current, indice)); }, [indice]);
 
@@ -907,6 +916,7 @@ export default function POS({ windowId, windowLabel }) {
   useEffect(() => {
     const target = () => selected || (cart.length ? cart[cart.length - 1].product_id : null);
     const onKey = (e) => {
+      if (!activoRef.current) return;
       if (["F6", "F7", "F8", "F9"].includes(e.key)) e.preventDefault();
       if (e.key === "F8") { const t = target(); if (t) { updateQty(t, 1); setSelected(t); } }
       else if (e.key === "F9") { const t = target(); if (t) { updateQty(t, -1); setSelected(t); } }
@@ -967,6 +977,7 @@ export default function POS({ windowId, windowLabel }) {
   // Atajo de teclado: Ctrl+Enter abre el cobro (COBRAR) o guarda la cotización.
   useEffect(() => {
     const onKey = (e) => {
+      if (!activoRef.current) return;
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
         if (creditoBloqueado || cart.length === 0) return;
@@ -1022,8 +1033,15 @@ export default function POS({ windowId, windowLabel }) {
       setAvisoCampoOpen(true);
       return;
     }
+    // Llave anti-duplicados: la misma en los reintentos de este cobro (doble
+    // clic, red lenta); el servidor devuelve la venta ya registrada en vez de
+    // crear otra. Se renueva al terminar la venta.
+    if (!cobroKeyRef.current) {
+      cobroKeyRef.current = (window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    }
     try {
       const payload = {
+        idempotency_key: cobroKeyRef.current,
         cliente_id: clienteId || null,
         items: cart.map((i) => ({ product_id: i.product_id, codigo: i.codigo || "", descripcion: i.descripcion || "", cantidad: Number(i.cantidad), unidad: i.unidad || "PZA", presentacion: i.presentacion || i.unidad || "PZA", factor: Number(i.factor || 1.0), precio: Number(i.precio) || 0, iva_tasa: incluyeIva ? Number(i.iva_tasa ?? 8) : 0, descuento: Number(i.descuento || 0), comentario: i.comentario || "", precio_manual: !!i.precio_manual, autorizacion_id: i.precio_manual ? (i.autorizacion_id || null) : null })),
         descuento_global: totals.descGlobalTotal,
@@ -1040,6 +1058,7 @@ export default function POS({ windowId, windowLabel }) {
         override_reason: invReason || null,
       };
       const { data } = await api.post("/sales", payload);
+      cobroKeyRef.current = null;
       // Reset completo: la siguiente venta comienza limpia (Público General,
       // carrito vacío, contado, directa, sin descuentos ni modales abiertos).
       resetPos();
@@ -1222,7 +1241,7 @@ export default function POS({ windowId, windowLabel }) {
               <ShoppingCart className="w-5 h-5 text-brand-600" />
               <span className="font-display font-bold">Ticket</span>
               <Badge className="bg-brand-600/10 text-brand-600 font-mono flex items-center gap-1" data-testid="pos-next-folio"><Hash className="w-3 h-3" />{folioActual}</Badge>
-              <span className="ml-auto text-sm text-slate-400">{cart.length} items</span>
+              <span className="ml-auto text-sm text-slate-400">{cart.length} {cart.length === 1 ? "artículo" : "artículos"}</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <Select value={tipoVenta} onValueChange={setTipoVenta}>
@@ -1829,11 +1848,11 @@ export default function POS({ windowId, windowLabel }) {
                 </div>
                 {settings.ticket_config?.encabezado && <div className="text-center text-[11px]">{settings.ticket_config.encabezado}</div>}
                 <div className="border-t border-dashed border-black my-1" />
-                <div>{ticket.tipo_venta === "cotizacion" ? "COTIZACIN" : "FOLIO"}: {ticket.folio}</div>
-                <div>Fecha: {ticket.fecha?.slice(0, 16).replace("T", " ")}</div>
+                <div>{ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FOLIO"}: {ticket.folio}</div>
+                <div>Fecha: {fmtFechaHora(ticket.fecha)}</div>
                 <div>Cliente: {ticket.cliente_nombre}</div>
                 <div className="border-t border-dashed border-black my-1" />
-                <div className="text-center font-bold text-[11px]">DESCRIPCION</div>
+                <div className="text-center font-bold text-[11px]">DESCRIPCIÓN</div>
                 <div className="border-t border-t-2 border-black my-1" />
                 {ticket.items.map((i, k) => {
                   const importe = i.cantidad * i.precio - (i.descuento || 0);
@@ -1858,8 +1877,8 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="flex justify-between font-bold text-[14px]"><span>Total a pagar</span><span>{money(ticket.total)}</span></div>
                 <div className="text-center font-bold text-[10px]">({numeroALetras(ticket.total)})</div>
                 {ticket.tipo_venta === "directa" && ticket.condicion === "contado" && (<><div className="flex justify-between mt-1"><span>Recibido</span><span>{money((ticket.pagos || []).reduce((s, p) => s + p.monto, 0))}</span></div><div className="flex justify-between"><span>Cambio</span><span>{money(ticket.cambio)}</span></div></>)}
-                {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CR0DITO ** Saldo: {money(ticket.saldo)}</div>}
-                <div className="flex justify-between"><span>Articulos vendidos</span><span>{ticket.items.reduce((s, i) => s + Number(i.cantidad || 0), 0)}</span></div>
+                {ticket.condicion === "credito" && <div className="text-center mt-1">** VENTA A CRÉDITO ** Saldo: {money(ticket.saldo)}</div>}
+                <div className="flex justify-between"><span>Artículos vendidos</span><span>{ticket.items.reduce((s, i) => s + Number(i.cantidad || 0), 0)}</span></div>
                 <div className="flex justify-between"><span>Atendido por</span><span>{ticket.vendedor_nombre}</span></div>
                 <div className="text-center font-bold mt-1">Verifique su compra y cambio</div>
                 <div className="border-t border-dashed border-black my-1" />
@@ -1961,7 +1980,7 @@ export default function POS({ windowId, windowLabel }) {
                 {/* Título */}
                 <div className="text-center mb-5">
                   <div style={{ fontSize: "18pt", fontWeight: 800, color: "#CD0708", letterSpacing: 2 }}>
-                    {ticket.tipo_venta === "cotizacion" ? "COTIZACIN" : "FACTURA"}
+                    {ticket.tipo_venta === "cotizacion" ? "COTIZACIÓN" : "FACTURA"}
                   </div>
                   <div style={{ fontSize: "10pt", color: "#64748B" }}>Folio: {ticket.folio}</div>
                 </div>
@@ -1978,10 +1997,10 @@ export default function POS({ windowId, windowLabel }) {
                     {ticketSucursal && <><strong>Sucursal:</strong> {ticketSucursal.nombre}<br /></>}
                   </div>
                   <div className="text-right">
-                    <strong>Fecha:</strong> {ticket.fecha?.slice(0, 16).replace("T", " ")}<br />
+                    <strong>Fecha:</strong> {fmtFechaHora(ticket.fecha)}<br />
                     <strong>Folio:</strong> {ticket.folio}<br />
                     <strong>Condición:</strong> {ticket.condicion === "credito" ? "Crédito" : "Contado"}<br />
-                    {ticket.condicion === "credito" && <><strong>Vencimiento:</strong> {ticket.fecha?.slice(0, 10)}<br /></>}
+                    {ticket.condicion === "credito" && <><strong>Vencimiento:</strong> {fmtFecha(ticket.fecha_vencimiento || ticket.fecha)}<br /></>}
                   </div>
                 </div>
 
@@ -2226,7 +2245,9 @@ export default function POS({ windowId, windowLabel }) {
       {/* Área de resumen + COBRAR sticky: SIEMPRE visible sin importar el scroll.
           Estructural: fija al fondo del viewport, con estados claro/deshabilitado/carga.
           El contenedor padre reserva el espacio con pb-28 para no ocultar contenido. */}
-      <div className="fixed bottom-0 inset-x-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur shadow-[0_-2px_14px_rgba(0,0,0,0.08)]" data-testid="pos-cobrar-bar">
+      {/* Empieza donde termina el menú lateral (ErpLayout publica --sidebar-w):
+          antes cubría el menú y su botón para contraerlo. */}
+      <div className="fixed bottom-0 right-0 left-[var(--sidebar-w,0px)] z-40 border-t border-slate-200 bg-white/95 backdrop-blur shadow-[0_-2px_14px_rgba(0,0,0,0.08)]" data-testid="pos-cobrar-bar">
         <div className="mx-auto max-w-[1400px] px-4 sm:px-6 py-3 flex items-center gap-5 sm:gap-8 flex-wrap">
           {/* Resumen */}
           <div className="flex items-center gap-5 sm:gap-8 min-w-0 flex-1 flex-wrap" data-testid="pos-resumen">
@@ -2240,7 +2261,7 @@ export default function POS({ windowId, windowLabel }) {
             </div>
             <div>
               <div className="text-base uppercase tracking-wide text-slate-600 font-semibold">Descuento</div>
-              <div className="text-xl font-bold text-brand-600 leading-tight tabular-nums">-{money(totals.descGlobalAmount + totals.descPctAmount)}</div>
+              <div className="text-xl font-bold text-brand-600 leading-tight tabular-nums">{(totals.descGlobalAmount + totals.descPctAmount) > 0 ? `−${money(totals.descGlobalAmount + totals.descPctAmount)}` : "—"}</div>
             </div>
             <div>
               <div className="text-base uppercase tracking-wide text-slate-600 font-semibold">Total</div>

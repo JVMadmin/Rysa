@@ -12,10 +12,9 @@ function one(id, label) {
 
 export default function MultiPos() {
   const { clearCartState } = useContext(CartContext);
-  const [windows, setWindows] = useState(() => [
-    { id: 1, label: "POS 1" },
-    { id: _seq++, label: "POS 2" },
-  ]);
+  // Se abre con UNA ventana: cada ventana montada descarga catálogo y clientes y
+  // consulta el servidor por su cuenta. La segunda se abre con "Nueva ventana".
+  const [windows, setWindows] = useState(() => [{ id: 1, label: "POS 1" }]);
   const [active, setActive] = useState(1);
 
   const add = () => {
@@ -64,7 +63,7 @@ export default function MultiPos() {
       <div className="flex-1 min-h-0">
         {windows.map((w) => (
           <div key={w.id} style={{ display: active === w.id ? "block" : "none" }} className="h-full">
-            <POS windowId={w.id} windowLabel={w.label} />
+            <POS windowId={w.id} windowLabel={w.label} activo={active === w.id} />
           </div>
         ))}
       </div>

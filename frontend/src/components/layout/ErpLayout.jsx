@@ -5,6 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import AutorizacionesRemotas from "@/components/AutorizacionesRemotas";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
   UserCog, ScrollText, LogOut, Menu, ChevronLeft, Settings, HandCoins, FileText, Stamp, BarChart3, Smartphone, Wrench,
@@ -80,9 +81,17 @@ export default function ErpLayout() {
     }
   });
   const [searchOpen, setSearchOpen] = useState(false);
+  // En el Punto de venta el menú se contrae solo para dar espacio al ticket;
+  // se puede abrir ahí mismo sin cambiar la preferencia guardada, y al salir
+  // del POS vuelve a como estaba.
+  const enPOS = pathname.startsWith("/app/pos");
+  const [posExpandido, setPosExpandido] = useState(false);
+  useEffect(() => { if (!enPOS) setPosExpandido(false); }, [enPOS]);
+  const contraido = enPOS ? !posExpandido : collapsed;
 
   // Guardar preferencia de colapso en localStorage
   const handleToggleCollapsed = () => {
+    if (enPOS) { setPosExpandido((v) => !v); return; }
     setCollapsed((prev) => {
       const next = !prev;
       try { localStorage.setItem("rysa_sidebar_collapsed", String(next)); } catch {}
@@ -216,24 +225,25 @@ export default function ErpLayout() {
   const seccionLabel = (sec) => sec.charAt(0) + sec.slice(1).toLowerCase();
 
   return (
-    <div className="min-h-[var(--erp-vh)] flex bg-canvas">
+    <TooltipProvider delayDuration={120} skipDelayDuration={300}>
+    <div className="min-h-[var(--erp-vh)] flex bg-canvas" style={{ "--sidebar-w": contraido ? "72px" : "240px" }}>
       {/* Barra lateral en carbón: marca arriba, secciones en acordeón,
           indicador rojo en el módulo activo. */}
       <aside
         data-testid="sidebar"
-        className={`${collapsed ? "w-[72px]" : "w-60"} grafito grano shrink-0 text-slate-300 flex flex-col sticky top-0 h-[var(--erp-vh)] z-30 transition-[width] duration-200 ease-out-rysa`}
+        className={`${contraido ? "w-[72px]" : "w-60"} grafito grano shrink-0 text-slate-300 flex flex-col sticky top-0 h-[var(--erp-vh)] z-30 transition-[width] duration-200 ease-out-rysa`}
       >
         {/* Logotipo oficial para fondo oscuro (el mismo del sitio); colapsado,
             solo la "R" del isotipo. */}
-        <div className={`flex items-center h-16 border-b border-white/[0.06] ${collapsed ? "justify-center" : "px-5"}`}>
-          {collapsed ? (
+        <div className={`flex items-center h-16 border-b border-white/[0.06] ${contraido ? "justify-center" : "px-5"}`}>
+          {contraido ? (
             <img src="/brand/isotipo-oscuro.webp" alt="Grupo RYSA" width="240" height="161" className="h-7 w-auto" />
           ) : (
             <img src="/brand/logotipo-oscuro.webp" alt="Grupo RYSA" width="900" height="424" className="h-10 w-auto" />
           )}
         </div>
 
-        <nav aria-label="Módulos del sistema" className={`flex-1 overflow-y-auto py-3 ${collapsed ? "px-2" : "px-3"}`}>
+        <nav aria-label="Módulos del sistema" className={`flex-1 overflow-y-auto overflow-x-hidden py-3 ${contraido ? "px-2" : "px-3"}`}>
           {sectionsOrder.map((sec) => {
             const items = visibleGrouped[sec];
             if (!items || items.length === 0) return null;
@@ -241,14 +251,16 @@ export default function ErpLayout() {
             const activaAqui = items.some((n) => current?.to === n.to);
             return (
               <div key={sec} className="mb-1">
-                {collapsed ? (
-                  <div className="mx-auto my-2 h-px w-6 bg-white/10" />
+                {contraido ? (
+                  <div className="mx-auto my-2 h-px w-6 bg-brand-400/30" />
                 ) : (
+                  // Encabezado de sección en rojo claro de la marca (legible sobre
+                  // grafito: 5:1) con un brillo rojo suave; los módulos quedan en gris.
                   <button
                     type="button"
                     onClick={() => toggleSection(sec)}
                     aria-expanded={isOpen}
-                    className="w-full flex items-center justify-between px-2 pt-3 pb-1.5 text-2xs font-semibold uppercase tracking-[0.12em] text-slate-400 hover:text-slate-200 transition-colors"
+                    className="w-full flex items-center justify-between px-2 pt-3 pb-1.5 text-2xs font-bold uppercase tracking-[0.12em] text-brand-300 [text-shadow:0_0_12px_rgba(235,15,17,0.45)] hover:text-brand-200 hover:[text-shadow:0_0_14px_rgba(235,15,17,0.7)] transition-[color,text-shadow] duration-200"
                   >
                     <span className="flex items-center gap-2 truncate">
                       {seccionLabel(sec)}
@@ -257,34 +269,49 @@ export default function ErpLayout() {
                     <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${isOpen ? "" : "-rotate-90"}`} />
                   </button>
                 )}
-                {(collapsed || isOpen) && (
-                  <ul className={collapsed ? "flex flex-col items-center gap-1" : "space-y-0.5"}>
-                    {items.map((n) => (
-                      <li key={n.to} className={collapsed ? "" : "w-full"}>
+                {(contraido || isOpen) && (
+                  <ul className={contraido ? "flex flex-col items-center gap-1" : "space-y-0.5"}>
+                    {items.map((n) => {
+                      const enlace = (
                         <NavLink
                           to={n.to}
-                          title={n.label}
+                          aria-label={n.label}
                           data-testid={`nav-${n.to.split("/").pop()}`}
                           className={({ isActive }) =>
-                            collapsed
-                              ? `relative flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
-                                  isActive ? "bg-white/[0.08] text-white" : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
+                            contraido
+                              // Contraído: el recuadro crece y brilla al pasar el cursor
+                              // o con el teclado; el nombre sale en la etiqueta flotante.
+                              ? `relative flex h-10 w-10 items-center justify-center rounded-md transition-[transform,background-color,box-shadow,color] duration-150 ease-out-rysa motion-reduce:transition-none motion-reduce:hover:scale-100 hover:scale-110 hover:bg-white/[0.10] hover:text-white hover:shadow-[0_0_0_1px_rgba(242,122,124,.35),0_0_18px_-4px_rgba(235,15,17,.6)] focus-visible:outline-none focus-visible:scale-110 focus-visible:ring-2 focus-visible:ring-brand-400 ${
+                                  isActive ? "bg-white/[0.08] text-white" : "text-slate-300"
                                 }`
-                              : `relative flex items-center gap-3 h-9 pl-3 pr-2 rounded-md text-[0.9rem] transition-colors ${
+                              : `group relative flex items-center gap-3 h-9 pl-3 pr-2 rounded-md text-[0.9rem] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
                                   isActive ? "bg-white/[0.08] text-white font-semibold" : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
                                 }`
                           }
                         >
                           {({ isActive }) => (
                             <>
-                              {isActive && <span className={`absolute ${collapsed ? "-left-2" : "-left-3"} top-1.5 bottom-1.5 w-[3px] rounded-r bg-brand-500`} aria-hidden="true" />}
-                              <n.icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? "text-brand-400" : ""}`} strokeWidth={1.9} />
-                              {!collapsed && <span className="truncate">{n.label}</span>}
+                              {isActive && <span className={`absolute ${contraido ? "-left-2" : "-left-3"} top-1.5 bottom-1.5 w-[3px] rounded-r bg-brand-500`} aria-hidden="true" />}
+                              <n.icon className={`w-[18px] h-[18px] shrink-0 transition-transform duration-150 ${contraido ? "" : "group-hover:scale-110 motion-reduce:group-hover:scale-100"} ${isActive ? "text-brand-400" : ""}`} strokeWidth={1.9} />
+                              {!contraido && <span className="truncate animate-in fade-in-0 duration-200">{n.label}</span>}
                             </>
                           )}
                         </NavLink>
-                      </li>
-                    ))}
+                      );
+                      return (
+                        <li key={n.to} className={contraido ? "" : "w-full"}>
+                          {contraido ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>{enlace}</TooltipTrigger>
+                              <TooltipContent side="right" sideOffset={14}
+                                className="bg-carbon-950 text-white border border-white/10 shadow-raised text-xs font-medium">
+                                {n.label}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : enlace}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -294,12 +321,12 @@ export default function ErpLayout() {
 
         <button
           onClick={handleToggleCollapsed}
-          className={`flex items-center gap-2 h-12 border-t border-white/[0.06] text-slate-400 hover:text-white transition-colors ${collapsed ? "justify-center" : "px-5"}`}
+          className={`flex items-center gap-2 h-12 border-t border-white/[0.06] text-slate-400 hover:text-white transition-colors ${contraido ? "justify-center" : "px-5"}`}
           data-testid="toggle-sidebar"
-          title={collapsed ? "Expandir menú" : "Colapsar menú"}
-          aria-label={collapsed ? "Expandir menú" : "Colapsar menú"}
+          title={contraido ? "Expandir menú" : "Contraer menú"}
+          aria-label={contraido ? "Expandir menú" : "Contraer menú"}
         >
-          {collapsed ? <Menu className="w-5 h-5" /> : <><ChevronLeft className="w-4 h-4" /><span className="text-sm">Colapsar</span></>}
+          {contraido ? <Menu className="w-5 h-5" /> : <><ChevronLeft className="w-4 h-4" /><span className="text-sm">Contraer</span></>}
         </button>
       </aside>
 
@@ -406,6 +433,7 @@ export default function ErpLayout() {
       </div>
       <AutorizacionesRemotas />
     </div>
+    </TooltipProvider>
   );
 }
 

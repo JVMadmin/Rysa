@@ -9,7 +9,10 @@ import { BellRing, Check, X, Loader2, AlertTriangle } from "lucide-react";
 // Aviso a pantalla completa para quien puede autorizar (autorizacion.otorgar):
 // cuando una caja pide un precio manual a distancia, cubre la pantalla con
 // timbre hasta que alguien lo autoriza o lo rechaza. Ver autorizaciones.py.
-const INTERVALO_MS = 3000;
+// Cada 5 s con la pantalla a la vista; cada 15 s con la pestaña oculta (ahí
+// avisa la notificación del sistema). Antes era cada 3 s siempre.
+const INTERVALO_MS = 5000;
+const INTERVALO_OCULTA_MS = 15000;
 const TIMBRE_MS = 2500;
 
 // Timbre de tres tonos con Web Audio (sin archivos). Los navegadores solo dejan
@@ -88,14 +91,18 @@ export default function AutorizacionesRemotas() {
 
   useEffect(() => {
     if (!habilitado) return undefined;
-    cargar();
-    const t = setInterval(cargar, INTERVALO_MS);
+    let t;
+    const ciclo = async () => {
+      await cargar();
+      t = setTimeout(ciclo, document.visibilityState === "visible" ? INTERVALO_MS : INTERVALO_OCULTA_MS);
+    };
+    ciclo();
     const onVis = () => { if (document.visibilityState === "visible") cargar(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("pointerdown", audio, { once: true });
     window.addEventListener("keydown", audio, { once: true });
     return () => {
-      clearInterval(t);
+      clearTimeout(t);
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("pointerdown", audio);
       window.removeEventListener("keydown", audio);

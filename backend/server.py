@@ -1404,6 +1404,48 @@ async def list_products(response: Response, estado: Optional[str] = None, q: Opt
                 d["presentaciones"] = pres_by_prod.get(d["id"], [])
     return docs
 
+_CACHE_POS_INDEX = {"firma": None, "cuerpo": b"", "etag": ""}
+
+
+@api.get("/products/pos-index")
+async def products_pos_index(request: Request, user: dict = Depends(get_current_user)):
+    """Catálogo activo completo para el POS en UNA respuesta (antes 5 páginas
+    de 500, cada una con conteo y ordenamiento). Se arma una vez y se reutiliza
+    mientras no cambie ningún producto ni presentación: la firma es el número
+    de productos activos y la última actualización. Responde 304 si el
+    navegador ya tiene la misma versión (ETag)."""
+    firma = tuple((await _sql_rows(
+        "SELECT count(*), max(doc->>'updated_at'), "
+        "(SELECT max(updated_at)::text FROM product_presentations) "
+        "FROM products WHERE doc->>'estado' = 'activo'"))[0])
+    if firma != _CACHE_POS_INDEX["firma"]:
+        docs = await db.products.find({"estado": "activo"}, {"_id": 0}).sort("descripcion", 1).to_list(50000)
+        pids = [d["id"] for d in docs]
+        pres_by_prod = {}
+        if pids:
+            async with transaction() as conn:
+                for pr in (await conn.execute(text(
+                        "SELECT product_id, id, nombre, factor, codigo_barras, precio, costo, es_base, es_predeterminada "
+                        "FROM product_presentations WHERE product_id = ANY(:pids) AND activo = TRUE ORDER BY factor ASC"),
+                        {"pids": pids})).fetchall():
+                    pres_by_prod.setdefault(pr.product_id, []).append({
+                        "id": pr.id, "nombre": pr.nombre, "factor": float(pr.factor),
+                        "codigo_barras": pr.codigo_barras,
+                        "precio": float(pr.precio) if pr.precio is not None else None,
+                        "costo": float(pr.costo) if pr.costo is not None else None,
+                        "es_base": pr.es_base, "es_predeterminada": pr.es_predeterminada})
+        for d in docs:
+            d["presentaciones"] = pres_by_prod.get(d["id"], [])
+        cuerpo = json.dumps(docs, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
+        import hashlib as _hl
+        _CACHE_POS_INDEX.update(firma=firma, cuerpo=cuerpo, etag='"' + _hl.md5(cuerpo).hexdigest() + '"')
+    etag = _CACHE_POS_INDEX["etag"]
+    cab = {"ETag": etag, "Cache-Control": "private, no-cache"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=cab)
+    return Response(content=_CACHE_POS_INDEX["cuerpo"], media_type="application/json", headers=cab)
+
+
 # --- Catálogo POS: más vendidos y favoritos por usuario ---
 @api.get("/products/bestsellers")
 async def list_bestsellers(estado: Optional[str] = None, limit: int = 24,
@@ -5393,52 +5435,85 @@ def _tabla_pdf_bytes(titulo: str, meta: str, columns, rows, extra_sections=None)
 # =========================================================================
 # DASHBOARD
 # =========================================================================
+_CACHE_DASH: dict = {}
+_ERP = "doc->>'estado' = 'confirmada' AND (doc->>'source') IS DISTINCT FROM 'LEGACY'"
+
+
+async def _sql_rows(sql: str, params: Optional[dict] = None):
+    from pgstore.database import get_engine
+    from sqlalchemy import text as _sql
+    async with get_engine().connect() as conn:
+        return (await conn.execute(_sql(sql), params or {})).fetchall()
+
+
+async def _efectivo_cajas(cajas: list) -> dict:
+    """Resumen de efectivo de varias cajas con UNA consulta de movimientos
+    (antes una consulta por caja abierta)."""
+    ids = [c["id"] for c in cajas]
+    if not ids:
+        return {}
+    movs = await db.caja_movimientos.find({"caja_id": {"$in": ids}},
+                                          {"_id": 0, "caja_id": 1, "tipo": 1, "monto": 1}).to_list(500000)
+    por = {}
+    for m in movs:
+        por.setdefault(m.get("caja_id"), []).append(m)
+    return {c["id"]: resumen_caja(c, por.get(c["id"], [])) for c in cajas}
+
+
 @api.get("/dashboard")
 async def dashboard(sucursal_id: Optional[str] = None, user: dict = Depends(get_current_user)):
-    now = now_utc()
-    hoy = now.date().isoformat()
-    mes = now.strftime("%Y-%m")
+    """Tablero. Las ventas se leen solo del rango que se muestra (mes y últimos
+    7 días, con el índice de fecha), los totales históricos se suman en SQL y
+    la respuesta se guarda 20 s por usuario o vista global. Antes se traían
+    hasta 10,000 ventas completas sin orden: al pasar de ese número, "ventas de
+    hoy" podía salir incompleto. "Hoy" es el día de la sucursal, no UTC."""
     # Modo: admin/propietario/dev ven el negocio completo; el resto solo su operación
     es_global = "*" in effective_permissions(user)
-    
+    if not es_global and user.get("sucursal_id"):
+        sucursal_id = user.get("sucursal_id")
+    filtra_suc = bool(sucursal_id and sucursal_id != "todas")
+    clave = ("global" if es_global else user["id"], sucursal_id or "todas")
+    hit = _CACHE_DASH.get(clave)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+
+    now = ahora_local()
+    hoy = now.date().isoformat()
+    manana = (now + timedelta(days=1)).date().isoformat()
+    mes = now.strftime("%Y-%m")
+    desde = min(f"{mes}-01", (now - timedelta(days=6)).date().isoformat())
+
     # Sucursales registradas en el sistema
     sucs = await db.sucursales.find({}, {"_id": 0}).to_list(100)
     sucs.sort(key=lambda s: s.get("nombre") or s.get("codigo") or "")
-    
-    # Si el usuario no es global, forzar su sucursal asignada
-    if not es_global:
-        user_suc = user.get("sucursal_id")
-        if user_suc:
-            sucursal_id = user_suc
 
     mq = {"estado": "confirmada", "source": {"$ne": "LEGACY"}}
     if not es_global:
         mq["usuario_id"] = user["id"]
-    if sucursal_id and sucursal_id != "todas":
+    if filtra_suc:
         mq["sucursal_id"] = sucursal_id
-
-    sales = await db.sales.find(mq, {"_id": 0}).to_list(10000)
-    ventas_hoy = [s for s in sales if s.get("fecha", "")[:10] == hoy]
-    ventas_mes = [s for s in sales if s.get("fecha", "")[:7] == mes]
-    total_hoy = round(sum(float(s.get("total", 0)) for s in ventas_hoy), 2)
-    total_mes = round(sum(float(s.get("total", 0)) for s in ventas_mes), 2)
+    sales = await db.sales.find({**mq, "$and": [filtro_dias_local("fecha", desde, hoy)]},
+                                {"_id": 0, "total": 1, "fecha": 1}).to_list(500000)
+    for x in sales:
+        x["_dia"] = fecha_local(x.get("fecha"))
+    ventas_hoy = [x for x in sales if x["_dia"] == hoy]
+    total_hoy = round(sum(float(x.get("total", 0) or 0) for x in ventas_hoy), 2)
+    total_mes = round(sum(float(x.get("total", 0) or 0) for x in sales if x["_dia"][:7] == mes), 2)
 
     # Caja: la propia (operador) o el consolidado de cajas abiertas filtradas por sucursal (admin)
-    caja = await caja_abierta_de(user["id"])
     total_caja = 0.0
     caja_info = None
     if es_global:
         cajas_flt = {"estado": "abierta"}
-        if sucursal_id and sucursal_id != "todas":
+        if filtra_suc:
             cajas_flt["sucursal_id"] = sucursal_id
         cajas_abiertas = await db.cajas.find(cajas_flt, {"_id": 0}).to_list(500)
-        for c in cajas_abiertas:
-            movs = await db.caja_movimientos.find({"caja_id": c["id"]}, {"_id": 0}).to_list(1000)
-            total_caja = round(total_caja + resumen_caja(c, movs)["efectivo_esperado"], 2)
+        resumenes = await _efectivo_cajas(cajas_abiertas)
+        total_caja = round(sum(r["efectivo_esperado"] for r in resumenes.values()), 2)
     else:
+        caja = await caja_abierta_de(user["id"])
         if caja:
-            movs = await db.caja_movimientos.find({"caja_id": caja["id"]}, {"_id": 0}).to_list(1000)
-            res = resumen_caja(caja, movs)
+            res = (await _efectivo_cajas([caja]))[caja["id"]]
             total_caja = res["efectivo_esperado"]
             caja_info = {"id": caja["id"], "caja_nombre": caja.get("caja_nombre") or "Caja 1",
                          "fondo_inicial": caja.get("fondo_inicial"), "resumen": res}
@@ -5452,64 +5527,73 @@ async def dashboard(sucursal_id: Optional[str] = None, user: dict = Depends(get_
                              "fondo_inicial": ultima[0].get("fondo_inicial"), "cerrada": True,
                              "resumen": cierre}
 
-    # Desglose de ventas por sucursal (para consolidado global o comparativo)
-    suc_map = {s["id"]: s.get("nombre") or s.get("codigo") or "Sucursal" for s in sucs}
-    all_sales_for_breakdown = sales if (sucursal_id and sucursal_id != "todas") else await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}}, {"_id": 0, "sucursal_id": 1, "total": 1, "fecha": 1}).to_list(20000)
+    # Desglose de ventas por sucursal, sumado en SQL
+    suc_map = {x["id"]: x.get("nombre") or x.get("codigo") or "Sucursal" for x in sucs}
+    params = {"hi": inicio_dia_utc(hoy), "hf": inicio_dia_utc(manana)}
+    extra = ""
+    if filtra_suc:
+        extra += " AND doc->>'sucursal_id' = :suc"
+        params["suc"] = sucursal_id
+    if not es_global:
+        extra += " AND doc->>'usuario_id' = :uid"
+        params["uid"] = user["id"]
     por_sucursal_dict = {}
-    for s in all_sales_for_breakdown:
-        sid = s.get("sucursal_id") or "sin_sucursal"
-        sname = suc_map.get(sid, "Matriz" if sid == "sin_sucursal" else "Otra")
-        entry = por_sucursal_dict.setdefault(sid, {
-            "sucursal_id": sid, "nombre": sname, "num_ventas": 0,
-            "total": 0.0, "ventas_hoy": 0.0
-        })
-        entry["num_ventas"] += 1
-        entry["total"] = round(entry["total"] + float(s.get("total", 0)), 2)
-        if (s.get("fecha") or "")[:10] == hoy:
-            entry["ventas_hoy"] = round(entry["ventas_hoy"] + float(s.get("total", 0)), 2)
-
-    for s in sucs:
-        if s["id"] not in por_sucursal_dict:
-            por_sucursal_dict[s["id"]] = {
-                "sucursal_id": s["id"],
-                "nombre": s.get("nombre") or s.get("codigo") or "Sucursal",
+    for sid, n, tot, tot_hoy in await _sql_rows(
+            "SELECT COALESCE(doc->>'sucursal_id', 'sin_sucursal'), count(*), COALESCE(sum(total), 0), "
+            "COALESCE(sum(total) FILTER (WHERE doc->>'fecha' >= :hi AND doc->>'fecha' < :hf), 0) "
+            f"FROM sales WHERE {_ERP}{extra} GROUP BY 1", params):
+        por_sucursal_dict[sid] = {
+            "sucursal_id": sid, "nombre": suc_map.get(sid, "Matriz" if sid == "sin_sucursal" else "Otra"),
+            "num_ventas": int(n), "total": round(float(tot), 2), "ventas_hoy": round(float(tot_hoy), 2)}
+    for x in sucs:
+        if x["id"] not in por_sucursal_dict:
+            por_sucursal_dict[x["id"]] = {
+                "sucursal_id": x["id"],
+                "nombre": x.get("nombre") or x.get("codigo") or "Sucursal",
                 "num_ventas": 0, "total": 0.0, "ventas_hoy": 0.0
             }
-    por_sucursal = sorted(por_sucursal_dict.values(), key=lambda x: -x["total"])
+    por_sucursal = sorted(por_sucursal_dict.values(), key=lambda r: -r["total"])
 
-    # Productos (datos compartidos del negocio)
-    products = await db.products.find({"estado": "activo"}, {"_id": 0}).to_list(5000)
-    bajo_stock = [p for p in products if 0 < float(p.get("existencia", 0)) <= float(p.get("stock_minimo", 0))]
-    sin_existencia = [p for p in products if float(p.get("existencia", 0)) <= 0]
+    # Productos (datos compartidos del negocio), contados en SQL
+    n_prod, n_sin, n_bajo = (await _sql_rows(
+        "SELECT count(*), count(*) FILTER (WHERE COALESCE(existencia, 0) <= 0), "
+        "count(*) FILTER (WHERE COALESCE(existencia, 0) > 0 AND COALESCE(existencia, 0) <= COALESCE(stock_minimo, 0)) "
+        "FROM products WHERE doc->>'estado' = 'activo'"))[0]
+    alertas = await _sql_rows(
+        "SELECT doc->>'codigo', doc->>'descripcion', COALESCE(existencia, 0), COALESCE(stock_minimo, 0) "
+        "FROM products WHERE doc->>'estado' = 'activo' AND (COALESCE(existencia, 0) <= 0 OR "
+        "COALESCE(existencia, 0) <= COALESCE(stock_minimo, 0)) "
+        "ORDER BY (COALESCE(existencia, 0) <= 0), doc->>'descripcion' LIMIT 10")
     clientes = await db.clients.count_documents({})
 
-    # Ventas por día últimos 7 días
+    # Ventas por día últimos 7 días (día de la sucursal)
     serie = []
     for i in range(6, -1, -1):
-        d = (now - __import__("datetime").timedelta(days=i)).date().isoformat()
-        tot = round(sum(float(s.get("total", 0)) for s in sales if (s.get("fecha") or "")[:10] == d), 2)
+        d = (now - timedelta(days=i)).date().isoformat()
+        tot = round(sum(float(x.get("total", 0) or 0) for x in sales if x["_dia"] == d), 2)
         serie.append({"dia": d[5:], "total": tot})
 
-    recientes = sorted(sales, key=lambda s: s.get("fecha") or "", reverse=True)[:8]
+    recientes = await db.sales.find(mq, {"_id": 0, "folio": 1, "cliente_nombre": 1, "total": 1,
+                                         "fecha": 1, "estado": 1}).sort("fecha", -1).limit(8).to_list(8)
     base = {
         "ventas_hoy": total_hoy, "ventas_mes": total_mes,
         "num_ventas_hoy": len(ventas_hoy), "total_caja": total_caja,
-        "bajo_stock": len(bajo_stock), "sin_existencia": len(sin_existencia),
-        "clientes": clientes, "productos": len(products),
+        "bajo_stock": int(n_bajo), "sin_existencia": int(n_sin),
+        "clientes": clientes, "productos": int(n_prod),
         "serie_ventas": serie, "mode": "global" if es_global else "propio",
         "caja_info": caja_info,
-        "sucursales": [{"id": s["id"], "nombre": s.get("nombre") or s.get("codigo") or "Sucursal",
-                        "codigo": s.get("codigo"), "activa": s.get("activa", True)} for s in sucs],
+        "sucursales": [{"id": x["id"], "nombre": x.get("nombre") or x.get("codigo") or "Sucursal",
+                        "codigo": x.get("codigo"), "activa": x.get("activa", True)} for x in sucs],
         "sucursal_seleccionada": sucursal_id or "todas",
         "por_sucursal": por_sucursal,
-        "ventas_recientes": [{"folio": s.get("folio"), "cliente": s.get("cliente_nombre"),
-                              "total": s.get("total"), "fecha": s.get("fecha"), "estado": s.get("estado")} for s in recientes],
-        "alertas_stock": [{"codigo": p["codigo"], "descripcion": p["descripcion"],
-                           "existencia": p.get("existencia", 0), "stock_minimo": p.get("stock_minimo", 0)}
-                          for p in (bajo_stock + sin_existencia)[:10]],
+        "ventas_recientes": [{"folio": x.get("folio"), "cliente": x.get("cliente_nombre"),
+                              "total": x.get("total"), "fecha": x.get("fecha"), "estado": x.get("estado")} for x in recientes],
+        "alertas_stock": [{"codigo": a[0], "descripcion": a[1], "existencia": float(a[2]),
+                           "stock_minimo": float(a[3])} for a in alertas],
     }
     if es_global:
         base.update(await _dashboard_global_breakdown())
+    _CACHE_DASH[clave] = (time.monotonic() + 20, base)
     return base
 
 
@@ -5641,62 +5725,47 @@ async def finanzas_export(fmt: str = "excel", desde: Optional[str] = None, hasta
 
 async def _dashboard_global_breakdown() -> dict:
     """Desglose global: ventas por caja y por usuario (solo admin/propietario).
-    Excluye documentos LEGACY (histórico documental, no operación actual)."""
-    sales = await db.sales.find({"estado": "confirmada", "source": {"$ne": "LEGACY"}},
-                                {"_id": 0}).to_list(100000)
-    # Por usuario
-    por_usuario = {}
-    for s in sales:
-        uid_ = s.get("usuario_id") or "?"
-        e = por_usuario.setdefault(uid_, {"usuario_id": uid_, "usuario_nombre": s.get("usuario_nombre") or "—",
-                                          "num_ventas": 0, "total": 0.0})
-        e["num_ventas"] += 1
-        e["total"] = round(e["total"] + float(s.get("total", 0)), 2)
-    # Por caja
+    Excluye documentos LEGACY (histórico documental, no operación actual).
+    Sumado en SQL: antes traía hasta 100,000 ventas completas."""
+    por_usuario = [
+        {"usuario_id": u or "?", "usuario_nombre": nombre or "—", "num_ventas": int(n), "total": round(float(t), 2)}
+        for u, nombre, n, t in await _sql_rows(
+            "SELECT doc->>'usuario_id', max(COALESCE(doc->>'usuario_nombre', doc->>'vendedor_nombre')), "
+            f"count(*), COALESCE(sum(total), 0) FROM sales WHERE {_ERP} GROUP BY 1")]
+    ventas_caja = {cid: {"num_ventas": int(n), "total": float(t)} for cid, n, t in await _sql_rows(
+        f"SELECT doc->>'caja_id', count(*), COALESCE(sum(total), 0) FROM sales WHERE {_ERP} GROUP BY 1")}
     cajas = await db.cajas.find({}, {"_id": 0}).sort("fecha_apertura", -1).to_list(500)
-    ventas_caja = {}
-    for s in sales:
-        cid = s.get("caja_id")
-        if cid:
-            e = ventas_caja.setdefault(cid, {"num_ventas": 0, "total": 0.0})
-            e["num_ventas"] += 1
-            e["total"] = round(e["total"] + float(s.get("total", 0)), 2)
+    resumenes = await _efectivo_cajas([c for c in cajas if c["estado"] == "abierta"])
     por_caja = []
     for c in cajas:
-        res = {"efectivo_esperado": 0.0}
         v = ventas_caja.get(c["id"], {"num_ventas": 0, "total": 0.0})
         if c["estado"] == "abierta":
-            movs = await db.caja_movimientos.find({"caja_id": c["id"]}, {"_id": 0}).to_list(1000)
-            res = resumen_caja(c, movs)
+            res = resumenes.get(c["id"], {"efectivo_esperado": 0.0})
         else:
-            cierre = c.get("cierre") or {}
-            res["efectivo_esperado"] = cierre.get("efectivo_esperado", 0.0)
+            res = {"efectivo_esperado": (c.get("cierre") or {}).get("efectivo_esperado", 0.0)}
         por_caja.append({
             "caja_id": c["id"], "caja_nombre": c.get("caja_nombre") or "Caja 1",
             "usuario_nombre": c.get("usuario_nombre") or "—", "estado": c["estado"],
             "fecha_apertura": c.get("fecha_apertura"), "fondo_inicial": c.get("fondo_inicial"),
-            "efectivo_esperado": round(float(res.get("efectivo_esperado", 0)), 2),
+            "efectivo_esperado": round(float(res.get("efectivo_esperado", 0) or 0), 2),
             "ventas_total": round(float(v["total"]), 2), "num_ventas": v["num_ventas"],
         })
-    sin_caja = {"num_ventas": 0, "total": 0.0}
-    for s in sales:
-        if not s.get("caja_id"):
-            sin_caja["num_ventas"] += 1
-            sin_caja["total"] = round(sin_caja["total"] + float(s.get("total", 0)), 2)
-    if sin_caja["num_ventas"]:
+    sin_caja = ventas_caja.get(None)
+    if sin_caja and sin_caja["num_ventas"]:
         por_caja.append({"caja_id": None, "caja_nombre": "Sin caja", "usuario_nombre": "—",
                          "estado": "—", "fecha_apertura": "", "fondo_inicial": 0.0,
-                         "efectivo_esperado": 0.0, "ventas_total": sin_caja["total"],
+                         "efectivo_esperado": 0.0, "ventas_total": round(sin_caja["total"], 2),
                          "num_ventas": sin_caja["num_ventas"]})
     return {
-        "por_usuario": sorted(por_usuario.values(), key=lambda r: -r["total"]),
+        "por_usuario": sorted(por_usuario, key=lambda r: -r["total"]),
         "por_caja": por_caja,
         "totales_globales": {
-            "ventas": round(sum(float(s.get("total", 0)) for s in sales), 2),
-            "num_ventas": len(sales),
+            "ventas": round(sum(v["total"] for v in ventas_caja.values()), 2),
+            "num_ventas": sum(v["num_ventas"] for v in ventas_caja.values()),
             "cajas_abiertas": sum(1 for c in cajas if c["estado"] == "abierta"),
         },
     }
+
 
 # =========================================================================
 # EXCEL - IMPORT / EXPORT
