@@ -32,29 +32,78 @@ export function netoRedondeado(neto, ivaTasa, modo = REDONDEO_DEFAULT) {
 // guardados. Referencia B90 (costo 29.63): 50% → $48, 40% → $45, 30% → $42.
 export const LISTAS_PCT_DEFAULT = [50, 40, 30, 20, 15];
 
-// Precio NETO (sin IVA) de una lista: el carrito y el backend trabajan en neto
-// y el IVA se suma una sola vez en el total. Usa el precio capturado en el
-// producto para esa lista; si no hay, aplica el % de la lista sobre el costo.
-// En ambos casos el precio con IVA queda redondeado según la configuración.
-// Ej. B90 (costo 29.63): P1 50% → $48, P2 40% → $45, P3 30% → $42 con IVA.
-// Antes devolvía el precio CON IVA y el total le volvía a sumar el IVA.
-export const precioNetoLista = (p, l, pct = LISTAS_PCT_DEFAULT, modo = REDONDEO_DEFAULT) => {
-  const n = pct?.length ?? LISTAS_PCT_DEFAULT.length;
-  const iva = Number(p.iva_tasa ?? p.iva ?? 8);
-  if (Number(l) === n + 1) return Number(p.precio_minimo ?? 0);
-  const arr = p.precios || [];
-  const lIdx = Number(l) - 1;
-  const capturado = Number(arr[lIdx]?.precio_con_iva || 0);
-  if (capturado > 0) return netoRedondeado(capturado / (1 + iva / 100), iva, modo);
-  const costo = Number(p.costo ?? 0);
-  if (costo > 0 && lIdx < n) {
-    const pctLista = Number(pct[lIdx] ?? pct[0] ?? 0);
-    return netoRedondeado(costo * (1 + pctLista / 100), iva, modo);
+// IVA del producto en %. 0 es válido (exento); solo sin dato se usa 8.
+export const tasaIva = (p) => {
+  for (const k of ["iva_tasa", "iva", "impuesto"]) {
+    const v = p?.[k];
+    if (v !== undefined && v !== null && v !== "" && !Number.isNaN(Number(v))) return Number(v);
   }
-  const primero = Number(arr[0]?.precio_con_iva || 0);
-  return primero ? netoRedondeado(primero / (1 + iva / 100), iva, modo) : 0;
+  return 8;
 };
 
-// Precio con IVA de una lista (lo que paga el cliente), ya redondeado.
+// [{neto, conIva}] por posición de lista ({0,0} si esa lista no tiene precio).
+// Sin listas capturadas, el precio guardado del producto cuenta como Precio 1
+// (es el que trae la importación del sistema anterior).
+function capturados(p, f) {
+  let out = (p.precios || []).map((e) => {
+    let neto = Number(e?.precio_sin_iva || 0);
+    const con = Number(e?.precio_con_iva || 0);
+    // El neto guardado vale si cuadra con el precio con IVA; si no (se capturó
+    // con IVA y el neto quedó redondeado a centavos), se deriva de él.
+    if (con > 0 && (neto <= 0 || Math.abs(+(neto * f).toFixed(2) - con) > 0.005)) neto = con / f;
+    return { neto, conIva: con > 0 ? con : neto > 0 ? +(neto * f).toFixed(2) : 0 };
+  });
+  if (!out.some((x) => x.neto > 0)) {
+    let neto = Number(p.precio_sin_iva || 0);
+    const con = Number(p.precio_con_iva || 0);
+    if (neto <= 0 && con > 0) neto = con / f;
+    out = neto > 0 ? [{ neto, conIva: con > 0 ? con : +(neto * f).toFixed(2) }] : [];
+  }
+  return out;
+}
+
+// Precio de una lista. Misma regla que backend/moneycalc.py (precios_lista):
+//  - Precio capturado en el producto: tal cual, sin redondeo (es el del
+//    sistema anterior o el que puso el usuario; no debe variar).
+//  - Lista sin precio en un producto que sí tiene otros: el último precio
+//    capturado anterior (el último precio es el de revendedores).
+//  - Producto sin ningún precio: % de la lista sobre el costo (si el % > 0),
+//    redondeado según Configuración.
+// Devuelve { neto, conIva, capturado }. El carrito y la venta usan el NETO y el
+// IVA se suma una sola vez en el total.
+export function precioDeLista(p, l, pct = LISTAS_PCT_DEFAULT, modo = REDONDEO_DEFAULT) {
+  const n = pct?.length ?? LISTAS_PCT_DEFAULT.length;
+  const iva = tasaIva(p);
+  const f = 1 + iva / 100;
+  if (Number(l) === n + 1) {
+    const min = Number(p.precio_minimo ?? 0);
+    return { neto: min, conIva: +(min * f).toFixed(2), capturado: min > 0 };
+  }
+  const caps = capturados(p, f);
+  const lIdx = Math.max(0, Number(l) - 1);
+  let ultimo = null;
+  for (let i = 0; i <= lIdx && i < caps.length; i += 1) if (caps[i].neto > 0) ultimo = caps[i];
+  const propio = caps[lIdx];
+  if (propio && propio.neto > 0) return { neto: +propio.neto.toFixed(6), conIva: propio.conIva, capturado: true };
+  if (ultimo) return { neto: +ultimo.neto.toFixed(6), conIva: ultimo.conIva, capturado: false };
+  const costo = Number(p.costo ?? 0);
+  const pctLista = Number(pct?.[lIdx] ?? 0);
+  if (!caps.length && costo > 0 && pctLista > 0 && lIdx < n) {
+    const neto = netoRedondeado(costo * (1 + pctLista / 100), iva, modo);
+    return { neto, conIva: +(neto * f).toFixed(2), capturado: false };
+  }
+  return { neto: 0, conIva: 0, capturado: false };
+}
+
+// Listas (1..n) que el producto tiene capturadas: las que se ofrecen en F6.
+export const listasCapturadas = (p, pct = LISTAS_PCT_DEFAULT) =>
+  Array.from({ length: pct?.length ?? LISTAS_PCT_DEFAULT.length }, (_, i) => i + 1)
+    .filter((l) => precioDeLista(p, l, pct).capturado);
+
+// Precio NETO (sin IVA) de una lista.
+export const precioNetoLista = (p, l, pct = LISTAS_PCT_DEFAULT, modo = REDONDEO_DEFAULT) =>
+  precioDeLista(p, l, pct, modo).neto;
+
+// Precio con IVA de una lista (lo que paga el cliente).
 export const precioLista = (p, l, pct = LISTAS_PCT_DEFAULT, modo = REDONDEO_DEFAULT) =>
-  +(precioNetoLista(p, l, pct, modo) * (1 + Number(p.iva_tasa ?? p.iva ?? 8) / 100)).toFixed(2);
+  precioDeLista(p, l, pct, modo).conIva;

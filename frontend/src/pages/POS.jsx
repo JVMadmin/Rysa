@@ -14,7 +14,7 @@ import CajaAperturaModal from "@/components/CajaAperturaModal";
 import ReporteRapido from "@/components/ReporteRapido";
 import CodigoAutorizacionInput from "@/components/CodigoAutorizacionInput";
 import { toast } from "sonner";
-import { LISTAS_PCT_DEFAULT, REDONDEO_DEFAULT, precioNetoLista as calcListPrice } from "@/lib/precios";
+import { LISTAS_PCT_DEFAULT, REDONDEO_DEFAULT, listasCapturadas, precioLista, tasaIva, precioNetoLista as calcListPrice } from "@/lib/precios";
 import {
   Search, Plus, Minus, Trash2, ShoppingCart, PauseCircle, PlayCircle, X, Package,
   Banknote, ArrowLeftRight, CreditCard,   Tag, Printer, Hash, Keyboard, FileText,
@@ -44,7 +44,7 @@ const PRODUCT_EX_CLS = (ex) => {
 
 const ProductCard = ({ p, onAdd, priceOf, isFav, onFav, mostrarSold, incluyeIva }) => {
   const neto = priceOf(p);
-  const tasa = Number(p.iva_tasa ?? 8);
+  const tasa = tasaIva(p);
   const conIva = +(neto * (1 + tasa / 100)).toFixed(2);
   // Precio destacado = el que realmente se cobra: con IVA cuando el toggle
   // "Precios incluyen IVA" está activo; neto cuando está desactivado.
@@ -537,8 +537,15 @@ export default function POS({ windowId, windowLabel }) {
   const priceFromList = (p, l) => calcListPrice(p, l, listasPct, redondeo);
   const priceOf = (p) => priceFromList(p, lista);
 
+  // Aviso si un precio queda por debajo del costo (no debería pasar con las
+  // listas del sistema anterior; protege contra configuraciones erróneas).
+  const avisarBajoCosto = (p, neto) => {
+    const costo = Number(p?.costo ?? 0);
+    if (costo > 0 && Number(neto) > 0 && Number(neto) < costo) toast.warning(`${p.descripcion}: el precio queda por debajo del costo`);
+  };
   const addToCart = (p) => {
     setSelProd(p);
+    if (!cart.some((i) => i.product_id === p.id)) avisarBajoCosto(p, priceOf(p));
     setCart((c) => {
       const ex = c.find((i) => i.product_id === p.id);
       if (ex) return c.map((i) => (i.product_id === p.id ? { ...i, cantidad: i.cantidad + 1 } : i));
@@ -561,7 +568,7 @@ export default function POS({ windowId, windowLabel }) {
           factor: factorBase,
           presentaciones: p.presentaciones || [basePres],
           precio: Number(precioInicial),
-          iva_tasa: p.iva_tasa ?? 8,
+          iva_tasa: tasaIva(p),
           costo: Number(p.costo ?? 0),
           descuento: 0,
           comentario: "",
@@ -584,7 +591,7 @@ export default function POS({ windowId, windowLabel }) {
     setCart((c) => {
       const ex = c.find((i) => i.product_id === pid);
       if (ex) return c.map((i) => (i.product_id === pid ? { ...i, precio: Number(precio) || 0, ...marca } : i));
-      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: p.iva_tasa ?? 8, costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0), ...marca }];
+      return [...c, { product_id: pid, codigo: p.codigo || "", descripcion: p.descripcion || "", cantidad: 1, unidad: p.unidad_medida || p.unidad || "PZA", precio: Number(precio) || 0, iva_tasa: tasaIva(p), costo: Number(p.costo ?? 0), descuento: 0, comentario: "", precios: p.precios || [], precio_minimo: p.precio_minimo ?? 0, existencia: Number(p.existencia ?? 0), ...marca }];
     });
     setSelected(pid);
     setQ(""); qRef.current = ""; setResults([]);
@@ -674,6 +681,7 @@ export default function POS({ windowId, windowLabel }) {
   // Elegir un precio de la lista quita la marca de precio manual.
   const setLinePrecio = (item, precioVista, manual = null) => {
     const precio = netoDeVista(item, precioVista);
+    avisarBajoCosto(item, precio);
     const marca = manual
       ? { precio_manual: true, autorizacion_id: manual.autorizacion_id || null, autorizado_por: manual.autorizado_por || "" }
       : { precio_manual: false, autorizacion_id: null, autorizado_por: "" };
@@ -1512,10 +1520,13 @@ export default function POS({ windowId, windowLabel }) {
               {/* Lista de precios (F6): Precio 1…n y mínimo, sin y con IVA, ya
                   redondeados. Flechas para moverse, Enter o doble clic para elegir. */}
               {(() => {
-                const ivaF = 1 + Number(linePrice.iva_tasa ?? 8) / 100;
+                const ivaF = 1 + tasaIva(linePrice) / 100;
+                // Solo las listas que el producto tiene capturadas (si tiene P1–P3,
+                // no aparecen P4 ni P5) y el mínimo si existe.
+                const caps = listasCapturadas(linePrice, listasPct);
                 const filas = [
-                  ...listaNames.map((n, i) => ({ id: `${i + 1}`, nombre: n || `Precio ${i + 1}`, neto: priceFromList(linePrice, i + 1) })),
-                  { id: "min", nombre: "Precio mínimo", neto: Number(linePrice.precio_minimo || 0) },
+                  ...(caps.length ? caps : [1]).map((l) => ({ id: `${l}`, nombre: listaNames[l - 1] || `Precio ${l}`, neto: priceFromList(linePrice, l) })),
+                  ...(Number(linePrice.precio_minimo || 0) > 0 ? [{ id: "min", nombre: "Precio mínimo", neto: Number(linePrice.precio_minimo) }] : []),
                 ];
                 const elegir = (f) => f && f.neto > 0 && setLinePrecio(linePrice, f.neto * fDlg);
                 const sel = Math.min(filaPrecio, filas.length - 1);
@@ -1596,8 +1607,8 @@ export default function POS({ windowId, windowLabel }) {
                 <div className="flex justify-between"><div className="font-medium text-sm">{p.descripcion}</div><Badge variant="outline">Exist: {p.existencia}</Badge></div>
                 <div className="text-xs text-slate-400 mb-2">{p.codigo}</div>
                 <div className="grid grid-cols-3 gap-2 text-xs">
-                  {listaNames.map((_, i) => (
-                    <div key={i} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[i]}</div><div className="font-semibold text-brand-600">{money(calcListPrice(p, i + 1, listasPct, redondeo) * (1 + Number(p.iva_tasa ?? 8) / 100))}</div></div>
+                  {(listasCapturadas(p, listasPct).length ? listasCapturadas(p, listasPct) : [1]).map((l) => (
+                    <div key={l} className="bg-slate-50 rounded p-1.5 text-center"><div className="text-slate-400">{listaNames[l - 1] || `Precio ${l}`}</div><div className="font-semibold text-brand-600">{money(precioLista(p, l, listasPct, redondeo))}</div></div>
                   ))}
                 </div>
               </div>

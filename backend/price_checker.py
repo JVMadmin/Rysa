@@ -128,7 +128,7 @@ def _public_dto(p: dict, settings: dict) -> Optional[dict]:
                                      settings.get("redondeo_precios") or moneycalc.REDONDEO_DEFAULT)[0]
     bruto = float(lista1["precio_con_iva"] or 0)
     neto = float(lista1["precio"] or 0)
-    iva_tasa = float(p.get("iva_tasa") or p.get("impuesto") or 8)
+    iva_tasa = moneycalc.tasa_iva(p)
     if neto <= 0 and bruto > 0:
         neto = round(bruto / (1 + iva_tasa / 100), 2) if iva_tasa > 0 else bruto
     if bruto <= 0 and neto > 0:

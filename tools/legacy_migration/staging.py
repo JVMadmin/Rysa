@@ -26,6 +26,7 @@ from pathlib import Path
 
 from . import config
 from .dbf_reader import iter_records
+from .precios_legacy import precios_legacy
 
 TOL = 0.01
 CHUNK = 5000
@@ -223,12 +224,14 @@ class Stager:
                 if not cod:
                     continue
                 costo = round(float(r.get("COSTO") or 0.0), 4)
-                precio = round(float(r.get("PRECIO1") or 0.0), 2)
+                # PRECIO1..5 del legacy son SIN IVA (ver precios_legacy.py).
+                pl = precios_legacy(r)
+                precio = pl["precio_con_iva"]
                 exist = round(float(r.get("EXISTENCIA") or 0.0), 3)
-                min_stock = round(float(r.get("MINIMO") or 0.0), 3)
+                min_stock = round(float(r.get("STOCKMIN") or 0.0), 3)
                 desc = (r.get("DESCRIP") or "").strip()
                 linea = (r.get("LINEA") or "").strip()
-                um = (r.get("UNIDAD") or "").strip() or "PZA"
+                um = (r.get("UNIMEDIDA") or "").strip() or "PZA"
                 is_del = r.get("_deleted", False)
 
                 existing = await conn.fetchrow(
@@ -241,8 +244,7 @@ class Stager:
                     doc["linea"] = linea
                     doc["unidad_medida"] = um
                     doc["costo"] = costo
-                    doc["precio_con_iva"] = precio
-                    doc["precio_sin_iva"] = round(precio / 1.16, 2)
+                    doc.update(pl)
                     doc["existencia"] = exist
                     doc["stock_minimo"] = min_stock
                     doc["estado"] = "inactivo" if is_del else "activo"
@@ -256,12 +258,11 @@ class Stager:
                     pres_id = f"pres_{pid[:8]}"
                     doc = {
                         "id": pid, "_id": pid, "codigo": cod, "descripcion": desc, "linea": linea,
-                        "unidad_medida": um, "costo": costo, "precio_con_iva": precio,
-                        "precio_sin_iva": round(precio / 1.16, 2),
+                        "unidad_medida": um, "costo": costo, **pl,
                         "existencia": exist, "stock_minimo": min_stock, "estado": "activo",
                         "presentaciones": [{
                             "id": pres_id, "nombre": um, "factor": 1.0,
-                            "codigo_barras": cod, "precio": precio, "costo": costo, "es_base": True,
+                            "codigo_barras": cod, "precio": pl["precio_sin_iva"], "costo": costo, "es_base": True,
                             "es_predeterminada": True
                         }],
                         "created_at": now_str, "updated_at": now_str

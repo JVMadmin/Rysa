@@ -2336,7 +2336,7 @@ async def catalogo_consulta(q: Optional[str] = None, categoria: Optional[str] = 
             "precio2": listas[1]["precio"] if len(listas) > 1 else precio,
             "existencia": round(float(d.get("existencia") or 0), 3),
             "unidad_medida": d.get("unidad_medida") or d.get("unimedida") or "PZA",
-            "iva_tasa": float(d.get("iva_tasa") or d.get("impuesto") or 8.0),
+            "iva_tasa": moneycalc.tasa_iva(d),
             "precios": listas,
         })
     return out

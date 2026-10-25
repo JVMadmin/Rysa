@@ -16,8 +16,8 @@ Decisiones oficiales:
   P3. Productos ya existentes en `products` (match por `doc->>'codigo'`)
       NO se sobrescriben; se reportan como 'existing' para revisión manual.
   P4. Precios: se replica la lógica de server.py (build_product_doc +
-      _enriquecer_precios). PRECIO1..5 son precios CON IVA
-      (precio_incluye_iva=True, igual que la importación por Excel).
+      _enriquecer_precios). PRECIO1..5 son precios SIN IVA (verificado contra
+      los datos: PRECIO1 = COSTO × (1 + UTILPRECI1 %)); ver precios_legacy.py.
       Si PRECIO1..5 están vacíos y PRECIOVTA > 0, se usa PRECIOVTA como
       PRECIO1 (decisión documentada; solo afecta al catálogo, no al histórico).
   P5. Idempotente: clave = `doc->>'codigo'`; re-ejecutar no duplica.
@@ -36,6 +36,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .precios_legacy import precios_legacy
 from . import config
 from .dbf_reader import iter_records, read_header
 
@@ -180,23 +181,11 @@ def build_product_doc(d: dict, deleted: bool) -> dict:
         pvta = d.get("preciovta")
         if pvta:
             d["precio1"] = float(pvta)
-    iva = d.get("impuesto")
-    iva = float(iva) if iva not in (None, 0, "") else 8.0
+    # PRECIO1..5 son SIN IVA; las listas vacías no se inventan (precios_legacy.py).
+    pl = precios_legacy(d)
+    iva = pl["iva_tasa"]
     costo = float(d.get("costo") or 0)
-    precios = []
-    for i in range(1, 6):
-        con = d.get(f"precio{i}")
-        util = d.get(f"utilpreci{i}")
-        if con:
-            con = float(con)
-            sin = round(con / (1 + iva / 100), 2)
-            u = round((sin / costo - 1) * 100, 2) if costo else float(util or 0)
-        else:
-            u = float(util or 0)
-            sin = round(costo * (1 + u / 100), 2)
-            con = round(sin * (1 + iva / 100), 2)
-        precios.append({"nombre": f"Precio {i}", "utilidad_pct": u,
-                        "precio_sin_iva": sin, "precio_con_iva": round(con, 2)})
+    precios = pl["precios"]
     status = str(d.get("status", "")).upper()
     doc = dict(d)                     # conserva los 85 campos tal cual
     # P2: existencia legacy SÍ se carga (doc + columna tipada en el import)
@@ -227,7 +216,7 @@ def build_product_doc(d: dict, deleted: bool) -> dict:
                       "mostrar_catalogo": bool(d.get("ventaweb", False))},
         "ficha_tecnica": {},
         "proveedores": [d.get("proveedor")] if d.get("proveedor") else [],
-        "precio_incluye_iva": True,
+        "precio_incluye_iva": False,
         "source": "LEGACY",
         "legacy_table": "ARTICULO",
     })
@@ -236,30 +225,10 @@ def build_product_doc(d: dict, deleted: bool) -> dict:
     if codigo and codigo not in barras:
         barras.insert(0, codigo)
     doc["codigos_barras"] = barras
-    # _enriquecer_precios (precio_incluye_iva=True)
-    iva_tasa = float(doc["iva_tasa"])
-    precios = []
-    for p in doc["precios"]:
-        sin = float(p["precio_sin_iva"] or 0)
-        con = float(p["precio_con_iva"] or 0)
-        util = float(p["utilidad_pct"] or 0)
-        if con > 0:
-            sin = _neto_de_precio(con, iva_tasa, True)
-        elif sin > 0:
-            con = _bruto_de_precio(sin, iva_tasa, False)
-        else:
-            neto_base = costo * (1 + util / 100) if util >= 0 else costo
-            sin = round(neto_base, 2)
-            con = _bruto_de_precio(sin, iva_tasa, False)
-        if costo > 0:
-            util = round((sin / costo - 1) * 100, 2)
-        precios.append({"nombre": p.get("nombre", "Precio"), "utilidad_pct": util,
-                        "precio_sin_iva": round(sin, 2), "precio_con_iva": round(con, 2)})
     doc["precios"] = precios
-    sin_ok = float(precios[0]["precio_sin_iva"]) if precios else costo
-    con_ok = float(precios[0]["precio_con_iva"]) if precios else round(costo * (1 + iva_tasa / 100), 2)
-    doc["precio_sin_iva"] = round(sin_ok, 2)
-    doc["precio_con_iva"] = round(con_ok, 2)
+    sin_ok = pl["precio_sin_iva"]
+    doc["precio_sin_iva"] = sin_ok
+    doc["precio_con_iva"] = pl["precio_con_iva"]
     util, margen = _utilidad_margen(sin_ok, costo)
     doc["utilidad"] = util
     doc["margen"] = margen

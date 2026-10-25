@@ -147,23 +147,65 @@ def neto_redondeado(neto: float, iva_tasa: float, modo: str = REDONDEO_DEFAULT) 
     return round(redondear_precio(float(neto or 0) * f, modo) / f, 4)
 
 
-def precios_lista(prod: dict, pct: list | None = None, modo: str = REDONDEO_DEFAULT) -> list:
-    """[{lista, precio (neto), precio_con_iva}] para las listas configuradas.
-    Usa el precio capturado del producto para la lista si existe; si no, el
-    % de la lista sobre el costo."""
-    pct = pct or LISTAS_PCT_DEFAULT
-    iva = float(prod.get("iva_tasa") or prod.get("impuesto") or 8)
-    f = 1 + iva / 100
-    capturados = prod.get("precios") or []
-    costo = float(prod.get("costo") or 0)
+def tasa_iva(prod: dict) -> float:
+    """IVA del producto en %. 0 es válido (exento); solo sin dato se usa 8."""
+    for k in ("iva_tasa", "impuesto"):
+        v = prod.get(k)
+        if v not in (None, ""):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                pass
+    return 8.0
+
+
+def _capturados(prod: dict, f: float) -> list:
+    """[(neto, con_iva)] por posición de lista; (0, 0) si la lista no tiene precio.
+    Sin listas capturadas, el precio guardado del producto cuenta como Precio 1
+    (es el que trae la importación del sistema anterior)."""
     out = []
+    for e in prod.get("precios") or []:
+        e = e or {}
+        sin, con = float(e.get("precio_sin_iva") or 0), float(e.get("precio_con_iva") or 0)
+        # El neto guardado vale si cuadra con el precio con IVA; si no (p. ej. se
+        # capturó con IVA y el neto quedó redondeado a centavos), se deriva de él.
+        if con > 0 and (sin <= 0 or abs(round(sin * f, 2) - con) > 0.005):
+            sin = con / f
+        out.append((sin, con if con > 0 else (round(sin * f, 2) if sin > 0 else 0.0)))
+    if not any(s > 0 for s, _ in out):
+        sin, con = float(prod.get("precio_sin_iva") or 0), float(prod.get("precio_con_iva") or 0)
+        if sin <= 0 and con > 0:
+            sin = con / f
+        out = [(sin, con if con > 0 else round(sin * f, 2))] if sin > 0 else []
+    return out
+
+
+def precios_lista(prod: dict, pct: list | None = None, modo: str = REDONDEO_DEFAULT) -> list:
+    """[{lista, precio (neto), precio_con_iva, capturado}] para las listas configuradas.
+
+    Regla (igual que frontend/src/lib/precios.js):
+      - Precio capturado en el producto: se usa TAL CUAL, sin redondeo (es el
+        precio del sistema anterior o el que puso el usuario; no debe variar).
+      - Lista sin precio en un producto que sí tiene otros: toma el último
+        precio capturado anterior (el último precio es el de revendedores).
+      - Producto sin ningún precio: % de la lista sobre el costo (solo si el %
+        es mayor que 0), redondeado según Configuración.
+    """
+    pct = pct or LISTAS_PCT_DEFAULT
+    iva = tasa_iva(prod)
+    f = 1 + iva / 100
+    caps = _capturados(prod, f)
+    costo = float(prod.get("costo") or 0)
+    out, ultimo = [], (0.0, 0.0)
     for i, p in enumerate(pct):
-        cap = float((capturados[i] or {}).get("precio_con_iva") or 0) if i < len(capturados) else 0.0
-        if cap > 0:
-            neto = neto_redondeado(cap / f, iva, modo)
-        elif costo > 0:
-            neto = neto_redondeado(costo * (1 + float(p or 0) / 100), iva, modo)
-        else:
-            neto = 0.0
-        out.append({"lista": i + 1, "precio": neto, "precio_con_iva": round(neto * f, 2)})
+        sin, con = caps[i] if i < len(caps) else (0.0, 0.0)
+        capturado = sin > 0
+        if capturado:
+            ultimo = (sin, con)
+        elif ultimo[0] > 0:
+            sin, con = ultimo
+        elif not caps and costo > 0 and float(p or 0) > 0:
+            sin = neto_redondeado(costo * (1 + float(p) / 100), iva, modo)
+            con = round(sin * f, 2)
+        out.append({"lista": i + 1, "precio": round(sin, 6), "precio_con_iva": round(con, 2), "capturado": capturado})
     return out

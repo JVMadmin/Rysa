@@ -18,6 +18,7 @@ from pathlib import Path
 from sqlalchemy import text
 
 from tools.legacy_migration.dbf_reader import iter_records
+from tools.legacy_migration.precios_legacy import precios_legacy
 import tools.legacy_migration.config as leg_cfg
 from pgstore.cxc import recalcular_saldos_cxc
 
@@ -70,14 +71,14 @@ async def generar_preview_reemplazo(conn, legacy_path: Path | None = None) -> di
             cod = _norm(r.get("CODIGO"))
             if cod:
                 costo = round(float(r.get("COSTO") or 0.0), 4)
-                precio = round(float(r.get("PRECIO1") or 0.0), 2)
+                precio = precios_legacy(r)["precio_con_iva"]
                 exist = round(float(r.get("EXISTENCIA") or 0.0), 3)
-                min_stock = round(float(r.get("MINIMO") or 0.0), 3)
+                min_stock = round(float(r.get("STOCKMIN") or 0.0), 3)
                 articulos_dbf[cod] = {
                     "codigo": cod,
                     "descripcion": _norm(r.get("DESCRIP")),
                     "linea": _norm(r.get("LINEA")),
-                    "unidad_medida": _norm(r.get("UNIDAD") or "PZA"),
+                    "unidad_medida": _norm(r.get("UNIMEDIDA")) or "PZA",
                     "costo": costo,
                     "precio_con_iva": precio,
                     "existencia": exist,
@@ -276,11 +277,13 @@ async def ejecutar_reemplazo_total(conn, user: dict, legacy_path: Path | None = 
             codigos_fuente_art.add(cod)
             desc = _norm(r.get("DESCRIP"))
             linea = _norm(r.get("LINEA"))
-            unidad = _norm(r.get("UNIDAD") or "PZA")
+            unidad = _norm(r.get("UNIMEDIDA")) or "PZA"
             costo = round(float(r.get("COSTO") or 0.0), 4)
-            precio = round(float(r.get("PRECIO1") or 0.0), 2)
+            # PRECIO1..5 del legacy son SIN IVA (ver precios_legacy.py).
+            pl = precios_legacy(r)
+            precio = pl["precio_con_iva"]
             exist = round(float(r.get("EXISTENCIA") or 0.0), 3)
-            min_stock = round(float(r.get("MINIMO") or 0.0), 3)
+            min_stock = round(float(r.get("STOCKMIN") or 0.0), 3)
             is_del = r.get("_deleted", False)
 
             existing = (await conn.execute(
@@ -295,8 +298,7 @@ async def ejecutar_reemplazo_total(conn, user: dict, legacy_path: Path | None = 
                 doc["linea"] = linea
                 doc["unidad_medida"] = unidad
                 doc["costo"] = costo
-                doc["precio_con_iva"] = precio
-                doc["precio_sin_iva"] = round(precio / 1.16, 2)
+                doc.update(pl)
                 doc["existencia"] = exist
                 doc["stock_minimo"] = min_stock
                 doc["estado"] = "inactivo" if is_del else "activo"
@@ -324,15 +326,14 @@ async def ejecutar_reemplazo_total(conn, user: dict, legacy_path: Path | None = 
                         SET precio = :p, costo = :c, nombre = :n, updated_at = now()
                         WHERE product_id = :pid AND es_base = TRUE
                     """),
-                    {"p": precio, "c": costo, "n": unidad, "pid": pid}
+                    {"p": pl["precio_sin_iva"], "c": costo, "n": unidad, "pid": pid}
                 )
                 actualizados_prod += 1
             elif not is_del:
                 pid = uid()
                 doc = {
                     "id": pid, "_id": pid, "codigo": cod, "descripcion": desc, "linea": linea,
-                    "unidad_medida": unidad, "costo": costo, "precio_con_iva": precio,
-                    "precio_sin_iva": round(precio / 1.16, 2), "existencia": exist,
+                    "unidad_medida": unidad, "costo": costo, **pl, "existencia": exist,
                     "stock_minimo": min_stock, "estado": "activo", "vendidas": 0.0,
                     "created_at": now_iso(), "updated_at": now_iso()
                 }
@@ -360,7 +361,7 @@ async def ejecutar_reemplazo_total(conn, user: dict, legacy_path: Path | None = 
                         VALUES (:prid, :pid, :n, 1.0, :p, :c, TRUE, TRUE, TRUE, now(), now())
                         ON CONFLICT (product_id, nombre) DO NOTHING
                     """),
-                    {"prid": pres_id, "pid": pid, "n": unidad, "p": precio, "c": costo}
+                    {"prid": pres_id, "pid": pid, "n": unidad, "p": pl["precio_sin_iva"], "c": costo}
                 )
                 creados_prod += 1
 
