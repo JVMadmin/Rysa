@@ -284,12 +284,12 @@ async def _cxc_de_cartera(vendedor_id: str, vendedor_nombre: str = "") -> dict:
         if dv > 0:
             vencido += float(s.get("saldo", 0))
     saldo_total = round(sum(float(c.get("saldo", 0) or 0) for c in clientes), 2)
-    hoy_iso = hoy.isoformat()
+    # Cobrado hoy (día de la sucursal) solo de este vendedor, con el índice usuario+fecha.
+    hoy_iso = ahora_local().date().isoformat()
     abonos = await db.abonos.find(
-        {"fecha": {"$regex": "^" + hoy_iso}},
-        {"_id": 0, "monto": 1, "usuario_id": 1}).to_list(100000)
-    cobrado_hoy = round(sum(float(a.get("monto", 0) or 0)
-                            for a in abonos if a.get("usuario_id") == vendedor_id), 2)
+        {"usuario_id": vendedor_id, "$and": [filtro_dias_local("fecha", hoy_iso, hoy_iso)]},
+        {"_id": 0, "monto": 1}).to_list(100000)
+    cobrado_hoy = round(sum(float(a.get("monto", 0) or 0) for a in abonos), 2)
     return {
         "saldo_total": round(saldo_total, 2),
         "vencido": round(vencido, 2),
