@@ -1438,7 +1438,7 @@ async def products_pos_index(request: Request, user: dict = Depends(get_current_
             d["presentaciones"] = pres_by_prod.get(d["id"], [])
         cuerpo = json.dumps(docs, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
         import hashlib as _hl
-        _CACHE_POS_INDEX.update(firma=firma, cuerpo=cuerpo, etag='"' + _hl.md5(cuerpo).hexdigest() + '"')
+        _CACHE_POS_INDEX.update(firma=firma, cuerpo=cuerpo, etag='"' + _hl.md5(cuerpo, usedforsecurity=False).hexdigest() + '"')
     etag = _CACHE_POS_INDEX["etag"]
     cab = {"ETag": etag, "Cache-Control": "private, no-cache"}
     if request.headers.get("if-none-match") == etag:
