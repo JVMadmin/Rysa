@@ -6,6 +6,14 @@
 //   PARCHE correcciones sin funciones nuevas
 export const NOVEDADES = [
   {
+    version: "2.0.1",
+    fecha: "2026-10-29",
+    cambios: [
+      "Actualizaciones más rápidas: el sistema llega listo y ya no se compila en el servidor.",
+      "Si una actualización falla, RYSA vuelve sola a la versión anterior.",
+    ],
+  },
+  {
     version: "2.0.0",
     fecha: "2026-10-29",
     cambios: [

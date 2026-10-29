@@ -2,12 +2,19 @@
 # Despliegue reproducible de RYSA en VPS desde cero.
 #
 # Uso:
-#   ./scripts/deploy.sh                   # pull + backup + build + up + cadena completa
-#   ./scripts/deploy.sh --no-cache       # build --no-cache (limpio total)
-#   ./scripts/deploy.sh --skip-build     # solo pull + up (build anterior)
+#   ./scripts/deploy.sh                   # pull + backup + imágenes + up + cadena completa
+#   ./scripts/deploy.sh --ref <commit>  # despliega EXACTAMENTE ese commit/tag/rama
+#   ./scripts/deploy.sh --compilar      # compila las imágenes aquí en vez de bajarlas
+#   ./scripts/deploy.sh --no-cache       # compila aquí con build --no-cache (limpio total)
+#   ./scripts/deploy.sh --skip-build     # solo up con las imágenes actuales
 #   ./scripts/deploy.sh --check         # solo diagnóstico
 #   ./scripts/deploy.sh --no-backup     # saltarse backup (deploys rápidos)
-#   ./scripts/deploy.sh --ref <commit>  # despliega EXACTAMENTE ese commit/tag/rama
+#
+# Imágenes: por defecto se descargan las que compiló y probó GitHub (CI) para
+# ese commit (scripts/imagenes_ci.sh); el servidor no compila. Si CI falló no
+# hay imágenes y no se despliega. ESPERA_CI (900 s) es cuánto se espera a que
+# CI las publique. Si el despliegue falla, se vuelve solo a la versión anterior
+# (salvo que traiga migraciones de base de datos).
 #
 # Regla: producción solo corre código que está en git. Nada de `docker cp`:
 # el paso 7b compara el código del contenedor contra el commit desplegado y
@@ -31,9 +38,12 @@ SKIP_BUILD=""
 CHECK_ONLY=""
 NO_BACKUP=""
 DEPLOY_REF=""
+COMPILAR=""
+ESPERA_CI="${ESPERA_CI:-900}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --no-cache)  NO_CACHE=1 ;;
+    --no-cache)  NO_CACHE=1; COMPILAR=1 ;;
+    --compilar)  COMPILAR=1 ;;
     --skip-build) SKIP_BUILD=1 ;;
     --check) CHECK_ONLY=1 ;;
     --no-backup) NO_BACKUP=1 ;;
@@ -41,7 +51,7 @@ while [[ $# -gt 0 ]]; do
       [[ -n "${2:-}" ]] || { echo "--ref requiere un commit/tag/rama" >&2; exit 2; }
       DEPLOY_REF="$2"; shift ;;
     -h|--help)
-      grep '^#' "$0" | head -n 25
+      grep '^#' "$0" | head -n 32
       exit 0
       ;;
     *) echo "Argumento no reconocido: $1" >&2; exit 2 ;;
@@ -64,6 +74,59 @@ require_env() {
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "Comando requerido no instalado: $1"; exit 1; }
 }
+wait_healthy() {
+  local svc="$1"
+  local timeout="${2:-180}"
+  local state=""
+  for ((i=0; i<timeout; i+=5)); do
+    # Contenedores con nombre fijo (container_name: rysa_<servicio>).
+    state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+      "rysa_$svc" 2>/dev/null || echo "")
+    case "$state" in
+      healthy) ok "$svc healthy"; return 0 ;;
+      unhealthy) err "$svc unhealthy — revisa: docker compose logs $svc --tail=50"; return 1 ;;
+    esac
+    sleep 5
+  done
+  err "$svc NO quedó healthy en ${timeout}s (último estado: $state)"
+  return 1
+}
+
+# shellcheck source=imagenes_ci.sh
+. "$ROOT/scripts/imagenes_ci.sh"
+
+# ============ Reversión automática ================================
+# Lo que corría antes de este despliegue (para volver si algo falla).
+PREV_DEPLOYED="$(cat "$ROOT/.deployed" 2>/dev/null || true)"
+PREV_COMMIT="$(sed -n 's/^commit=//p' <<< "$PREV_DEPLOYED" | head -1)"
+PUEDE_REVERTIR=""
+ORIGEN_IMAGENES="actuales"
+# Si falla después de cambiar los contenedores, vuelve a las imágenes
+# rysa-*:anterior y a su commit. No lo hace si el despliegue trae migraciones:
+# el código anterior no arrancaría con la base ya migrada (alembic no conoce
+# la revisión nueva); ahí toca corregir y volver a desplegar, o restaurar.
+revertir() {
+  [[ -n "$PUEDE_REVERTIR" ]] || return 0
+  local migr
+  migr=$(git diff --name-only "$PREV_COMMIT" HEAD -- backend/alembic/versions 2>/dev/null | wc -l)
+  if [[ "$migr" -gt 0 ]]; then
+    err "No se revierte solo: este despliegue trae $migr migración(es) de base de datos."
+    err "Corrige y vuelve a desplegar, o restaura el respaldo (scripts/restore.sh)."
+    return 0
+  fi
+  err "Revirtiendo a la versión anterior (${PREV_COMMIT:0:7})..."
+  git checkout -q --detach "$PREV_COMMIT" || true
+  imagenes_revertir
+  docker compose up -d --no-build backend frontend nginx \
+    || { err "No se pudo revertir: revisar a mano"; return 0; }
+  if wait_healthy backend 180 && wait_healthy frontend 60 && wait_healthy nginx 90; then
+    printf '%s\n' "$PREV_DEPLOYED" > "$ROOT/.deployed"
+    ok "Quedó funcionando la versión anterior (${PREV_COMMIT:0:7})"
+  else
+    err "La versión anterior tampoco quedó sana: revisar a mano"
+  fi
+}
+fallar() { err "$*"; revertir; exit 1; }
 
 # ============ 1) Pre-chequeos ====================================
 step "1) Pre-chequeos"
@@ -149,9 +212,9 @@ if [[ -z "$CHECK_ONLY" && -z "$NO_BACKUP" ]]; then
   ok "Backup completado"
 fi
 
-# ============ 4) Pull + build ====================================
+# ============ 4) Código + imágenes ===============================
 if [[ -z "$CHECK_ONLY" ]]; then
-  step "4) Pull + build"
+  step "4) Código + imágenes"
   if [[ -z "$SKIP_BUILD" ]]; then
     if [[ -n "$DEPLOY_REF" ]]; then
       log "git fetch + checkout $DEPLOY_REF..."
@@ -167,51 +230,51 @@ if [[ -z "$CHECK_ONLY" ]]; then
     log "Commit a desplegar: $DEPLOYED_COMMIT"
     # Versión que muestran el ERP y /api/version (archivo VERSION + commit).
     export APP_VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo dev)"
-    export GIT_COMMIT="$(git rev-parse --short HEAD)"
+    # 7 caracteres, igual que CI: la pantalla y el servidor deben coincidir.
+    export GIT_COMMIT="${DEPLOYED_COMMIT:0:7}"
     export BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     log "Versión: ${APP_VERSION} (${GIT_COMMIT})"
-    log "docker compose build ${NO_CACHE:+--no-cache}"
-    [[ -n "$NO_CACHE" ]] && docker compose build --no-cache || docker compose build
+    if [[ -z "$COMPILAR" ]]; then
+      log "Descargando imágenes de GitHub (espera hasta ${ESPERA_CI}s a que CI las publique)..."
+      if ! imagenes_ci_esperar "$DEPLOYED_COMMIT" "$ESPERA_CI"; then
+        err "GitHub no publicó imágenes de ${GIT_COMMIT}: ¿falló CI o no se empujó el commit?"
+        err "Revisa https://github.com/JVMadmin/Rysa/actions, o usa --compilar."
+        [[ -n "$PREV_COMMIT" ]] && git checkout -q --detach "$PREV_COMMIT"
+        exit 1
+      fi
+      imagenes_guardar_anterior
+      imagenes_ci_activar "$DEPLOYED_COMMIT"
+      ORIGEN_IMAGENES="github"
+      ok "Imágenes de GitHub listas"
+    else
+      imagenes_guardar_anterior
+      log "docker compose build ${NO_CACHE:+--no-cache}"
+      [[ -n "$NO_CACHE" ]] && docker compose build --no-cache || docker compose build
+      ORIGEN_IMAGENES="compiladas"
+    fi
+    [[ -n "$PREV_COMMIT" ]] && docker image inspect rysa-backend:anterior >/dev/null 2>&1 \
+      && PUEDE_REVERTIR=1
   else
     log "Saltando build (--skip-build)"
   fi
 
   # ============ 5) Up ============================================
   step "5) docker compose up -d"
-  docker compose up -d
+  docker compose up -d || fallar "DEPLOY FAILED en docker compose up"
 fi
 
 # ============ 6) Esperar cadena de healthchecks =================
 step "6) Healthchecks de servicios"
-wait_healthy() {
-  local svc="$1"
-  local timeout="${2:-180}"
-  for ((i=0; i<timeout; i+=5)); do
-    local state
-    # Contenedores con nombre fijo (container_name: rysa_<servicio>).
-    state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
-      "rysa_$svc" 2>/dev/null || echo "")
-    case "$state" in
-      healthy) ok "$svc healthy"; return 0 ;;
-      unhealthy) err "$svc unhealthy — revisa: docker compose logs $svc --tail=50"; return 1 ;;
-    esac
-    sleep 5
-  done
-  err "$svc NO quedó healthy en ${timeout}s (último estado: $state)"
-  return 1
-}
-wait_healthy postgres 120 || { err "DEPLOY FAILED en postgres"; exit 1; }
-wait_healthy backend  180 || { err "DEPLOY FAILED en backend"; exit 1; }
-wait_healthy frontend 60  || { err "DEPLOY FAILED en frontend"; exit 1; }
-wait_healthy nginx    90  || { err "DEPLOY FAILED en nginx"; exit 1; }
+wait_healthy postgres 120 || fallar "DEPLOY FAILED en postgres"
+wait_healthy backend  180 || fallar "DEPLOY FAILED en backend"
+wait_healthy frontend 60  || fallar "DEPLOY FAILED en frontend"
+wait_healthy nginx    90  || fallar "DEPLOY FAILED en nginx"
 
 # ============ 7) Diagnóstico de instalación =====================
 step "7) Diagnóstico de instalación"
 if [[ -f "$ROOT/backend/scripts/check_installation.py" ]]; then
-  docker compose exec -T backend python /app/scripts/check_installation.py || {
-    err "DEPLOY FAILED en check_installation.py"
-    exit 1
-  }
+  docker compose exec -T backend python /app/scripts/check_installation.py \
+    || fallar "DEPLOY FAILED en check_installation.py"
 fi
 
 # ============ 7b) Deriva: el contenedor corre EXACTAMENTE el commit =====
@@ -225,12 +288,13 @@ while IFS= read -r f; do
     err "Deriva en $rel (git=$want contenedor=${have:-ausente})"; DRIFT=1
   fi
 done < <(git ls-files 'backend/*.py' | grep -v '^backend/tests/')
-[[ "$DRIFT" -eq 0 ]] || { err "DEPLOY FAILED: el contenedor no coincide con git"; exit 1; }
+[[ "$DRIFT" -eq 0 ]] || fallar "DEPLOY FAILED: el contenedor no coincide con git"
 ok "Código del backend idéntico al commit $(git rev-parse --short HEAD)"
 if [[ -z "$CHECK_ONLY" ]]; then
   {
     echo "commit=$(git rev-parse HEAD)"
     echo "version=$(tr -d '[:space:]' < VERSION 2>/dev/null || echo dev)"
+    echo "imagenes=$ORIGEN_IMAGENES"
     echo "fecha=$(date -Iseconds)"
     echo "usuario=$(whoami)"
   } > "$ROOT/.deployed"
@@ -259,10 +323,12 @@ fi
 RUN_ENV=$(docker exec rysa_backend printenv ENVIRONMENT 2>/dev/null || true)
 if [[ "$RUN_ENV" == "${ENVIRONMENT:-}" ]]; then ok "Backend corre con ENVIRONMENT=$RUN_ENV"
 else err "Backend corre con ENVIRONMENT='$RUN_ENV' (esperado '${ENVIRONMENT:-}')"; SMOKE_FAIL=1; fi
-[[ "$SMOKE_FAIL" -eq 0 ]] || { err "DEPLOY FAILED en smoke tests"; exit 1; }
+[[ "$SMOKE_FAIL" -eq 0 ]] || fallar "DEPLOY FAILED en smoke tests"
 if [[ "${RUN_SMOKE_AUTH:-0}" == "1" && -f "$ROOT/scripts/test_all.sh" ]]; then
-  bash "$ROOT/scripts/test_all.sh" || { err "DEPLOY FAILED en test_all.sh"; exit 1; }
+  bash "$ROOT/scripts/test_all.sh" || fallar "DEPLOY FAILED en test_all.sh"
 fi
+# Ya no hay vuelta atrás automática: lo que sigue no depende de los contenedores.
+PUEDE_REVERTIR=""
 
 # ============ 9) Verificación pública ==========================
 step "9) Verificación pública"
@@ -284,7 +350,13 @@ fi
 
 # ============ 10) Resumen final ================================
 step "10) Resumen"
-ok "RYSA desplegado correctamente."
+if [[ -z "$CHECK_ONLY" ]]; then
+  # Imágenes sin etiqueta y caché de compilaciones viejas: en disco quedan
+  # solo rysa-*:latest (actual) y rysa-*:anterior.
+  docker image prune -f >/dev/null 2>&1 || true
+  docker builder prune -f >/dev/null 2>&1 || true
+fi
+ok "RYSA desplegado correctamente (imágenes: ${ORIGEN_IMAGENES})."
 if [[ -n "${DOMAIN:-}" ]]; then
   ok "URL: https://${DOMAIN}/"
   ok "Admin: ${ADMIN_EMAIL} (idempotente)"

@@ -8,6 +8,23 @@ ven los usuarios están en `frontend/src/lib/novedades.js`.
 Al publicar: subir `VERSION`, agregar la entrada aquí y en `novedades.js`, y
 etiquetar el commit desplegado (`git tag v<versión>`).
 
+Cómo viaja un cambio:
+1. Commit y `git push` (cualquier rama). GitHub corre las pruebas y, si pasan,
+   publica las imágenes `ghcr.io/jvmadmin/rysa-{backend,frontend,nginx}:<commit>`.
+2. Prueba local con esas mismas imágenes: `./scripts/usar_imagenes_ci.sh`.
+   (Para algo aún sin empujar, compilar local como siempre y después
+   `./scripts/limpiar_docker_local.sh`.)
+3. Producción: `./scripts/deploy.sh --ref <commit>` descarga las imágenes (no
+   compila), respalda, migra y verifica; si falla vuelve sola a la anterior.
+   Sin imágenes de GitHub (CI en rojo) no despliega; `--compilar` lo fuerza.
+
+## 2.0.1 · 2026-10-29
+
+- Las imágenes se compilan y prueban en GitHub; el servidor y la PC local solo
+  las descargan. Despliegues más rápidos y sin carga en producción.
+- Reversión automática a la versión anterior si un despliegue falla.
+- Más pruebas en CI (POS atómico, PostgreSQL, permisos, código de autorización).
+
 ## 2.0.0 · 2026-10-29
 
 - Indicador de versión y aviso de versión nueva.
