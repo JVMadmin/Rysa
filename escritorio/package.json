@@ -1,7 +1,7 @@
 {
   "name": "rysa-erp-escritorio",
   "productName": "RYSA ERP",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "RYSA ERP para escritorio",
   "author": "Grupo RYSA",
   "private": true,
@@ -63,6 +63,9 @@
         "provider": "generic",
         "url": "https://gruporysa.com/escritorio/"
       }
+    ],
+    "asarUnpack": [
+      "node_modules/pdf-to-printer/dist/**"
     ]
   },
   "devDependencies": {
@@ -70,6 +73,7 @@
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "pdf-to-printer": "^5.6.0"
   }
 }

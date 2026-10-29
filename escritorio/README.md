@@ -49,6 +49,35 @@ sola vez.
 - **Una sola instancia**: abrir el acceso directo otra vez trae al frente la ventana abierta.
 - Si no hay conexión al arrancar, muestra una pantalla propia y reintenta sola.
 
+## Impresión directa (desde la versión 1.1.0)
+
+El ERP imprime sin diálogo a la impresora de Windows elegida para cada
+documento. Cada PC elige en **Configuración → Impresoras → Impresoras de este
+equipo** su impresora de tickets y la de carta; se guarda en esa PC.
+
+| Documento | Impresora del cliente | Cómo se imprime |
+|---|---|---|
+| Ticket | Xprinter XP-N160II (térmica 80 mm, 72 mm útiles) | PDF oficial a tamaño real (`noscale`); el corte lo hace el driver XP-80 |
+| Carta, cotización, reportes | Brother DCP-L2660DW (láser) | PDF ajustado a hoja carta (`fit`) |
+
+- **Dentro de la app:** `src/preload.js` expone `window.rysaEscritorio`
+  (`version`, `listarImpresoras()`, `imprimir({ impresora, pdf_base64, tipo, copias })`).
+  `src/main.js` solo atiende peticiones que vienen del ERP.
+- **ERP abierto en Chrome en la misma PC:** mientras la app está abierta,
+  `src/puente.js` escucha en `http://127.0.0.1:9731` (`GET /estado`,
+  `GET /printers`, `POST /print`). Solo acepta el origen del ERP; cualquier otro
+  sitio recibe 403.
+- La impresión usa SumatraPDF, incluido en `pdf-to-printer`. Va desempaquetado
+  fuera de `app.asar` (`asarUnpack`), porque Windows no puede ejecutarlo desde
+  dentro del archivo.
+- Sin la app, el ERP usa el diálogo del navegador. Chrome recuerda la última
+  impresora elegida.
+
+**Configurar la Xprinter XP-N160II en Windows:** instala el driver XP-80 de
+Xprinter. En *Preferencias de impresión* elige papel **80 mm × 297 mm** (o
+rollo), márgenes 0 y **cortar al final del documento**. Imprime la hoja de
+prueba desde Configuración: la regla de 72 mm debe verse completa.
+
 ## Instalador
 
 `RYSA-ERP-Setup-<versión>.exe` (NSIS, en español):

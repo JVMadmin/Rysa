@@ -2,10 +2,12 @@
 // Abre solo el ERP de gruporysa.com (login y /app/...), nunca el sitio público,
 // y sirve imágenes de producto y estáticos desde la carpeta de datos elegida
 // en el instalador (ver cache.js).
-const { app, BrowserWindow, Menu, dialog, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const { CacheDisco } = require("./cache");
+const { listarImpresoras, imprimirPdf } = require("./impresion");
+const { iniciarPuente } = require("./puente");
 
 const BASE = new URL(process.env.RYSA_URL || "https://gruporysa.com");
 const INICIO = new URL("/app", BASE).href;
@@ -134,6 +136,9 @@ function crearVentana() {
       sandbox: true,
       nodeIntegration: false,
       spellcheck: false,
+      // window.rysaEscritorio: impresión directa para el ERP (ver impresion.js).
+      preload: path.join(__dirname, "preload.js"),
+      additionalArguments: [`--rysa-version=${app.getVersion()}`],
     },
   });
   ventana.maximize();
@@ -149,6 +154,35 @@ function crearVentana() {
     }
   });
   ventana.loadURL(INICIO);
+}
+
+// --- Impresión directa ------------------------------------------------------
+// La página del ERP (y solo ella) puede listar impresoras e imprimir PDFs sin
+// diálogo. El puente en localhost:9731 da lo mismo al ERP abierto en Chrome en
+// esta PC mientras la app está abierta.
+function desdeErp(evento) {
+  try {
+    return new URL(evento.senderFrame.url).origin === BASE.origin;
+  } catch {
+    return false;
+  }
+}
+
+function instalarImpresion() {
+  ipcMain.handle("rysa:impresoras", async (evento) => {
+    if (!desdeErp(evento)) throw new Error("No permitido");
+    return listarImpresoras(ventana.webContents);
+  });
+  ipcMain.handle("rysa:imprimir", async (evento, opciones) => {
+    if (!desdeErp(evento)) return { ok: false, error: "No permitido" };
+    return imprimirPdf(opciones || {});
+  });
+  iniciarPuente({
+    origen: BASE.origin,
+    version: app.getVersion(),
+    listar: () => listarImpresoras(ventana.webContents),
+    imprimir: imprimirPdf,
+  });
 }
 
 // --- Menú (oculto; se muestra con Alt) --------------------------------------
@@ -244,6 +278,7 @@ app.whenReady().then(() => {
   instalarCache(session.defaultSession);
   Menu.setApplicationMenu(crearMenu());
   crearVentana();
+  instalarImpresion();
   buscarActualizacion();
 });
 
