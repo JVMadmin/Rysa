@@ -191,8 +191,9 @@ def test_rollback_transaccional():
 def test_caja_inventario():
     async def body():
         db = deps.db
-        u = await db.users.find_one({"role": "admin"})
-        assert u is not None
+        # Usuario sintético: la caja solo guarda id y nombre (en CI la base
+        # está vacía y no hay un usuario con rol "admin").
+        u = {"id": "test-" + uid(), "name": "Cajero Prueba"}
         cid = uid()
         await db.cajas.insert_one({"id": cid, "caja_nombre": "Caja Test",
                                    "usuario_id": u["id"], "usuario_nombre": u["name"],

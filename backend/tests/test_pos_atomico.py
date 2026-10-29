@@ -86,12 +86,12 @@ def _run(body):
     asyncio.run(_main())
 
 
-def _call(db, sale, caja=None, cliente=None, fault=None, idem=None):
+def _call(db, sale, caja=None, cliente=None, fault=None, idem=None, autorizaciones=None):
     return pos.crear_venta_pg(
         user=USER, sale=sale, items=sale["items"], pagos=sale["pagos"], total=sale["total"],
         es_cotizacion=sale["tipo_venta"] == "cotizacion", caja=caja,
         condicion=sale["condicion"], cliente=cliente, folio=sale["folio"],
-        idempotency_key=idem, fault=fault)
+        idempotency_key=idem, fault=fault, autorizaciones=autorizaciones)
 
 
 # --------------------------------------------------------------------------- #
@@ -300,4 +300,37 @@ def test_idempotencia():
         eng = pgstore.get_engine()
         async with eng.begin() as c:
             await c.execute(text('DELETE FROM "sale_idempotency" WHERE idempotency_key=:k'), {"k": key})
+    _run(body)
+
+
+# --------------------------------------------------------------------------- #
+# Autorización de precio manual: sirve para UNA sola venta                   #
+# --------------------------------------------------------------------------- #
+def test_autorizacion_una_sola_venta():
+    async def body():
+        db = deps.db
+        pid = await _make_product(db, 10)
+        aid = uid()
+        await db.autorizaciones.insert_one({"id": aid, "tipo": "precio_manual",
+                                            "estado": "aprobada", "usado": False})
+        s1 = make_sale([_item(pid, 1, 10.0)], folio="V-AUT1")
+        s2 = make_sale([_item(pid, 1, 10.0)], folio="V-AUT2")
+        # Dos cajas cobran a la vez con la misma autorización: solo una pasa.
+        r = await asyncio.gather(_call(db, s1, autorizaciones=[aid]),
+                                 _call(db, s2, autorizaciones=[aid]), return_exceptions=True)
+        ok = [x for x in r if isinstance(x, dict)]
+        errores = [x for x in r if isinstance(x, pos.VentaError)]
+        assert len(ok) == 1 and len(errores) == 1, r
+        assert errores[0].status == 409
+        a = await db.autorizaciones.find_one({"id": aid})
+        assert a["usado"] is True and a["venta_folio"] == ok[0]["folio"]
+        # La venta rechazada no dejó rastro (rollback completo).
+        assert await _existencia(db, pid) == 9
+        assert await _count("sales", f"t.doc->>'id' IN ('{s1['id']}','{s2['id']}')") == 1
+        for s in [s1, s2]:
+            await db.sales.delete_one({"id": s["id"]})
+            await db.audit_logs.delete_many({"registro_id": s["id"]})
+        await db.inventory_movements.delete_many({"product_id": pid})
+        await db.autorizaciones.delete_one({"id": aid})
+        await db.products.delete_one({"id": pid})
     _run(body)

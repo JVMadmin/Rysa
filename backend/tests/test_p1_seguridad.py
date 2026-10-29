@@ -61,8 +61,9 @@ def test_alcance_roles():
 
 
 def test_default_modulos_y_rol_privilegiado():
-    assert set(DEFAULT_MODULES_NON_PRIVILEGED) == {"productos", "clientes", "recargas",
-                                                  "ventas", "caja", "reportes"}
+    # Desde los permisos por perfil (e17b16d) el alta solo da caja y catálogo;
+    # lo demás lo otorga un administrador.
+    assert set(DEFAULT_MODULES_NON_PRIVILEGED) == {"caja", "catalogo"}
     assert not es_rol_privilegiado("vendedor")
     assert not es_rol_privilegiado("encargado")
     assert es_rol_privilegiado("admin")

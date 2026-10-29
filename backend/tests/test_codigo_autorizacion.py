@@ -265,10 +265,10 @@ class TestVenta:
         usadas = run(autz.validar_precios_manuales(sesion(db, "cajero"), items))
         assert usadas == [aid] and items[0]["autorizado_por_nombre"] == "Encargada Prueba"
         run(autz.registrar_precios_manuales(sesion(db, "cajero"), {"id": "v1", "folio": "V000123"}, items, usadas))
-        a = db.autorizaciones.docs[aid]
-        assert a["usado"] is True and a["venta_folio"] == "V000123"
         assert ("cajero", "PRECIO_MANUAL") in [(u, ac) for u, ac, _ in db.auditoria]
-        # No se puede reutilizar en otra venta.
+        # La transacción de la venta (pgstore/pos.py) la marca usada; eso se
+        # prueba en test_pos_atomico. Aquí: ya usada, no sirve para otra venta.
+        db.autorizaciones.docs[aid].update(usado=True, venta_folio="V000123")
         assert error(lambda: run(autz.validar_precios_manuales(
             sesion(db, "cajero"), [linea(autorizacion_id=aid)])))[0] == 409
 
