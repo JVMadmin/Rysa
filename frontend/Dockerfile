@@ -16,6 +16,12 @@ ENV NODE_OPTIONS=$NODE_OPTIONS
 COPY package.json package-lock.json* ./
 RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
+# Versión que muestra el ERP y con la que detecta que hay una nueva publicada.
+ARG REACT_APP_VERSION=dev
+ARG REACT_APP_COMMIT=dev
+ARG REACT_APP_BUILD_DATE=""
+ENV REACT_APP_VERSION=$REACT_APP_VERSION REACT_APP_COMMIT=$REACT_APP_COMMIT REACT_APP_BUILD_DATE=$REACT_APP_BUILD_DATE
+
 COPY . .
 # Comando de build real del package.json: craco build -> genera carpeta build/
 RUN npm run build

@@ -21,6 +21,13 @@ RUN pip install --upgrade pip && \
 # Código fuente del backend (excluye .env, venv, uploads, etc. via .dockerignore)
 COPY . .
 
+# Versión del sistema (scripts/deploy.sh la toma de VERSION y de git). Va al
+# final para que cambiarla no reinstale dependencias.
+ARG APP_VERSION=dev
+ARG GIT_COMMIT=dev
+ARG BUILD_DATE=""
+ENV APP_VERSION=$APP_VERSION GIT_COMMIT=$GIT_COMMIT BUILD_DATE=$BUILD_DATE
+
 # Scripts: diagnóstico + bootstrap del primer admin
 RUN chmod +x /app/scripts/check_installation.py /app/scripts/bootstrap_admin.py
 

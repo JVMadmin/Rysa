@@ -48,7 +48,7 @@ export default function Login() {
             Inventario, ventas, caja, clientes, cotizaciones y facturación de {empresa_nombre} en un solo lugar.
           </p>
         </div>
-        <p className="relative z-10 text-sm text-slate-500">© {new Date().getFullYear()} {empresa_nombre}</p>
+        <p className="relative z-10 text-sm text-slate-500">© {new Date().getFullYear()} {empresa_nombre} · RYSA v{process.env.REACT_APP_VERSION || "dev"}</p>
       </aside>
 
       <main className="flex flex-1 items-center justify-center bg-slate-50 p-6 sm:p-10">

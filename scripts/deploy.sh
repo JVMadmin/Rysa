@@ -165,6 +165,11 @@ if [[ -z "$CHECK_ONLY" ]]; then
     fi
     DEPLOYED_COMMIT="$(git rev-parse HEAD)"
     log "Commit a desplegar: $DEPLOYED_COMMIT"
+    # Versión que muestran el ERP y /api/version (archivo VERSION + commit).
+    export APP_VERSION="$(tr -d '[:space:]' < VERSION 2>/dev/null || echo dev)"
+    export GIT_COMMIT="$(git rev-parse --short HEAD)"
+    export BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    log "Versión: ${APP_VERSION} (${GIT_COMMIT})"
     log "docker compose build ${NO_CACHE:+--no-cache}"
     [[ -n "$NO_CACHE" ]] && docker compose build --no-cache || docker compose build
   else
@@ -225,6 +230,7 @@ ok "Código del backend idéntico al commit $(git rev-parse --short HEAD)"
 if [[ -z "$CHECK_ONLY" ]]; then
   {
     echo "commit=$(git rev-parse HEAD)"
+    echo "version=$(tr -d '[:space:]' < VERSION 2>/dev/null || echo dev)"
     echo "fecha=$(date -Iseconds)"
     echo "usuario=$(whoami)"
   } > "$ROOT/.deployed"

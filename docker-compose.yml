@@ -50,6 +50,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      # Versión del sistema: scripts/deploy.sh exporta estas variables.
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-dev}
+        BUILD_DATE: ${BUILD_DATE:-}
     container_name: rysa_backend
     restart: unless-stopped
     # .env.docker es la ÚNICA fuente de configuración del backend
@@ -91,6 +96,9 @@ services:
       args:
         # Ruta relativa: el SPA consume el mismo origen (proxy del host -> rysa_nginx -> backend).
         REACT_APP_BACKEND_URL: ""
+        REACT_APP_VERSION: ${APP_VERSION:-dev}
+        REACT_APP_COMMIT: ${GIT_COMMIT:-dev}
+        REACT_APP_BUILD_DATE: ${BUILD_DATE:-}
     container_name: rysa_frontend
     restart: unless-stopped
     networks:

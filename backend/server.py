@@ -7109,6 +7109,18 @@ def _pdf_prueba_impresora(tipo: str, empresa: str) -> bytes:
     return buf.getvalue()
 
 
+@api.get("/version")
+async def version_sistema():
+    """Versión desplegada (pública): la usa el ERP para mostrarla y para avisar
+    que hay una versión nueva cuando la página abierta es de un despliegue
+    anterior. Viene de VERSION y git (scripts/deploy.sh → build args)."""
+    return {
+        "version": os.environ.get("APP_VERSION", "dev"),
+        "commit": os.environ.get("GIT_COMMIT", "dev"),
+        "fecha": os.environ.get("BUILD_DATE", ""),
+    }
+
+
 @api.get("/printers/prueba.pdf")
 async def printers_prueba_pdf(tipo: str = "ticket", user: dict = Depends(get_current_user)):
     """PDF de prueba para Configuración → Impresoras (ticket 80 mm o carta)."""

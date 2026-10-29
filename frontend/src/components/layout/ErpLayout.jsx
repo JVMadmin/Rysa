@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import AutorizacionesRemotas from "@/components/AutorizacionesRemotas";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import VersionRysa from "@/components/VersionRysa";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
@@ -338,6 +339,7 @@ export default function ErpLayout() {
           })}
         </nav>
 
+        <VersionRysa contraido={contraido} />
         <button
           onClick={esEscritorio ? handleToggleCollapsed : () => setMenuMovil(false)}
           className={`flex items-center gap-2 h-12 border-t border-white/[0.06] text-slate-400 hover:text-white transition-colors ${contraido ? "justify-center" : "px-5"}`}
