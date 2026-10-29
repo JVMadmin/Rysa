@@ -1,0 +1,75 @@
+{
+  "name": "rysa-erp-escritorio",
+  "productName": "RYSA ERP",
+  "version": "1.0.0",
+  "description": "RYSA ERP para escritorio",
+  "author": "Grupo RYSA",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "iniciar": "electron .",
+    "iconos": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generar-iconos.ps1",
+    "instalador": "electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "com.gruporysa.erp",
+    "productName": "RYSA ERP",
+    "copyright": "Grupo RYSA",
+    "directories": {
+      "output": "dist",
+      "buildResources": "recursos"
+    },
+    "files": [
+      "package.json",
+      "src/**",
+      "recursos/icono.ico",
+      "recursos/icono-256.png"
+    ],
+    "compression": "normal",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "recursos/icono.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "include": "recursos/instalador.nsh",
+      "installerIcon": "recursos/icono.ico",
+      "uninstallerIcon": "recursos/icono.ico",
+      "installerSidebar": "recursos/instalador-lateral.bmp",
+      "uninstallerSidebar": "recursos/instalador-lateral.bmp",
+      "installerLanguages": [
+        "es_ES"
+      ],
+      "language": "3082",
+      "shortcutName": "RYSA ERP",
+      "uninstallDisplayName": "RYSA ERP",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "RYSA-ERP-Setup-${version}.exe"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://gruporysa.com/escritorio/"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

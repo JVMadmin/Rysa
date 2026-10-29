@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' file:">
+<title>RYSA ERP</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background: #1c1d20; color: #e9e9ea;
+    font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+  }
+  .caja { max-width: 420px; padding: 32px; text-align: center; }
+  img { width: 96px; height: 96px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 16px 0 8px; }
+  p { color: #a6a7ab; margin: 0 0 24px; }
+  button {
+    background: #d7141a; color: #fff; border: 0; border-radius: 6px;
+    padding: 10px 22px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:hover { background: #b81016; }
+</style>
+</head>
+<body>
+  <div class="caja">
+    <img src="../recursos/icono-256.png" alt="">
+    <h1>No se pudo conectar con el servidor</h1>
+    <p>Revisa la conexión a internet de esta PC. RYSA ERP vuelve a intentar en unos segundos.</p>
+    <button id="reintentar">Reintentar ahora</button>
+  </div>
+<script>
+  const volver = new URLSearchParams(location.search).get("volver") || "https://gruporysa.com/app";
+  const ir = () => { location.href = volver; };
+  document.getElementById("reintentar").addEventListener("click", ir);
+  setTimeout(ir, 15000);
+</script>
+</body>
+</html>
