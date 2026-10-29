@@ -159,15 +159,17 @@ imagen completa.
 
 ## Actualizaciones automáticas
 
-Ya está configurado `electron-updater` con proveedor genérico
-`https://gruporysa.com/escritorio/` (`build.publish` en `package.json`). Para
-activarlo:
+`electron-updater` usa el proveedor genérico
+`https://gruporysa.com/download/escritorio/` (`build.publish` en `package.json`),
+que es la carpeta pública `/opt/rysa/downloads/escritorio/` del VPS (la misma
+ruta `/download/` de las APK, sin cambios en nginx). Para publicar una versión:
 
 1. Subir `version` en `package.json` y compilar.
-2. Copiar `dist\latest.yml` y `dist\RYSA-ERP-Setup-<versión>.exe` a una carpeta
-   del servidor que nginx sirva como estáticos en `/escritorio/`. Hoy esa ruta cae
-   en el `index.html` del SPA, así que la comprobación falla en silencio y no
-   pasa nada.
+2. Copiar `dist\latest.yml`, `dist\RYSA-ERP-Setup-<versión>.exe` y su
+   `.blockmap` a `/opt/rysa/downloads/escritorio/`.
+
+La versión 1.0.0 buscaba en `/escritorio/` (ruta que no existe): esas
+instalaciones se actualizan una vez a mano con el instalador 1.1.0.
 
 La app busca actualizaciones al arrancar, las descarga en segundo plano y las
 instala al cerrarse. La carpeta de datos se conserva.

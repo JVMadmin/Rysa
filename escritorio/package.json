@@ -61,7 +61,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://gruporysa.com/escritorio/"
+        "url": "https://gruporysa.com/download/escritorio/"
       }
     ],
     "asarUnpack": [
