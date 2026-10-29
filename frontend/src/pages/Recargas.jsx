@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { fmtHora, fmtFechaHora } from "@/lib/fechas";
+import { imprimirDirecto } from "@/lib/impresion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -135,8 +136,14 @@ export default function Recargas() {
   };
 
   // Impresión POS80 del comprobante OFICIAL (vista @page 80mm auto-print).
-  const imprimirPos80 = () => {
+  const imprimirPos80 = async () => {
     if (!ticket?.id) return;
+    try {
+      const { data } = await api.post(`/sales/${ticket.id}/ticket-pdf`);
+      if (await imprimirDirecto({ tipo: "ticket", pdfUrl: data.url, nombre: `ticket-${ticket.folio || ""}.pdf` })) {
+        toast.success("Ticket enviado a la impresora."); return;
+      }
+    } catch (e) { toast.error(`No se pudo imprimir directo (${e.message || "error"}). Se abre el diálogo.`); }
     const f = document.createElement("iframe");
     f.style.position = "fixed";
     f.style.right = "0"; f.style.bottom = "0";

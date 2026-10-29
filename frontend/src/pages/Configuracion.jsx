@@ -15,6 +15,7 @@ import { ImageUpload } from "@/components/ImageUpload";
 import { fileUrl, API } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useConfirm } from "@/components/ConfirmProvider";
+import ImpresorasEquipo from "@/components/ImpresorasEquipo";
 import { Building2, MapPin, DollarSign, Store, Loader2, Plus, Trash2, Save, Receipt, DatabaseZap, HardDrive, Printer as PrinterIcon, Search, RefreshCw, CheckCircle2, XCircle, Landmark, Star, Pencil, Power, AlertTriangle } from "lucide-react";
 
 const LOGOS_OFICIALES = [
@@ -631,9 +632,11 @@ export default function Configuracion() {
 
         <TabsContent value="impresoras" className="pt-4">
           <div className="space-y-4">
+            {s && <ImpresorasEquipo settings={s} />}
             {s && (
               <div className="card-soft p-5 space-y-4">
-                <div className="flex items-center gap-2 text-slate-700 font-semibold"><PrinterIcon className="w-4 h-4 text-brand-600" /> Impresoras y salida de documentos</div>
+                <div className="flex items-center gap-2 text-slate-700 font-semibold"><PrinterIcon className="w-4 h-4 text-brand-600" /> Impresoras generales y salida de documentos</div>
+                <p className="-mt-2 text-[13px] text-slate-500">Valen para todos los equipos que no hayan elegido su propia impresora arriba.</p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-center justify-between border border-slate-200 rounded-md px-3 h-12">
                     <div>
@@ -645,7 +648,7 @@ export default function Configuracion() {
                   <div>
                     <Label className="text-xs uppercase tracking-wider text-slate-500">Servicio / puente de impresión local (opcional)</Label>
                     <Input value={s.printers?.bridge_url || ""} onChange={(e) => setBridgeUrl(e.target.value)} className="mt-1 font-mono" placeholder="http://localhost:9731" data-testid="cfg-bridge-url" />
-                    <p className="text-[11px] text-slate-400 mt-1">URL del puente que la app empaquetada expone para imprimir a impresoras USB/red (ej. <b>http://localhost:9731</b>). Con impresión por navegador no se requiere.</p>
+                    <p className="text-[11px] text-slate-400 mt-1">La app RYSA ERP para escritorio lo abre en <b>http://localhost:9731</b> mientras está abierta. Déjalo vacío para usar ese valor.</p>
                   </div>
                 </div>
 
@@ -678,7 +681,11 @@ export default function Configuracion() {
                 <div className="border-t pt-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs uppercase tracking-wider text-slate-500">Impresoras configuradas ({printers.length})</Label>
-                    <Button variant="outline" size="sm" onClick={() => addPrinter()} data-testid="cfg-agregar-impresora"><Plus className="w-3.5 h-3.5 mr-1" /> Agregar impresora</Button>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" onClick={() => addPrinter({ nombre: "Xprinter XP-N160II", tipo_conexion: "bridge" })} data-testid="cfg-agregar-xprinter"><Plus className="w-3.5 h-3.5 mr-1" /> Xprinter XP-N160II</Button>
+                      <Button variant="outline" size="sm" onClick={() => addPrinter({ nombre: "Brother DCP-L2660DW", tipo_conexion: "bridge" })} data-testid="cfg-agregar-brother"><Plus className="w-3.5 h-3.5 mr-1" /> Brother DCP-L2660DW</Button>
+                      <Button variant="outline" size="sm" onClick={() => addPrinter()} data-testid="cfg-agregar-impresora"><Plus className="w-3.5 h-3.5 mr-1" /> Otra impresora</Button>
+                    </div>
                   </div>
                   {printers.length === 0 && <p className="text-sm text-slate-400">Aún no hay impresoras configuradas. Agrega una o usa "Buscar impresoras".</p>}
                   {printers.map((p, i) => (

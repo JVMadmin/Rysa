@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { fmtFecha, fmtHora, fmtFechaHora, fechaLocalISO } from "@/lib/fechas";
+import { imprimirDirecto } from "@/lib/impresion";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -190,6 +191,13 @@ export default function Ventas() {
   const reimprimir = async (s) => {
     try {
       const { data } = await api.post(`/sales/${s.id}/ticket-pdf?regenerar=true`);
+      // Con la app de escritorio (o su puente) va directo a la impresora de
+      // tickets de este equipo; si no, el diálogo del navegador abajo.
+      try {
+        if (await imprimirDirecto({ tipo: "ticket", pdfUrl: data.url, nombre: `ticket-${s.folio}.pdf` })) {
+          toast.success(`Ticket ${s.folio} enviado a la impresora.`); return;
+        }
+      } catch (e) { toast.error(`No se pudo imprimir directo (${e.message}). Se abre el diálogo.`); }
       // Iframe oculto: carga el PDF y dispara el diálogo de impresión
       // automáticamente (1 copia por defecto; el usuario puede cambiarla
       // desde el diálogo del navegador). Evita que tenga que abrir el

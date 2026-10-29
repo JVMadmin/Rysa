@@ -7068,6 +7068,57 @@ async def sale_cotizacion_pdf(sale_id: str, regenerar: bool = False,
     return {"path": r["path"], "url": r["url"]}
 
 
+def _pdf_prueba_impresora(tipo: str, empresa: str) -> bytes:
+    """Hoja de prueba: ticket de 80 mm (72 mm útiles, regla y corte) o carta."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas
+    buf = io.BytesIO()
+    ahora = ahora_local().strftime("%d/%m/%Y %H:%M")
+    if tipo == "ticket":
+        w, h = 80 * mm, 110 * mm
+        c = canvas.Canvas(buf, pagesize=(w, h))
+        x0, util = 4 * mm, 72 * mm
+        y = h - 10 * mm
+        c.setFont("Helvetica-Bold", 12); c.drawCentredString(w / 2, y, empresa[:32]); y -= 7 * mm
+        c.setFont("Helvetica", 9); c.drawCentredString(w / 2, y, "PRUEBA DE IMPRESORA DE TICKETS"); y -= 5 * mm
+        c.drawCentredString(w / 2, y, ahora); y -= 8 * mm
+        # Regla de 72 mm: si se ve completa, el ancho está bien configurado.
+        c.setLineWidth(0.8); c.line(x0, y, x0 + util, y)
+        for i in range(0, 73, 8):
+            c.line(x0 + i * mm, y, x0 + i * mm, y + (3 if i % 24 == 0 else 1.5) * mm)
+        c.setFont("Helvetica", 6); c.drawString(x0, y - 3 * mm, "0"); c.drawRightString(x0 + util, y - 3 * mm, "72 mm")
+        y -= 10 * mm
+        c.setFont("Helvetica", 9)
+        for linea in ["Si la regla se ve completa y el", "texto no sale cortado, la impresora",
+                      "está lista para tickets de 80 mm.", "", "Xprinter XP-N160II: papel 80 mm,",
+                      "driver XP-80, corte automático."]:
+            c.drawCentredString(w / 2, y, linea); y -= 4.5 * mm
+        c.setFont("Helvetica-Bold", 10); c.drawCentredString(w / 2, 8 * mm, "— FIN —")
+    else:
+        w, h = letter
+        c = canvas.Canvas(buf, pagesize=letter)
+        c.setFont("Helvetica-Bold", 20); c.drawString(25 * mm, h - 30 * mm, empresa[:60])
+        c.setFont("Helvetica", 12)
+        c.drawString(25 * mm, h - 40 * mm, "Prueba de impresora tamaño carta")
+        c.drawString(25 * mm, h - 47 * mm, ahora)
+        c.setLineWidth(1); c.rect(15 * mm, 15 * mm, w - 30 * mm, h - 30 * mm)
+        c.drawString(25 * mm, h - 62 * mm, "Si el recuadro se ve completo, el papel y los márgenes están bien.")
+        c.drawString(25 * mm, h - 69 * mm, "Brother DCP-L2660DW: papel carta, driver de Brother.")
+    c.showPage(); c.save()
+    return buf.getvalue()
+
+
+@api.get("/printers/prueba.pdf")
+async def printers_prueba_pdf(tipo: str = "ticket", user: dict = Depends(get_current_user)):
+    """PDF de prueba para Configuración → Impresoras (ticket 80 mm o carta)."""
+    settings = await db.settings.find_one({"_id": "app"}, {"_id": 0, "empresa_nombre": 1}) or {}
+    pdf = await asyncio.to_thread(_pdf_prueba_impresora, "ticket" if tipo == "ticket" else "carta",
+                                  settings.get("empresa_nombre") or "Grupo RYSA")
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="prueba-{tipo}.pdf"'})
+
+
 @api.get("/sales/{sale_id}/ticket-print")
 async def sale_ticket_print(sale_id: str, request: Request):
     """Vista HTML de auto-impresión en PAPEL POS80 (@page 80mm) del ticket

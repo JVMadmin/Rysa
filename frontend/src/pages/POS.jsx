@@ -4,6 +4,7 @@ import { api, formatApiError, money, fileUrl, fotoProducto } from "@/lib/api";
 import { numeroALetras } from "@/lib/utils";
 import { fmtFecha, fmtFechaHora } from "@/lib/fechas";
 import { useConfirm } from "@/components/ConfirmProvider";
+import { imprimirDirecto } from "@/lib/impresion";
 import { useAuth } from "@/context/AuthContext";
 import { useCart, CartContext } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
@@ -280,23 +281,7 @@ export default function POS({ windowId, windowLabel, activo = true }) {
   }, [printClone]);
 
   // --- Impresoras configuradas: destino real por tipo de documento ---
-  const printerById = (id) => (settings.printers?.lista || []).find((p) => p.id === id);
-  const defaultPrinterId = (tipo) => (settings.printers?.predeterminadas || settings.printers?.defaults || {})[tipo];
   const ticketPdfRef = useRef(""); // PDF oficial de la venta actual (cache)
-
-  const enviarAlPuente = async (printer, extra = {}) => {
-    const base = String(settings.printers?.bridge_url || "").trim() || "http://localhost:9731";
-    const r = await fetch(base + "/print", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        printer: printer?.name || "", ip: printer?.ip || "", documento: "ticket",
-        ...extra,
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!r.ok) throw new Error("bridge_error");
-  };
 
   // Imprime el PDF REAL (el mismo archivo que se comparte por WhatsApp).
   // Para tickets usa la vista /ticket-print que fija @page 80mm (POS80 por
@@ -327,28 +312,17 @@ export default function POS({ windowId, windowLabel, activo = true }) {
     return ticketPdfRef.current;
   };
 
-  // Imprime el ticket según la impresora predeterminada para tickets.
-  // Puente local: recibe además el PDF oficial en base64. Sin puente, se
-  // imprime directamente el PDF real del documento. Un fallo de impresión
-  // NUNCA afecta la venta registrada.
+  // Ticket: directo a la impresora de tickets de este equipo (app de escritorio
+  // o su puente local); si este equipo solo tiene navegador, el PDF oficial a
+  // 80 mm con el diálogo del sistema. Un fallo de impresión NUNCA afecta la venta.
   const imprimirTicket = async () => {
     const pdfUrl = await asegurarTicketPdf();
-    const pr = printerById(defaultPrinterId("ticket") || defaultPrinterId("ticket_pos"));
-    if (pr && pr.tipo_conexion !== "browser") {
-      try {
-        let pdf_base64 = "";
-        if (pdfUrl) {
-          const resp = await api.get(pdfUrl.replace(/^.*\/api\/files\//, "/files/"), { responseType: "blob" });
-          pdf_base64 = await new Promise((res) => {
-            const fr = new FileReader();
-            fr.onload = () => res(String(fr.result).split(",")[1] || "");
-            fr.onerror = () => res("");
-            fr.readAsDataURL(resp.data);
-          });
-        }
-        await enviarAlPuente(pr, { pdf_base64, filename: `ticket-${ticket?.folio || ""}.pdf` });
-        setPrintFail(false); toast.success("Impresión enviada correctamente."); return true;
-      } catch { /* sin puente disponible: imprime el PDF real abajo */ }
+    try {
+      if (await imprimirDirecto({ tipo: "ticket", pdfUrl, nombre: `ticket-${ticket?.folio || ""}.pdf` }, settings)) {
+        setPrintFail(false); toast.success("Ticket enviado a la impresora."); return true;
+      }
+    } catch (e) {
+      toast.error(`No se pudo imprimir directo (${e.message}). Se abre el diálogo de impresión.`);
     }
     if (pdfUrl && imprimirPdfUrl(pdfUrl, { pos80: true })) { setPrintFail(false); return true; }
     try { printThermal(); setPrintFail(false); return true; }
@@ -367,6 +341,19 @@ export default function POS({ windowId, windowLabel, activo = true }) {
     finally { setPdfBusy(false); }
   };
   const descargarCarta = async () => { const url = await generarCartaPDF(); if (url) window.open(fileUrl(url), "_blank"); };
+  // Carta: directo a la impresora de carta de este equipo; si no, el PDF con el diálogo.
+  const imprimirCarta = async () => {
+    const url = await generarCartaPDF();
+    if (!url) return;
+    try {
+      if (await imprimirDirecto({ tipo: "carta", pdfUrl: url, nombre: `comprobante-${ticket?.folio || ""}.pdf` }, settings)) {
+        toast.success("Comprobante enviado a la impresora."); return;
+      }
+    } catch (e) {
+      toast.error(`No se pudo imprimir directo (${e.message}). Se abre el diálogo de impresión.`);
+    }
+    if (!imprimirPdfUrl(url)) printLetter();
+  };
   const compartirCarta = async () => {
     const url = await generarCartaPDF();
     if (!url) return;
@@ -1962,6 +1949,9 @@ export default function POS({ windowId, windowLabel, activo = true }) {
                   )}
 
                   <div className="letter-actions" style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center" }}>
+                    <Button size="sm" onClick={imprimirCarta} disabled={pdfBusy} data-testid="letter-imprimir">
+                      <Printer className="w-4 h-4 mr-1" /> Imprimir
+                    </Button>
                     <Button size="sm" variant="outline" onClick={descargarCarta} disabled={pdfBusy} data-testid="letter-descargar">
                       {pdfBusy ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Download className="w-4 h-4 mr-1" />} Descargar PDF
                     </Button>
@@ -2130,7 +2120,7 @@ export default function POS({ windowId, windowLabel, activo = true }) {
             </div>
           </div>
           <DialogFooter className="flex-wrap gap-2">
-            <Button onClick={printThermal} variant="outline" data-testid="ticket-print">
+            <Button onClick={imprimirTicket} variant="outline" data-testid="ticket-print">
               <Printer className="w-4 h-4 mr-1" /> Imprimir ticket
             </Button>
             <Button onClick={printInvoice} variant="outline" data-testid="invoice-print">
