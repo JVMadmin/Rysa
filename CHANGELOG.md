@@ -18,6 +18,16 @@ Cómo viaja un cambio:
    compila), respalda, migra y verifica; si falla vuelve sola a la anterior.
    Sin imágenes de GitHub (CI en rojo) no despliega; `--compilar` lo fuerza.
 
+## 2.0.3 · 2026-10-30
+
+- Ticket: cada renglón muestra cantidad x precio con IVA = importe con IVA (el
+  mismo precio del formato carta; antes el precio unitario salía sin IVA y no
+  cuadraba con el importe). Encabezado DESCRIPCION / IMPORTE y desglose
+  «Subtotal sin IVA», «IVA <tasa>», «TOTAL».
+- Cantidades con decimales (1.5 KG salía como 1 KG).
+- Fecha y hora locales en ticket y carta (salían en UTC).
+- Las líneas largas del ticket (dirección) se parten en vez de cortarse.
+
 ## 2.0.2 · 2026-10-30
 
 - Impresión desde el navegador corregida: el ticket salía en blanco (la vista

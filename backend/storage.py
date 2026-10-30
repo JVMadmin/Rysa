@@ -315,21 +315,57 @@ def _wrap_lines(text, max_w, size, font="Helvetica"):
     return lines
 
 
+def _precio_con_iva(it) -> float:
+    """Precio unitario que paga el cliente (con IVA), el mismo del formato carta."""
+    if it.get("precio_bruto") is not None:
+        return float(it["precio_bruto"] or 0)
+    p = float(it.get("precio", it.get("precio_neto", 0)) or 0)
+    if it.get("precio_incluye_iva"):
+        return p
+    return round(p * (1 + float(it.get("iva_tasa", 0) or 0) / 100), 2)
+
+
+def _importe_con_iva(it) -> float:
+    for k in ("importe_bruto", "importe"):
+        if it.get(k) is not None:
+            return float(it[k] or 0)
+    return float(it.get("cantidad", 0) or 0) * _precio_con_iva(it) - float(it.get("descuento", 0) or 0)
+
+
+def _cant(v) -> str:
+    """Cantidad sin ceros de más: 1, 1.5, 0.25 (antes 1.5 KG salía como 1 KG)."""
+    return f"{float(v or 0):.3f}".rstrip("0").rstrip(".") or "0"
+
+
+def _tasa_iva(sale) -> str:
+    """'16%' si todas las partidas llevan la misma tasa; '' si hay varias."""
+    tasas = {float(it.get("iva_tasa", 0) or 0) for it in (sale.get("items") or [])}
+    return f"{_cant(tasas.pop())}%" if len(tasas) == 1 else ""
+
+
+def _fecha_hora_local(sale) -> tuple:
+    """('29/10/2026', '18:23') en hora del negocio. La venta guarda la marca en
+    UTC (antes los documentos imprimían la hora UTC); las del sistema anterior
+    traen solo la fecha y su hora local aparte."""
+    from datetime import datetime
+    from deps import fecha_local, hora_local
+    marca = str(sale.get("fecha") or "")
+    dia = fecha_local(marca)
+    hora = hora_local(marca) or str(sale.get("hora") or "")
+    try:
+        dia = datetime.strptime(dia[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        pass
+    return dia, hora
+
+
 def _item_lines(it, max_w, size):
     """Cantidad real de líneas que ocupará un item en el ticket (para calcular
     la altura del papel sin que el contenido se corte)."""
     font = "Helvetica"
     desc = str(it.get("descripcion", "") or "")
     n = len(_wrap_lines(desc, max_w, size, font))
-    precio = _money(it.get("precio", 0))
-    importe = it.get("importe", it.get("importe_bruto",
-                 float(it.get("cantidad", 0) or 0) * float(it.get("precio", 0) or 0) -
-                 float(it.get("descuento", 0) or 0)))
-    fe = "  {0} {1}   {2}  {3}".format(int(it.get("cantidad", 0) or 0),
-                                      it.get("unidad", "PZA"),
-                                      _money(it.get("precio", it.get("importe", 0))),
-                                      _money(importe))
-    n += max(1, len(_wrap_lines(fe, max_w, size, font)))
+    n += 1  # cantidad × precio ........ importe
     if float(it.get("descuento", 0) or 0) > 0:
         n += 1
     comentario = str(it.get("comentario", "") or "").strip()
@@ -499,8 +535,11 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
         nonlocal y
         if align is None:
             align = "center" if center else "left"
-        _apply_align(c, y, w, text, align, sz or (9 if size == "carta" else 7), bold)
-        y -= line_h
+        tam = sz or (9 if size == "carta" else 7)
+        # Las líneas largas (p. ej. la dirección) se parten en vez de salirse del papel.
+        for parte in _wrap_lines(text, w - 8 * mm, tam, "Helvetica-Bold" if bold else "Helvetica") or [""]:
+            _apply_align(c, y, w, parte, align, tam, bold)
+            y -= line_h
 
     def sep():
         nonlocal y
@@ -509,7 +548,11 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
 
     def campos_items():
         nonlocal y
-        _apply_align(c, y, w, "DESCRIPCION", "center", 8, True)
+        # Cada partida: «cantidad x precio con IVA ...... importe con IVA», el
+        # mismo precio del formato carta. Antes el precio salía sin IVA y el
+        # importe con IVA (1 x $44.44 = $48.00 no cuadraba para el cliente).
+        _apply_align(c, y, w, "DESCRIPCION", "left", 8, True)
+        _apply_align(c, y, w, "IMPORTE", "right", 8, True)
         y -= line_h
         sep()
         for it in sale.get("items", []):
@@ -518,15 +561,12 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
             for dl in _wrap_lines(it.get("descripcion", ""), max_text_w, desc_font):
                 _apply_align(c, y, w, dl, "left", desc_font, False)
                 y -= line_h
-            cant = it.get("cantidad", 0)
-            precio = it.get("precio", 0)
             unidad = str(it.get("unidad", "PZA"))
-            importe = it.get("importe", it.get("importe_bruto", cant * precio - float(it.get("descuento", 0) or 0)))
             desc_un = it.get("descuento", 0)
-            fe = f"  {int(cant)} {unidad}   {_money(precio)}  {_money(importe)}"
-            for fl in _wrap_lines(fe, max_text_w, 7):
-                _apply_align(c, y, w, fl, "left", 7, False)
-                y -= line_h
+            fe = f"  {_cant(it.get('cantidad'))} {unidad} x {_money(_precio_con_iva(it))}"
+            _apply_align(c, y, w, fe, "left", 7, False)
+            _apply_align(c, y, w, _money(_importe_con_iva(it)), "right", 7, False)
+            y -= line_h
             if float(desc_un or 0) > 0:
                 _apply_align(c, y, w, f"    Descuento -{_money(desc_un)}", "left", 7, False)
                 y -= line_h
@@ -612,9 +652,9 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
                 elif tipo == "folio":
                     L(f"FOLIO: {sale.get('folio', '')}", bold=True, sz=fsz)
                 elif tipo == "fecha":
-                    L(f"Fecha: {str(sale.get('fecha', ''))[:16].replace('T', ' ')}", sz=fsz)
+                    L(f"Fecha: {_fecha_hora_local(sale)[0]}", sz=fsz)
                 elif tipo == "hora":
-                    L(f"Hora: {sale.get('hora') or str(sale.get('fecha', ''))[11:16]}", sz=fsz)
+                    L(f"Hora: {_fecha_hora_local(sale)[1]}", sz=fsz)
                 elif tipo == "cliente":
                     L(f"Cliente: {sale.get('cliente_nombre', 'Público General')}", sz=fsz)
                 elif tipo == "articulos":
@@ -629,9 +669,10 @@ def build_ticket_pdf(sale: dict, settings: dict) -> bytes:
                     _apply_align(c, y, w, "DESCRIPCION", "center", 8, True)
                     y -= line_h
                 elif tipo == "subtotal":
-                    L(f"Subtotal: {_money(sale.get('subtotal'))}", align=align, sz=fsz)
+                    L(f"Subtotal sin IVA: {_money(sale.get('subtotal'))}", align=align, sz=fsz)
                 elif tipo == "iva":
-                    L(f"IVA: {_money(sale.get('iva_total'))}", align=align, sz=fsz)
+                    tasa = _tasa_iva(sale)
+                    L(f"IVA{' ' + tasa if tasa else ''}: {_money(sale.get('iva_total'))}", align=align, sz=fsz)
                 elif tipo == "descuento":
                     L(f"Descuento: -{_money(sale.get('descuento', sale.get('descuento_total'))) }", align=align, sz=fsz)
                 elif tipo == "letras":
@@ -796,8 +837,8 @@ def build_letter_pdf(sale: dict, settings: dict, cliente: dict = None) -> bytes:
         "Crédito" if sale.get("condicion") == "credito" else "Contado")
     metas = [
         ("Folio", sale.get("folio") or ""),
-        ("Fecha", str(sale.get("fecha") or "")[:10]),
-        ("Hora", sale.get("hora") or ""),
+        ("Fecha", _fecha_hora_local(sale)[0]),
+        ("Hora", _fecha_hora_local(sale)[1]),
         ("Vendedor", sale.get("vendedor_nombre") or sale.get("usuario_nombre") or ""),
         ("Método de pago", metodo_txt),
     ]

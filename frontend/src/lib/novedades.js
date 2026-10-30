@@ -6,6 +6,14 @@
 //   PARCHE correcciones sin funciones nuevas
 export const NOVEDADES = [
   {
+    version: "2.0.3",
+    fecha: "2026-10-30",
+    cambios: [
+      "Ticket más claro: cada producto con su precio con IVA y el importe; al final, subtotal sin IVA, IVA con su tasa y total.",
+      "Las cantidades a granel salen con decimales (1.5 KG) y la fecha y hora del ticket y la carta son las de México.",
+    ],
+  },
+  {
     version: "2.0.2",
     fecha: "2026-10-30",
     cambios: [
