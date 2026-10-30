@@ -117,7 +117,7 @@ revertir() {
   err "Revirtiendo a la versión anterior (${PREV_COMMIT:0:7})..."
   git checkout -q --detach "$PREV_COMMIT" || true
   imagenes_revertir
-  docker compose up -d --no-build backend frontend nginx \
+  { docker compose up -d --no-build backend frontend nginx && imagenes_recrear; } \
     || { err "No se pudo revertir: revisar a mano"; return 0; }
   if wait_healthy backend 180 && wait_healthy frontend 60 && wait_healthy nginx 90; then
     printf '%s\n' "$PREV_DEPLOYED" > "$ROOT/.deployed"
@@ -260,7 +260,7 @@ if [[ -z "$CHECK_ONLY" ]]; then
 
   # ============ 5) Up ============================================
   step "5) docker compose up -d"
-  docker compose up -d || fallar "DEPLOY FAILED en docker compose up"
+  { docker compose up -d && imagenes_recrear; } || fallar "DEPLOY FAILED en docker compose up"
 fi
 
 # ============ 6) Esperar cadena de healthchecks =================

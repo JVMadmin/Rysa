@@ -14,6 +14,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+RYSA_COMPOSE="docker compose -p rysa -f docker-compose.yml --env-file .env.docker"
 # shellcheck source=imagenes_ci.sh
 . scripts/imagenes_ci.sh
 
@@ -25,5 +26,6 @@ imagenes_ci_esperar "$SHA" "${ESPERA_CI:-0}" || {
 }
 imagenes_guardar_anterior
 imagenes_ci_activar "$SHA"
-docker compose -p rysa -f docker-compose.yml --env-file .env.docker up -d --no-build backend frontend nginx
-docker compose -p rysa -f docker-compose.yml --env-file .env.docker ps
+$RYSA_COMPOSE up -d --no-build backend frontend nginx
+imagenes_recrear
+$RYSA_COMPOSE ps

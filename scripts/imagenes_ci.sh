@@ -14,6 +14,7 @@
 
 RYSA_GHCR="${RYSA_GHCR:-ghcr.io/jvmadmin/rysa}"
 RYSA_SERVICIOS=(backend frontend nginx)
+RYSA_COMPOSE="${RYSA_COMPOSE:-docker compose}"
 
 # imagenes_ci_descargar <commit completo>: 0 si GitHub ya publicó las tres.
 imagenes_ci_descargar() {
@@ -55,7 +56,20 @@ imagenes_ci_activar() {
   done
 }
 
-# La anterior vuelve a ser latest (después: docker compose up -d --no-build).
+# Compose no siempre recrea un contenedor cuando solo cambió a qué imagen
+# apunta la etiqueta: se recrea cada servicio que no corre rysa-<s>:latest.
+imagenes_recrear() {
+  local s actual nueva
+  for s in "${RYSA_SERVICIOS[@]}"; do
+    actual=$(docker inspect -f '{{.Image}}' "rysa_$s" 2>/dev/null || true)
+    nueva=$(docker image inspect -f '{{.Id}}' "rysa-$s:latest" 2>/dev/null || true)
+    [[ -n "$nueva" && "$actual" != "$nueva" ]] || continue
+    echo "  recreando $s (imagen nueva)"
+    $RYSA_COMPOSE up -d --no-deps --force-recreate "$s" || return 1
+  done
+}
+
+# La anterior vuelve a ser latest (después: up -d e imagenes_recrear).
 imagenes_revertir() {
   local s
   for s in "${RYSA_SERVICIOS[@]}"; do
