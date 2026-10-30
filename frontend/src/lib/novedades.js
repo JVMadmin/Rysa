@@ -6,6 +6,13 @@
 //   PARCHE correcciones sin funciones nuevas
 export const NOVEDADES = [
   {
+    version: "2.0.4",
+    fecha: "2026-10-30",
+    cambios: [
+      "La nota de venta carta muestra la fecha y hora de México.",
+    ],
+  },
+  {
     version: "2.0.3",
     fecha: "2026-10-30",
     cambios: [

@@ -300,7 +300,9 @@ def contexto_venta(sale: dict, settings: dict, cliente: dict | None = None,
     articulos = sum(_num(i.get("cantidad")) for i in items)
     tasas = sorted({_num(i.get("iva_tasa")) for i in items if _num(i.get("iva_tasa")) > 0})
     es_cot = sale.get("tipo_venta") == "cotizacion" or sale.get("estado") == "cotizacion"
-    fecha = str(sale.get("fecha") or "")
+    # Fecha y hora del negocio (la venta guarda UTC; antes la carta decía 19:18
+    # por una venta de las 13:18).
+    dia, hora = storage._fecha_hora_local(sale)
     try:
         letra = storage._num_a_letras(sale.get("total"))
     except Exception:
@@ -308,8 +310,8 @@ def contexto_venta(sale: dict, settings: dict, cliente: dict | None = None,
     doc = {
         "id": sale.get("id") or "", "folio": sale.get("folio") or "", "serie": sale.get("serie") or "",
         "titulo": "COTIZACIÓN" if es_cot else "NOTA DE VENTA",
-        "fecha": fecha[:10], "hora": sale.get("hora") or fecha[11:16],
-        "fecha_hora": (fecha[:10] + " " + (sale.get("hora") or fecha[11:16])).strip(),
+        "fecha": dia, "hora": hora,
+        "fecha_hora": f"{dia} {hora}".strip(),
         "fecha_vencimiento": str(sale.get("fecha_vencimiento") or "")[:10],
         "condicion": sale.get("condicion") or "contado",
         "condicion_txt": "Crédito" if sale.get("condicion") == "credito" else "Contado",

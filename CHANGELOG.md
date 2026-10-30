@@ -18,6 +18,11 @@ Cómo viaja un cambio:
    compila), respalda, migra y verifica; si falla vuelve sola a la anterior.
    Sin imágenes de GitHub (CI en rojo) no despliega; `--compilar` lo fuerza.
 
+## 2.0.4 · 2026-10-30
+
+- Nota de venta carta (plantilla del Editor de formatos): fecha y hora locales
+  (salían en UTC: 19:18 por una venta de las 13:18).
+
 ## 2.0.3 · 2026-10-30
 
 - Ticket: cada renglón muestra cantidad x precio con IVA = importe con IVA (el
