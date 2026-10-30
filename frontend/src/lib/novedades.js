@@ -10,6 +10,7 @@ export const NOVEDADES = [
     fecha: "2026-10-30",
     cambios: [
       "La nota de venta carta muestra la fecha y hora de México.",
+      "Usuarios: aviso de cuenta bloqueada por intentos fallidos y botón Desbloquear (solo administradores y desarrolladores).",
     ],
   },
   {

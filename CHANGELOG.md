@@ -22,6 +22,10 @@ Cómo viaja un cambio:
 
 - Nota de venta carta (plantilla del Editor de formatos): fecha y hora locales
   (salían en UTC: 19:18 por una venta de las 13:18).
+- Cuentas bloqueadas por intentos fallidos: indicador «Bloqueada» y botón
+  «Desbloquear» en Usuarios, solo para administradores y desarrolladores. Las
+  cuentas que no son de administrador quedan bloqueadas hasta que las
+  desbloqueen; las de administrador, 15 minutos.
 
 ## 2.0.3 · 2026-10-30
 

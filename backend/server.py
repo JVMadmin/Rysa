@@ -966,7 +966,10 @@ REFRESH_COOKIE = "refresh_token"
 LOGIN_IP_WINDOW_SECONDS = 60            # ventana de conteo por IP
 LOGIN_IP_MAX_FAILURES = 8               # máximo de fallos por minuto y por IP
 LOGIN_USER_MAX_FAILURES = 8             # fallos acumulados para bloquear el usuario
-LOGIN_USER_LOCK_MINUTES = 15            # duración del bloqueo temporal
+LOGIN_USER_LOCK_MINUTES = 15            # bloqueo temporal de cuentas de administrador
+# Las demás cuentas quedan bloqueadas hasta que un administrador o desarrollador
+# las desbloquee (Usuarios → Desbloquear). Las de administrador solo 15 min:
+# si no, cualquiera que conozca el correo del dueño podría dejarlo fuera.
 _CLEANUP_LAST_RUN = [0.0]
 
 
@@ -1021,7 +1024,8 @@ async def _cleanup_login_attempts():
         cutoff_ip = (now_utc() - timedelta(minutes=30)).isoformat()
         cutoff_user = (now_utc() - timedelta(hours=24)).isoformat()
         await db.login_attempts.delete_many({"kind": "ip", "last_at": {"$lt": cutoff_ip}})
-        await db.login_attempts.delete_many({"kind": "user", "last_at": {"$lt": cutoff_user}})
+        await db.login_attempts.delete_many({"kind": "user", "last_at": {"$lt": cutoff_user},
+                                             "bloqueada": {"$ne": True}})
     except Exception:
         pass
 
@@ -1039,6 +1043,10 @@ async def check_login_rate_limit(ip: str, email: str):
                                 detail="Demasiados intentos. Intenta de nuevo en un minuto.")
     if email:
         u = await db.login_attempts.find_one({"_id": "user:" + email.lower()})
+        if u and u.get("bloqueada"):
+            raise HTTPException(status_code=423,
+                                detail="Tu cuenta está bloqueada por demasiados intentos fallidos. "
+                                       "Pide a un administrador que la desbloquee.")
         if u:
             lu = _iso_to_dt(u.get("locked_until"))
             if lu and lu > now:
@@ -1046,7 +1054,8 @@ async def check_login_rate_limit(ip: str, email: str):
                                     detail="Cuenta temporalmente bloqueada por demasiados intentos. Intenta en unos minutos.")
 
 
-async def record_failed_login(ip: str, email: str):
+async def record_failed_login(ip: str, email: str, cuenta: Optional[dict] = None):
+    """`cuenta`: el usuario de ese correo (None si no existe)."""
     now = now_utc()
     ip_key = "ip:" + ip
     doc = await db.login_attempts.find_one({"_id": ip_key})
@@ -1065,13 +1074,28 @@ async def record_failed_login(ip: str, email: str):
         ukey = "user:" + email.lower()
         u = await db.login_attempts.find_one({"_id": ukey})
         fails = int((u or {}).get("fails", 0)) + 1
-        locked_until = None
+        cambios = {"kind": "user", "email": email.lower(), "fails": fails, "locked_until": None,
+                   "last_at": iso_now()}
         if fails >= LOGIN_USER_MAX_FAILURES:
-            locked_until = (now + timedelta(minutes=LOGIN_USER_LOCK_MINUTES)).isoformat()
-        await db.login_attempts.update_one({"_id": ukey},
-                                           {"$set": {"kind": "user", "fails": fails,
-                                                     "locked_until": locked_until, "last_at": iso_now()}},
-                                           upsert=True)
+            if cuenta and not es_rol_privilegiado(cuenta.get("role", "")):
+                cambios.update(bloqueada=True, bloqueada_at=(u or {}).get("bloqueada_at") or iso_now())
+            else:
+                cambios["locked_until"] = (now + timedelta(minutes=LOGIN_USER_LOCK_MINUTES)).isoformat()
+        await db.login_attempts.update_one({"_id": ukey}, {"$set": cambios}, upsert=True)
+
+
+async def bloqueos_de_cuentas() -> dict:
+    """{correo: {"tipo": "manual"|"temporal", "fallos", "desde"|"hasta"}} de las
+    cuentas bloqueadas ahora (indicador de Usuarios)."""
+    ahora = now_utc()
+    out = {}
+    for d in await db.login_attempts.find({"kind": "user"}).to_list(1000):
+        correo = d.get("email") or str(d.get("_id", ""))[len("user:"):]
+        if d.get("bloqueada"):
+            out[correo] = {"tipo": "manual", "fallos": d.get("fails", 0), "desde": d.get("bloqueada_at")}
+        elif (_iso_to_dt(d.get("locked_until")) or ahora) > ahora:
+            out[correo] = {"tipo": "temporal", "fallos": d.get("fails", 0), "hasta": d.get("locked_until")}
+    return out
 
 
 async def reset_login_failures(email: str):
@@ -1094,7 +1118,7 @@ async def login(data: LoginInput, response: Response, request: Request):
     user = await db.users.find_one({"email": email})
     # bcrypt tarda ~250 ms en 1 vCPU: en un hilo para no congelar a los demás.
     if not user or not await asyncio.to_thread(verify_password, data.password, user["password_hash"]):
-        await record_failed_login(ip, email)
+        await record_failed_login(ip, email, user)
         await log_audit({"id": None, "name": email or "?"}, "LOGIN_FAILURE", "auth",
                         detalle=(email or "sin correo"), ip=ip, user_agent=ua)
         raise HTTPException(status_code=401, detail="Credenciales incorrectas")
@@ -1263,9 +1287,26 @@ def _validar_modulos(modulos: List[str]):
 async def list_users(user: dict = Depends(require_permission("usuarios.ver"))):
     users = await db.users.find({}, {"_id": 0, "password_hash": 0}).to_list(500)
     con_codigo = await _autz.usuarios_con_codigo()
+    bloqueos = await bloqueos_de_cuentas()
     for u in users:
         u["codigo_autorizacion"] = u.get("id") in con_codigo
+        u["bloqueo"] = bloqueos.get(str(u.get("email", "")).lower())
     return users
+
+
+@api.post("/users/{user_id}/desbloquear")
+async def desbloquear_usuario(user_id: str, user: dict = Depends(get_current_user)):
+    """Quita el bloqueo por intentos fallidos. Solo administradores y
+    desarrolladores (aunque otro rol tenga el módulo de Usuarios)."""
+    if not es_rol_privilegiado(user.get("role", "")):
+        raise HTTPException(403, "Solo un administrador o desarrollador puede desbloquear cuentas")
+    target = await db.users.find_one({"id": user_id}, {"_id": 0, "email": 1, "name": 1})
+    if not target:
+        raise HTTPException(404, "Usuario no encontrado")
+    await reset_login_failures(target["email"])
+    await log_audit(user, "desbloquear", "usuario", user_id,
+                    f"Cuenta {target['email']} desbloqueada (intentos fallidos)")
+    return {"ok": True}
 
 @api.post("/users")
 async def create_user(data: UserCreate, user: dict = Depends(require_permission("usuarios.crear"))):

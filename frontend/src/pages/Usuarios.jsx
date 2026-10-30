@@ -12,7 +12,8 @@ import { Switch } from "@/components/ui/switch";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { etiquetaRol } from "@/lib/etiquetas";
 import { toast } from "sonner";
-import { Plus, Loader2, UserCog, Pencil, KeyRound, Eye, EyeOff } from "lucide-react";
+import { fmtFechaHora, fmtHora } from "@/lib/fechas";
+import { Plus, Loader2, UserCog, Pencil, KeyRound, Eye, EyeOff, Lock, LockOpen } from "lucide-react";
 
 const FALLBACK_ROLES = [
   ["admin", "Administrador"],
@@ -42,8 +43,10 @@ const FALLBACK_MODULOS = [
 const ADMIN_ROLES = ["admin", "admin_propietario", "admin_desarrollador"];
 
 export default function Usuarios({ embedded = false }) {
-  const { can } = useAuth();
+  const { can, user: yo } = useAuth();
   const canAssign = can("usuarios.admin");
+  // Desbloquear cuentas: solo administradores y desarrolladores.
+  const puedeDesbloquear = ADMIN_ROLES.includes(yo?.role);
   const [catalog, setCatalog] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +106,14 @@ export default function Usuarios({ embedded = false }) {
     catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
+  const desbloquear = async (u) => {
+    try {
+      await api.post(`/users/${u.id}/desbloquear`);
+      toast.success(`${u.name} ya puede iniciar sesión`);
+      load();
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
+  };
+
   const esAdminRole = (r) => ADMIN_ROLES.includes(r);
 
   return (
@@ -125,7 +136,21 @@ export default function Usuarios({ embedded = false }) {
             {loading && <tr><td colSpan={6} className="p-10 text-center"><Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-600" /></td></tr>}
             {!loading && rows.map((u) => (
               <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="p-3 font-medium">{u.name}</td><td className="p-3 text-slate-500">{u.email}</td>
+                <td className="p-3 font-medium">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {u.name}
+                    {u.bloqueo && (
+                      <span data-testid={`bloqueada-${u.email}`}
+                        title={`${u.bloqueo.fallos} intentos fallidos · ${u.bloqueo.tipo === "manual"
+                          ? `bloqueada desde ${fmtFechaHora(u.bloqueo.desde)}. Solo un administrador o desarrollador puede desbloquearla.`
+                          : `se desbloquea sola a las ${fmtHora(u.bloqueo.hasta)}`}`}
+                        className="flex items-center gap-1 rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 ring-1 ring-red-200">
+                        <Lock className="h-3 w-3" /> Bloqueada{u.bloqueo.tipo === "temporal" && ` hasta ${fmtHora(u.bloqueo.hasta)}`}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="p-3 text-slate-500">{u.email}</td>
                 <td className="p-3">
                   <Badge variant={esAdminRole(u.role) ? "default" : "outline"} className="uppercase">
                     {etiquetaRol(u.role)}
@@ -148,7 +173,11 @@ export default function Usuarios({ embedded = false }) {
                   </div>
                 </td>
                 <td className="p-3"><Switch checked={u.active !== false} onCheckedChange={() => toggleActive(u)} aria-label={u.active !== false ? `Desactivar a ${u.name}` : `Activar a ${u.name}`} title={u.active !== false ? "Desactivar usuario" : "Activar usuario"} /></td>
-                <td className="p-3 text-right">
+                <td className="p-3 text-right whitespace-nowrap">
+                  {u.bloqueo && puedeDesbloquear && (
+                    <Button size="sm" variant="outline" onClick={() => desbloquear(u)} className="mr-1 border-red-200 text-red-700 hover:bg-red-50"
+                      data-testid={`desbloquear-${u.email}`}><LockOpen className="mr-1 h-4 w-4" /> Desbloquear</Button>
+                  )}
                   <Button size="icon" variant="ghost" onClick={() => openEdit(u)} title="Editar usuario" aria-label="Editar usuario" data-testid={`edit-user-${u.email}`}><Pencil className="w-4 h-4" /></Button>
                 </td>
               </tr>
