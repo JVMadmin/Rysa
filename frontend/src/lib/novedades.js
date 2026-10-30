@@ -6,6 +6,13 @@
 //   PARCHE correcciones sin funciones nuevas
 export const NOVEDADES = [
   {
+    version: "2.0.2",
+    fecha: "2026-10-30",
+    cambios: [
+      "Tickets y comprobantes carta vuelven a imprimir desde el navegador (antes salían en blanco o no abría el diálogo).",
+    ],
+  },
+  {
     version: "2.0.1",
     fecha: "2026-10-29",
     cambios: [

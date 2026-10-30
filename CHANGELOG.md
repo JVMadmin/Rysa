@@ -18,6 +18,12 @@ Cómo viaja un cambio:
    compila), respalda, migra y verifica; si falla vuelve sola a la anterior.
    Sin imágenes de GitHub (CI en rojo) no despliega; `--compilar` lo fuerza.
 
+## 2.0.2 · 2026-10-30
+
+- Impresión desde el navegador corregida: el ticket salía en blanco (la vista
+  de impresión apuntaba a la dirección interna del servidor) y la carta del
+  POS no abría el diálogo. Un solo camino de impresión para todo PDF.
+
 ## 2.0.1 · 2026-10-29
 
 - Las imágenes se compilan y prueban en GitHub; el servidor y la PC local solo
