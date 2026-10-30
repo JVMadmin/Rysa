@@ -1034,13 +1034,8 @@ async def check_login_rate_limit(ip: str, email: str):
     if os.environ.get("LOGIN_RATE_LIMIT", "on").lower() == "off":
         return
     now = now_utc()
-    doc = await db.login_attempts.find_one({"_id": "ip:" + ip})
-    if doc:
-        ws = _iso_to_dt(doc.get("window_start"))
-        if (ws and (now - ws) < timedelta(seconds=LOGIN_IP_WINDOW_SECONDS)
-                and int(doc.get("count", 0)) >= LOGIN_IP_MAX_FAILURES):
-            raise HTTPException(status_code=429,
-                                detail="Demasiados intentos. Intenta de nuevo en un minuto.")
+    # Primero el bloqueo de la cuenta: es el aviso que le sirve a quien entra
+    # (el límite por IP le diría «espera un minuto» y luego seguiría bloqueada).
     if email:
         u = await db.login_attempts.find_one({"_id": "user:" + email.lower()})
         if u and u.get("bloqueada"):
@@ -1052,6 +1047,13 @@ async def check_login_rate_limit(ip: str, email: str):
             if lu and lu > now:
                 raise HTTPException(status_code=429,
                                     detail="Cuenta temporalmente bloqueada por demasiados intentos. Intenta en unos minutos.")
+    doc = await db.login_attempts.find_one({"_id": "ip:" + ip})
+    if doc:
+        ws = _iso_to_dt(doc.get("window_start"))
+        if (ws and (now - ws) < timedelta(seconds=LOGIN_IP_WINDOW_SECONDS)
+                and int(doc.get("count", 0)) >= LOGIN_IP_MAX_FAILURES):
+            raise HTTPException(status_code=429,
+                                detail="Demasiados intentos. Intenta de nuevo en un minuto.")
 
 
 async def record_failed_login(ip: str, email: str, cuenta: Optional[dict] = None):

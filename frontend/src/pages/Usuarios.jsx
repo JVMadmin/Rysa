@@ -115,11 +115,22 @@ export default function Usuarios({ embedded = false }) {
   };
 
   const esAdminRole = (r) => ADMIN_ROLES.includes(r);
+  const bloqueadas = rows.filter((u) => u.bloqueo).length;
+  const resumen = (
+    <p className="text-slate-500 text-sm">
+      {rows.length} usuarios
+      {bloqueadas > 0 && (
+        <span className="ml-2 inline-flex items-center gap-1 font-semibold text-red-700" data-testid="usuarios-bloqueados">
+          <Lock className="h-3.5 w-3.5" /> {bloqueadas} {bloqueadas === 1 ? "bloqueada" : "bloqueadas"}
+        </span>
+      )}
+    </p>
+  );
 
   return (
     <div className="space-y-5" data-testid="usuarios-page">
       <div className="flex items-center justify-between">
-        <div>{!embedded && <><h1 className="font-display text-2xl font-black tracking-tight">Usuarios y Roles</h1><p className="text-slate-500 text-sm">{rows.length} usuarios</p></>}{embedded && <p className="text-slate-500 text-sm">{rows.length} usuarios</p>}</div>
+        <div>{!embedded && <h1 className="font-display text-2xl font-black tracking-tight">Usuarios y Roles</h1>}{resumen}</div>
         <Button onClick={openNew} className="bg-brand-600 hover:bg-brand-700" data-testid="nuevo-usuario-btn"><Plus className="w-4 h-4 mr-1" /> Nuevo usuario</Button>
       </div>
 
