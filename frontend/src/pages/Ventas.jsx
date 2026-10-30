@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { fmtFecha, fmtHora, fmtFechaHora, fechaLocalISO } from "@/lib/fechas";
-import { imprimirDirecto } from "@/lib/impresion";
+import { imprimirPdf } from "@/lib/impresion";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -191,38 +191,9 @@ export default function Ventas() {
   const reimprimir = async (s) => {
     try {
       const { data } = await api.post(`/sales/${s.id}/ticket-pdf?regenerar=true`);
-      // Con la app de escritorio (o su puente) va directo a la impresora de
-      // tickets de este equipo; si no, el diálogo del navegador abajo.
-      try {
-        if (await imprimirDirecto({ tipo: "ticket", pdfUrl: data.url, nombre: `ticket-${s.folio}.pdf` })) {
-          toast.success(`Ticket ${s.folio} enviado a la impresora.`); return;
-        }
-      } catch (e) { toast.error(`No se pudo imprimir directo (${e.message}). Se abre el diálogo.`); }
-      // Iframe oculto: carga el PDF y dispara el diálogo de impresión
-      // automáticamente (1 copia por defecto; el usuario puede cambiarla
-      // desde el diálogo del navegador). Evita que tenga que abrir el
-      // PDF en otra pestaña y pulsar Ctrl+P.
-      const url = fileUrl(data.url);
-      const iframe = document.createElement("iframe");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.src = url;
-      iframe.title = `ticket-${s.folio}`;
-      iframe.onload = () => {
-        try { iframe.contentWindow && iframe.contentWindow.focus(); } catch {}
-        // Dar un tick para que el visor del PDF termine de cargar
-        setTimeout(() => {
-          try { iframe.contentWindow && iframe.contentWindow.print(); }
-          catch (e) { window.open(url, "_blank"); }
-        }, 400);
-      };
-      document.body.appendChild(iframe);
-      // Limpieza tras 60s (suficiente para que termine la impresión)
-      setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 60000);
+      // Directo a la impresora de tickets de este equipo o con el diálogo.
+      await imprimirPdf({ tipo: "ticket", pdfUrl: data.url, nombre: `ticket-${s.folio}.pdf`,
+        mensaje: `Ticket ${s.folio} enviado a la impresora.` });
     } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 

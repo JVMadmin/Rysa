@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { api, formatApiError } from "@/lib/api";
+import { formatApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { Loader2, Monitor, Printer as PrinterIcon, RefreshCw, Receipt, FileText } from "lucide-react";
 import {
-  PERFILES, detectarModo, listarImpresoras, leerEquipo, guardarEquipo, imprimirDirecto, imprimirConNavegador,
+  PERFILES, detectarModo, listarImpresoras, leerEquipo, guardarEquipo, imprimirPdf,
 } from "@/lib/impresion";
 
 // Impresoras de ESTE equipo: cada PC elige su impresora de tickets y la de
@@ -69,13 +69,8 @@ export default function ImpresorasEquipo({ settings }) {
     setBusy("prueba-" + clave);
     const url = `/api/printers/prueba.pdf?tipo=${clave}`;
     try {
-      const enviado = await imprimirDirecto({ tipo: clave, pdfUrl: url, nombre: `prueba-${clave}.pdf` }, settings);
-      if (enviado) {
-        toast.success("Prueba enviada a la impresora.");
-      } else {
-        const { data } = await api.get(`/printers/prueba.pdf`, { params: { tipo: clave }, responseType: "blob" });
-        imprimirConNavegador(URL.createObjectURL(data));
-      }
+      await imprimirPdf({ tipo: clave, pdfUrl: url, nombre: `prueba-${clave}.pdf`,
+        mensaje: "Prueba enviada a la impresora." }, settings);
     } catch (e) {
       toast.error(e?.message ? `No se pudo imprimir: ${e.message}` : formatApiError(e.response?.data?.detail));
     } finally {

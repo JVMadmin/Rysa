@@ -12,6 +12,7 @@
 // mismas impresoras tienen nombres distintos en cada PC), con respaldo en las
 // predeterminadas generales de Configuración → Impresoras.
 import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 const CLAVE_EQUIPO = "rysa_impresoras_equipo";
 const PUENTE_DEFAULT = "http://localhost:9731";
@@ -128,21 +129,50 @@ export async function imprimirDirecto({ tipo, pdfUrl, copias = 1, nombre = "" },
   return true;
 }
 
+/** PDF del ERP como blob: del mismo origen que la página, así el visor de PDF
+ * del navegador deja imprimirlo desde el iframe (y nunca apunta a una URL
+ * interna del servidor). */
+async function pdfBlobUrl(pdfUrl) {
+  const ruta = pdfUrl.replace(/^.*\/api\//, "/");
+  const { data } = await api.get(ruta, { responseType: "blob" });
+  return URL.createObjectURL(new Blob([data], { type: "application/pdf" }));
+}
+
 /**
- * Respaldo del navegador: abre el documento en un iframe oculto y lanza el
- * diálogo. `seImprimeSola`: la vista ya llama a window.print() (p. ej.
- * /ticket-print, que fija la hoja a 80 mm).
+ * Respaldo del navegador: carga el PDF en un iframe oculto y abre el diálogo
+ * de impresión cuando el visor terminó de dibujarlo. Si el navegador no deja
+ * imprimir desde el iframe, abre el PDF en otra pestaña.
  */
-export function imprimirConNavegador(src, { seImprimeSola = false } = {}) {
+export function imprimirConNavegador(src) {
   const f = document.createElement("iframe");
   Object.assign(f.style, { position: "fixed", right: "0", bottom: "0", width: "1px", height: "1px", border: "0" });
   f.src = src;
   f.onload = () => {
-    if (!seImprimeSola) {
-      try { f.contentWindow?.focus(); f.contentWindow?.print(); } catch { /* origen distinto: se abre el visor */ }
-    }
-    setTimeout(() => f.remove(), 60000);
+    setTimeout(() => {
+      try { f.contentWindow.focus(); f.contentWindow.print(); }
+      catch { window.open(src, "_blank"); }
+    }, 500);
+    setTimeout(() => { f.remove(); if (src.startsWith("blob:")) URL.revokeObjectURL(src); }, 60000);
   };
   document.body.appendChild(f);
   return true;
+}
+
+/**
+ * Imprime un PDF del ERP: directo a la impresora del equipo (app de escritorio
+ * o su puente) o, si no hay, con el diálogo del navegador. Lanza error solo si
+ * no se pudo obtener el PDF (quien llama puede usar su plantilla HTML).
+ */
+export async function imprimirPdf({ tipo, pdfUrl, copias = 1, nombre = "",
+  mensaje = "Documento enviado a la impresora." }, settings) {
+  try {
+    if (await imprimirDirecto({ tipo, pdfUrl, copias, nombre }, settings)) {
+      toast.success(mensaje);
+      return "directo";
+    }
+  } catch (e) {
+    toast.error(`No se pudo imprimir directo (${e.message || "error"}). Se abre el diálogo de impresión.`);
+  }
+  imprimirConNavegador(await pdfBlobUrl(pdfUrl));
+  return "dialogo";
 }

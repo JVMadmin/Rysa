@@ -7132,7 +7132,7 @@ async def printers_prueba_pdf(tipo: str = "ticket", user: dict = Depends(get_cur
 
 
 @api.get("/sales/{sale_id}/ticket-print")
-async def sale_ticket_print(sale_id: str, request: Request):
+async def sale_ticket_print(sale_id: str):
     """Vista HTML de auto-impresión en PAPEL POS80 (@page 80mm) del ticket
     oficial YA generado. El iframe del POS la carga y el navegador imprime
     el documento real a 80mm por la impresora térmica predeterminada."""
@@ -7148,8 +7148,9 @@ async def sale_ticket_print(sale_id: str, request: Request):
     r = res.get("ticket") or {}
     if not r.get("url"):
         raise HTTPException(502, "No se pudo preparar la impresión.")
-    base = str(request.base_url).rstrip("/")
-    src = f"{base}{r['url']}"
+    # Ruta relativa: detrás de los proxies request.base_url es la dirección
+    # interna (http://backend:8000), que el navegador no puede abrir.
+    src = r["url"]
     folio = ""
     sale_doc = await db.sales.find_one({"id": sale_id}, {"_id": 0, "folio": 1})
     if sale_doc:

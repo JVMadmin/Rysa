@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, formatApiError, money, fileUrl } from "@/lib/api";
 import { fmtHora, fmtFechaHora } from "@/lib/fechas";
-import { imprimirDirecto } from "@/lib/impresion";
+import { imprimirPdf } from "@/lib/impresion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -135,21 +135,15 @@ export default function Recargas() {
     } finally { setWaSending(false); }
   };
 
-  // Impresión POS80 del comprobante OFICIAL (vista @page 80mm auto-print).
+  // Impresión POS80 del comprobante OFICIAL: directo a la impresora de tickets
+  // de este equipo o con el diálogo del navegador.
   const imprimirPos80 = async () => {
     if (!ticket?.id) return;
     try {
       const { data } = await api.post(`/sales/${ticket.id}/ticket-pdf`);
-      if (await imprimirDirecto({ tipo: "ticket", pdfUrl: data.url, nombre: `ticket-${ticket.folio || ""}.pdf` })) {
-        toast.success("Ticket enviado a la impresora."); return;
-      }
-    } catch (e) { toast.error(`No se pudo imprimir directo (${e.message || "error"}). Se abre el diálogo.`); }
-    const f = document.createElement("iframe");
-    f.style.position = "fixed";
-    f.style.right = "0"; f.style.bottom = "0";
-    f.style.width = "1px"; f.style.height = "1px"; f.style.border = "0";
-    f.src = `/api/sales/${ticket.id}/ticket-print`;
-    document.body.appendChild(f);
+      await imprimirPdf({ tipo: "ticket", pdfUrl: data.url, nombre: `ticket-${ticket.folio || ""}.pdf`,
+        mensaje: "Ticket enviado a la impresora." });
+    } catch (e) { toast.error(formatApiError(e.response?.data?.detail)); }
   };
 
   const tabBtn = (id, label, Icono) => (

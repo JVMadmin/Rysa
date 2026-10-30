@@ -4,7 +4,7 @@ import { api, formatApiError, money, fileUrl, fotoProducto } from "@/lib/api";
 import { numeroALetras } from "@/lib/utils";
 import { fmtFecha, fmtFechaHora } from "@/lib/fechas";
 import { useConfirm } from "@/components/ConfirmProvider";
-import { imprimirDirecto } from "@/lib/impresion";
+import { imprimirPdf } from "@/lib/impresion";
 import { useAuth } from "@/context/AuthContext";
 import { useCart, CartContext } from "@/context/CartContext";
 import { Button } from "@/components/ui/button";
@@ -283,24 +283,6 @@ export default function POS({ windowId, windowLabel, activo = true }) {
   // --- Impresoras configuradas: destino real por tipo de documento ---
   const ticketPdfRef = useRef(""); // PDF oficial de la venta actual (cache)
 
-  // Imprime el PDF REAL (el mismo archivo que se comparte por WhatsApp).
-  // Para tickets usa la vista /ticket-print que fija @page 80mm (POS80 por
-  // defecto); para otros documentos abre el PDF directo.
-  const imprimirPdfUrl = useCallback((url, opts = {}) => {
-    if (!url) return false;
-    try {
-      const pos80 = !!opts.pos80 && !!ticket?.id;
-      const src = pos80 ? `/api/sales/${ticket.id}/ticket-print` : fileUrl(url);
-      const f = document.createElement("iframe");
-      f.style.position = "fixed";
-      f.style.right = "0"; f.style.bottom = "0";
-      f.style.width = "1px"; f.style.height = "1px"; f.style.border = "0";
-      f.src = src;
-      document.body.appendChild(f);
-      return true;
-    } catch { return false; }
-  }, [ticket]);
-
   // Obtiene (una vez por venta) la URL del ticket PDF oficial.
   const asegurarTicketPdf = async () => {
     if (!ticket?.id) return "";
@@ -312,21 +294,20 @@ export default function POS({ windowId, windowLabel, activo = true }) {
     return ticketPdfRef.current;
   };
 
-  // Ticket: directo a la impresora de tickets de este equipo (app de escritorio
-  // o su puente local); si este equipo solo tiene navegador, el PDF oficial a
-  // 80 mm con el diálogo del sistema. Un fallo de impresión NUNCA afecta la venta.
+  // Ticket: el PDF oficial (el mismo que se comparte por WhatsApp) directo a la
+  // impresora de tickets de este equipo (app de escritorio o su puente) o con el
+  // diálogo del navegador; sin PDF, la plantilla 80 mm de la pantalla. Un fallo
+  // de impresión NUNCA afecta la venta.
   const imprimirTicket = async () => {
     const pdfUrl = await asegurarTicketPdf();
-    try {
-      if (await imprimirDirecto({ tipo: "ticket", pdfUrl, nombre: `ticket-${ticket?.folio || ""}.pdf` }, settings)) {
-        setPrintFail(false); toast.success("Ticket enviado a la impresora."); return true;
-      }
-    } catch (e) {
-      toast.error(`No se pudo imprimir directo (${e.message}). Se abre el diálogo de impresión.`);
+    if (pdfUrl) {
+      try {
+        await imprimirPdf({ tipo: "ticket", pdfUrl, nombre: `ticket-${ticket?.folio || ""}.pdf`,
+          mensaje: "Ticket enviado a la impresora." }, settings);
+        setPrintFail(false); return true;
+      } catch { /* sin PDF: plantilla de la pantalla */ }
     }
-    if (pdfUrl && imprimirPdfUrl(pdfUrl, { pos80: true })) { setPrintFail(false); return true; }
-    try { printThermal(); setPrintFail(false); return true; }
-    catch { setPrintFail(true); return false; }
+    return printThermal();
   };
 
   // --- Formato carta: PDF real del comprobante comercial RYSA ---
@@ -346,13 +327,9 @@ export default function POS({ windowId, windowLabel, activo = true }) {
     const url = await generarCartaPDF();
     if (!url) return;
     try {
-      if (await imprimirDirecto({ tipo: "carta", pdfUrl: url, nombre: `comprobante-${ticket?.folio || ""}.pdf` }, settings)) {
-        toast.success("Comprobante enviado a la impresora."); return;
-      }
-    } catch (e) {
-      toast.error(`No se pudo imprimir directo (${e.message}). Se abre el diálogo de impresión.`);
-    }
-    if (!imprimirPdfUrl(url)) printLetter();
+      await imprimirPdf({ tipo: "carta", pdfUrl: url, nombre: `comprobante-${ticket?.folio || ""}.pdf`,
+        mensaje: "Comprobante enviado a la impresora." }, settings);
+    } catch { printLetter(); }
   };
   const compartirCarta = async () => {
     const url = await generarCartaPDF();
