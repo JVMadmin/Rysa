@@ -27,6 +27,7 @@ import deps  # noqa: E402
 import server  # noqa: E402
 
 IPS = [f"10.77.0.{i}" for i in range(server.LOGIN_USER_MAX_FAILURES)]
+IP_SATURADA = "10.77.9.8"
 
 
 def _run(body):
@@ -55,7 +56,7 @@ async def _fallar(u):
 async def _limpiar(u):
     await deps.db.users.delete_one({"id": u["id"]})
     await server.reset_login_failures(u["email"])
-    await deps.db.login_attempts.delete_many({"_id": {"$in": ["ip:" + ip for ip in IPS]}})
+    await deps.db.login_attempts.delete_many({"_id": {"$in": ["ip:" + ip for ip in IPS + [IP_SATURADA]]}})
     await deps.db.audit_logs.delete_many({"registro_id": u["id"]})
 
 
@@ -66,6 +67,12 @@ def test_cajero_bloqueado_hasta_que_lo_desbloquee_un_admin():
             await _fallar(cajero)
             with pytest.raises(HTTPException) as e:
                 await server.check_login_rate_limit("10.77.9.9", cajero["email"])
+            assert e.value.status_code == 423
+            # Aunque su IP también llegó al límite, el aviso es el de cuenta bloqueada.
+            for _ in range(server.LOGIN_IP_MAX_FAILURES):
+                await server.record_failed_login(IP_SATURADA, "", None)
+            with pytest.raises(HTTPException) as e:
+                await server.check_login_rate_limit(IP_SATURADA, cajero["email"])
             assert e.value.status_code == 423
             b = (await server.bloqueos_de_cuentas())[cajero["email"]]
             assert b["tipo"] == "manual" and b["fallos"] == server.LOGIN_USER_MAX_FAILURES
