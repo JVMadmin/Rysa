@@ -6,6 +6,15 @@
 //   PARCHE correcciones sin funciones nuevas
 export const NOVEDADES = [
   {
+    version: "2.1.0",
+    fecha: "2026-10-31",
+    cambios: [
+      "Nuevo apartado Sistema → Descargas con la app de Windows y la app de vendedores para Android (con código QR).",
+      "Supervisión: «Traslados del día» de cada vendedor, con paradas, tiempos de traslado y kilómetros.",
+      "El recorrido, las visitas y las ventas del día del vendedor se cuentan con la hora de México.",
+    ],
+  },
+  {
     version: "2.0.4",
     fecha: "2026-10-30",
     cambios: [

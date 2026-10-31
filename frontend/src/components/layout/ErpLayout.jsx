@@ -13,7 +13,7 @@ import {
   LayoutDashboard, Package, Users, Wallet, ShoppingCart, Receipt,
   UserCog, ScrollText, LogOut, Menu, ChevronLeft, Settings, HandCoins, FileText, Stamp, BarChart3, Smartphone, Wrench,
   Search, ChevronDown, Radar, Route as RouteIcon, ShoppingBag, Truck, Images, ClipboardList, FileSignature, PieChart,
-  CreditCard, ShieldCheck, UserRound, Mail, MessageCircle,
+  CreditCard, ShieldCheck, UserRound, Mail, MessageCircle, Download,
 } from "lucide-react";
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
@@ -66,6 +66,7 @@ const NAV = [
   { to: "/app/configuracion", label: "Configuración", icon: Settings, perm: "config", section: "SISTEMA" },
   { to: "/app/machotes", label: "Formatos de documentos", icon: ScrollText, perm: "config", section: "SISTEMA" },
   { to: "/app/auditoria", label: "Auditoría", icon: ShieldCheck, perm: "auditoria.ver", section: "SISTEMA" },
+  { to: "/app/descargas", label: "Descargas", icon: Download, section: "SISTEMA" },
   { to: "/app/devtools", label: "Desarrollador", icon: Wrench, perm: "dev.errores", dev: true, section: "SISTEMA" },
 ];
 

@@ -18,6 +18,17 @@ Cómo viaja un cambio:
    compila), respalda, migra y verifica; si falla vuelve sola a la anterior.
    Sin imágenes de GitHub (CI en rojo) no despliega; `--compilar` lo fuerza.
 
+## 2.1.0 · 2026-10-31
+
+- Sistema → Descargas: app de escritorio para Windows y app de vendedores para
+  Android (versión, tamaño, código QR y pasos de instalación, incluido el
+  permiso de ubicación «todo el tiempo» y la batería sin restricciones).
+- Supervisión → vendedor → «Traslados del día»: paradas (≥ 5 min en un lugar,
+  con el cliente o la visita), tiempo y kilómetros de cada traslado, tiempo en
+  movimiento y detenido (backend/traslados.py).
+- El recorrido térmico, las visitas y ventas del día del vendedor usan el día
+  de México (después de las 18:00 se iban al día siguiente).
+
 ## 2.0.4 · 2026-10-30
 
 - Nota de venta carta (plantilla del Editor de formatos): fecha y hora locales

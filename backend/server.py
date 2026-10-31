@@ -7164,6 +7164,21 @@ async def version_sistema():
     }
 
 
+@api.get("/descargas/qr.png")
+async def descargas_qr(archivo: str = "rysa-vendedores.apk"):
+    """QR para bajar una app desde el celular (Sistema → Descargas). Solo
+    apunta a archivos de /download/ del propio sitio."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?", archivo) or ".." in archivo:
+        raise HTTPException(404, "Archivo no encontrado")
+    import qrcode
+    from io import BytesIO
+    base = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/") or "https://gruporysa.com"
+    buf = BytesIO()
+    qrcode.make(f"{base}/download/{archivo}", box_size=8, border=2).save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
 @api.get("/printers/prueba.pdf")
 async def printers_prueba_pdf(tipo: str = "ticket", user: dict = Depends(get_current_user)):
     """PDF de prueba para Configuración → Impresoras (ticket 80 mm o carta)."""

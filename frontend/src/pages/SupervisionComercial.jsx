@@ -21,6 +21,7 @@ import {
 import SelectorVendedor from "@/components/campo/SelectorVendedor";
 import MapaCampo from "@/components/campo/MapaCampo";
 import FichaCliente from "@/components/campo/FichaCliente";
+import TrasladosDia from "@/components/campo/TrasladosDia";
 import { TarjetaInfoVendedor } from "@/components/campo/VendedoresMapa";
 import { separarVendedores } from "@/lib/ubicaciones";
 import MiActividadCampo from "@/pages/MiActividadCampo";
@@ -114,7 +115,7 @@ export default function SupervisionComercial() {
   const nav = useNavigate();
   const [detLoading, setDetLoading] = useState(false);
   const [detalle, setDetalle] = useState(null);
-  const [tabDetalle, setTabDetalle] = useState("ficha"); // "ficha" | "expediente" | "rutas"
+  const [tabDetalle, setTabDetalle] = useState("ficha"); // "ficha" | "traslados" | "expediente" | "rutas"
   const [editTelefono, setEditTelefono] = useState("");
   const [rutasSel, setRutasSel] = useState([]);
   const [savingDetalle, setSavingDetalle] = useState(false);
@@ -360,7 +361,8 @@ export default function SupervisionComercial() {
       return;
     }
     try {
-      const { data } = await api.get(`/locations/${vendedorId}`);
+      // Recorrido de HOY (sin fecha devolvía los 1,000 puntos más viejos).
+      const { data } = await api.get(`/locations/${vendedorId}`, { params: { fecha: hoyLocal() } });
       if (Array.isArray(data) && data.length > 0) {
         setRutaGps(data);
         setMostrarRutaId(vendedorId);
@@ -1185,6 +1187,7 @@ export default function SupervisionComercial() {
               <div className="flex items-center gap-1.5 border border-slate-200 rounded-lg p-1 bg-slate-50 text-xs">
                 {[
                   ["ficha", "Ficha & Métricas"],
+                  ["traslados", "Traslados del día"],
                   ["expediente", "Expediente / Dossier"],
                   ["rutas", `Rutas (${detalle?.clientes?.length || 0} clientes)`],
                 ].map(([tabKey, label]) => (
@@ -1207,6 +1210,8 @@ export default function SupervisionComercial() {
             <div className="flex justify-center py-16"><Loader2 className="w-8 h-8 animate-spin text-brand-600" /></div>
           ) : detalle && (
             <div className="flex-1 overflow-y-auto space-y-4 pt-2 text-sm">
+              {tabDetalle === "traslados" && <TrasladosDia vendedorId={detalle?.vendedor?.id} />}
+
               {/* TAB 1: FICHA & MÉTRICAS */}
               {tabDetalle === "ficha" && (
                 <div className="space-y-4">

@@ -55,7 +55,7 @@ jobs:
         run: |
           pytest tests/test_bootstrap_admin.py tests/test_codigo_autorizacion.py \
             tests/test_pos_atomico.py tests/test_postgresql.py tests/test_p1_seguridad.py \
-            tests/test_bloqueo_cuentas.py \
+            tests/test_bloqueo_cuentas.py tests/test_traslados.py \
             -v --tb=short -n 0
       - name: Security gate
         working-directory: backend

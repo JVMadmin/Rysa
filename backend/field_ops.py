@@ -20,8 +20,9 @@ import storage
 from deps import (
     db, iso_now, now_utc, get_current_user, require_permission,
     user_has_permission, log_audit, next_counter,
-    ahora_local, filtro_dias_local, fecha_local,
+    ahora_local, filtro_dias_local, fecha_local, hoy_local,
 )
+import traslados as _traslados
 
 router = APIRouter(prefix="/api")
 
@@ -1526,7 +1527,9 @@ async def location_history(vendedor_id: str, desde: Optional[str] = None,
         raise HTTPException(403, "No tienes permiso para ver estas ubicaciones")
     flt = {"vendedor_id": vendedor_id}
     if fecha:
-        flt["fecha"] = {"$regex": "^" + fecha[:10]}
+        # Día local: los puntos se guardan en UTC (después de las 18:00 ya es
+        # el día siguiente en UTC y el recorrido de la tarde no salía).
+        flt = {"$and": [flt, filtro_dias_local("fecha", fecha[:10], fecha[:10])]}
     else:
         if desde:
             flt["fecha"] = {"$gte": desde[:10]}
@@ -2081,24 +2084,25 @@ async def supervision_vendedor_actividad_dia(
     if not seller:
         raise HTTPException(404, "Vendedor no encontrado")
     
-    hoy = (fecha or now_utc().date().isoformat())[:10]
-    
+    hoy = (fecha or hoy_local())[:10]
+    dia = filtro_dias_local("fecha", hoy, hoy)
+
     # 1. Visitas del día
     visitas = await db.visits.find(
-        {"vendedor_id": seller_id, "fecha": {"$regex": "^" + hoy}},
+        {"$and": [{"vendedor_id": seller_id}, dia]},
         {"_id": 0}
     ).sort("fecha", -1).to_list(1000)
-    
+
     # 2. Ventas del día
     ventas = await db.sales.find(
-        {"vendedor_id": seller_id, "fecha": {"$regex": "^" + hoy}},
+        {"$and": [{"vendedor_id": seller_id}, dia]},
         {"_id": 0, "id": 1, "folio": 1, "fecha": 1, "cliente_nombre": 1, "total": 1,
          "condicion": 1, "estado": 1, "metodo_pago": 1}
     ).sort("fecha", -1).to_list(1000)
     
     # 3. Pedidos del día
     pedidos = await db.pedidos.find(
-        {"vendedor_id": seller_id, "created_at": {"$regex": "^" + hoy}},
+        {"$and": [{"vendedor_id": seller_id}, filtro_dias_local("created_at", hoy, hoy)]},
         {"_id": 0, "id": 1, "folio": 1, "created_at": 1, "cliente_nombre": 1, "total": 1, "estado": 1}
     ).sort("created_at", -1).to_list(1000)
     
@@ -2124,6 +2128,29 @@ async def supervision_vendedor_actividad_dia(
             "monto_pedidos": round(sum(float(p.get("total", 0) or 0) for p in pedidos), 2),
         }
     }
+
+
+@router.get("/supervision/vendedores/{seller_id}/traslados")
+async def supervision_vendedor_traslados(
+    seller_id: str,
+    fecha: Optional[str] = None,
+    user: dict = Depends(require_permission("supervision.ver"))
+):
+    """Paradas, tiempos de traslado y kilómetros del vendedor en un día local
+    (traslados.py), a partir de su rastro GPS."""
+    dia = (fecha or hoy_local())[:10]
+    puntos = await db.seller_locations.find(
+        {"$and": [{"vendedor_id": seller_id}, filtro_dias_local("fecha", dia, dia)]},
+        {"_id": 0, "latitud": 1, "longitud": 1, "precision": 1, "fecha": 1, "visita_id": 1},
+    ).sort("fecha", 1).to_list(20000)
+    clientes = await db.clients.find(
+        {"latitud": {"$exists": True}},
+        {"_id": 0, "id": 1, "nombre": 1, "latitud": 1, "longitud": 1},
+    ).to_list(20000)
+    ids = sorted({p["visita_id"] for p in puntos if p.get("visita_id")})
+    visitas = {v["id"]: v for v in await db.visits.find(
+        {"id": {"$in": ids}}, {"_id": 0, "id": 1, "cliente_id": 1, "cliente_nombre": 1}).to_list(1000)} if ids else {}
+    return {"fecha": dia, **_traslados.analizar(puntos, clientes, visitas)}
 
 
 @router.put("/supervision/sellers/{seller_id}")
