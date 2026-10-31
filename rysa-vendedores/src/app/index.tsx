@@ -20,6 +20,8 @@ import { getSellerDashboard } from '@/services/salesService';
 import { SellerDashboardData } from '@/types';
 import { getDashboardCache, saveDashboardCache } from '@/services/offlineCache';
 import { syncManager } from '@/services/syncManager';
+import { versionInstalada } from '@/services/updateService';
+import { pedirRevisionActualizacion } from '@/components/ActualizacionApp';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -148,6 +150,9 @@ export default function HomeScreen() {
               <Text style={styles.advisorRole}>
                 RYSA • {user?.role ? user.role.toUpperCase() : 'VENTAS EN CAMPO'}
               </Text>
+              <TouchableOpacity onPress={pedirRevisionActualizacion} accessibilityRole="button" accessibilityLabel="Buscar actualización">
+                <Text style={styles.advisorRole}>App v{versionInstalada().nombre || '—'} · Buscar actualización</Text>
+              </TouchableOpacity>
             </View>
           </View>
           <TouchableOpacity

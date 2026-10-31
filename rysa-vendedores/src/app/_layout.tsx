@@ -10,6 +10,7 @@ import { AuthProvider, useAuth } from '@/auth/AuthContext';
 import { LoginScreen } from '@/components/LoginScreen';
 import AppTabs from '@/components/app-tabs';
 import { JornadaGuard } from '@/components/JornadaGuard';
+import { ActualizacionApp } from '@/components/ActualizacionApp';
 
 // Se importa al arrancar para que la tarea de ubicación de fondo quede
 // definida a nivel de módulo (requisito de expo-location / TaskManager).
@@ -64,6 +65,8 @@ export default function RootLayout() {
       <AuthProvider>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <MainContent />
+          {/* Aviso de versión nueva, con o sin sesión iniciada. */}
+          <ActualizacionApp />
         </ThemeProvider>
       </AuthProvider>
     </SafeAreaProvider>

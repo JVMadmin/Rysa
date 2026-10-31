@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { login, User } from '@/services/auth';
+import { versionInstalada } from '@/services/updateService';
+import { pedirRevisionActualizacion } from '@/components/ActualizacionApp';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: User) => void;
@@ -68,7 +70,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             />
             <Text style={styles.brandTitle}>GRUPO RYSA</Text>
             <Text style={styles.brandSubtitle}>Vendedores & Operación en Campo</Text>
-            <Text style={styles.brandVersion}>v1.2.1 Oficial</Text>
+            <TouchableOpacity onPress={pedirRevisionActualizacion} accessibilityRole="button" accessibilityLabel="Buscar actualización">
+              <Text style={styles.brandVersion}>v{versionInstalada().nombre || '—'} · Buscar actualización</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Form Card */}

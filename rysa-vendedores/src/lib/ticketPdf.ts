@@ -35,7 +35,17 @@ function formatCurrency(num: number): string {
 }
 
 export function buildTicketHtml(data: TicketData): string {
-  const itemsHtml = data.items
+  // Igual que el ticket del ERP: precio e importe de cada renglón CON IVA y al
+  // final el desglose (subtotal sin IVA, IVA y total). El último renglón
+  // absorbe el centavo de redondeo para que los importes sumen el total.
+  const factor = data.aplicaIva ? 1 + Number(data.tasaIva || 0) / 100 : 1;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const lineas = data.items.map((it) => ({ ...it, precio: r2(it.precio * factor), subtotal: r2(it.subtotal * factor) }));
+  const diferencia = r2(data.total - lineas.reduce((s, l) => s + l.subtotal, 0));
+  if (lineas.length && Math.abs(diferencia) < 0.05) {
+    lineas[lineas.length - 1].subtotal = r2(lineas[lineas.length - 1].subtotal + diferencia);
+  }
+  const itemsHtml = lineas
     .map(
       (it) => `
       <tr style="border-bottom: 1px dashed #e2e8f0;">
@@ -215,7 +225,7 @@ export function buildTicketHtml(data: TicketData): string {
         <tr class="items-header">
           <th style="width: 18%; text-align: center;">Cant.</th>
           <th style="width: 44%;">Descripción</th>
-          <th style="width: 18%; text-align: right;">P. Unit</th>
+          <th style="width: 18%; text-align: right;">P. Unit c/IVA</th>
           <th style="width: 20%; text-align: right;">Importe</th>
         </tr>
       </thead>
@@ -226,7 +236,7 @@ export function buildTicketHtml(data: TicketData): string {
 
     <div class="totals-box">
       <div class="totals-row">
-        <span style="color: #718096;">Subtotal Neto:</span>
+        <span style="color: #718096;">Subtotal sin IVA:</span>
         <span style="font-weight: 600;">${formatCurrency(data.subtotalNeto)}</span>
       </div>
       <div class="totals-row">
